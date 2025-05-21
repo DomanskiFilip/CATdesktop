@@ -24,7 +24,9 @@ log = "0.4"
 tauri = { version = "2.5.0", features = [] }
 tauri-plugin-log = "2.0.0-rc"
 google-calendar3 = "5.0"
-yup-oauth2 = "8.3"
 tokio = { version = "1", features = ["full"] }
+oauth2 = { version = "4.4.2", features = ["reqwest"] }
 reqwest = { version = "0.11", features = ["json"] }
+open = "5"
 dotenvy = "0.15"
+urlencoding = "2.1"
