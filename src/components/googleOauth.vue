@@ -1,6 +1,6 @@
 <template>
   <section>
-    <button @click="checkOAuthAndLoad" :disabled="authenticating">login with <img src="@/assets/google-2025-g-logo.webp" alt="Google Logo" class="google-logo"/></button>
+    <button v-if="!loggedIn" @click="checkOAuthAndLoad" :disabled="authenticating">login with <img src="@/assets/google-2025-g-logo.webp" alt="Google Logo" class="google-logo"/></button>
     <div v-if="authenticating && timer > 0">
       Authenticating with google ...
       Time left: {{ timer }} seconds
@@ -21,6 +21,7 @@ export default defineComponent({
       authenticating: false,
       interval: undefined as number | undefined,
       oauthFinished: false,
+      loggedIn: false, 
     }
   },
   computed: {
@@ -75,6 +76,7 @@ export default defineComponent({
                     msg += 'No items found.'
                     }
                     this.message = msg
+                    this.loggedIn = true
                 } else {
                     this.message = `<span>OAuth successful!</span>Lambda error: ${response.message || 'Unknown error'}`
                 }

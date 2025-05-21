@@ -1,9 +1,9 @@
 use serde::Deserialize;
-use std::time::Duration;
 use std::time::Instant;
 use std::net::TcpListener;
 use std::io::Read;
 use urlencoding;
+use dirs;
 
 #[derive(Deserialize)]
 struct Installed {
@@ -109,7 +109,13 @@ pub async fn oauth2_flow(timeout: u64) -> Result<String, String> {
         })?;
 
     let token = token_result.access_token().secret().to_string();
-    println!("Token exchange complete, writing access_token.txt...");
-    fs::write("access_token.txt", &token).map_err(|e| e.to_string())?;
-    Ok(token)
+println!("Token exchange complete, writing access_token.txt...");
+
+// Get a safe app data directory
+let data_dir = dirs::data_local_dir().ok_or("Could not get app data dir")?;
+let token_path = data_dir.join("CalendarAssistantApp").join("access_token.txt");
+fs::create_dir_all(token_path.parent().unwrap()).map_err(|e| e.to_string())?;
+fs::write(token_path, &token).map_err(|e| e.to_string())?;
+println!("data dir created and token written to access_token.txt");
+Ok(token)
 }

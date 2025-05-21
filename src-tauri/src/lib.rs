@@ -29,7 +29,10 @@ async fn fetch_lambda_endpoint() -> Result<String, String> {
     dotenv().ok();
     let api_key = env::var("API_KEY").map_err(|e| e.to_string())?;
     let url = "https://ywaixwivt3.execute-api.eu-west-2.amazonaws.com/prod/data";
-    let access_token = fs::read_to_string("access_token.txt").map_err(|e| e.to_string())?;
+    // gert access token from the file
+    let data_dir = dirs::data_local_dir().ok_or("Could not get app data dir")?;
+    let token_path = data_dir.join("CalendarAssistantApp").join("access_token.txt");
+    let access_token = fs::read_to_string(token_path).map_err(|e| e.to_string())?;
     let client = reqwest::Client::new();
     let response = client
         .get(url)

@@ -35,3 +35,4 @@ src-tauri/gen/schemas
 
 # exclude environment files
 .env
+access_token.txt
