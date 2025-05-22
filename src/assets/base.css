@@ -10,9 +10,10 @@
 
 /* semantic color variables for this project */
 :root {
-  --color-main: var(--color-light);
-  --color-border: var(--color-dark);
-  --color-text: var(--color-dark);
+  color-scheme: light dark;
+  --color-main: light-dark(var(--color-light), var(--color-dark));
+  --color-border: light-dark(var(--color-dark), var(--color-light));
+  --color-text: light-dark(var(--color-dark), var(--color-light));
   --color-theme: var(--color-whale);
   --color-action: var(--color-theme);
 
