@@ -1,11 +1,23 @@
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub mod window;
 mod oauth;
+mod login;
+mod register;
 
 use tauri::command;
 use std::env;
 use dotenvy::dotenv;
 use crate::oauth::oauth2_flow;
+
+#[tauri::command]
+async fn login_user(email: String, password: String) -> Result<String, String> {
+    crate::login::login_user_lambda(email, password).await
+}
+
+#[tauri::command]
+async fn register_user(email: String, password: String) -> Result<String, String> {
+    crate::register::register_user_lambda(email, password).await
+}
 
 const TIMEOUT: u64 = 120; // 2 minutes
 
@@ -50,7 +62,9 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
       get_oauth_timeout,
       run_oauth2_flow,
-      fetch_lambda_endpoint
+      fetch_lambda_endpoint,
+      login_user,
+      register_user
       ])
     .setup(|app| {
       // set window always on top
