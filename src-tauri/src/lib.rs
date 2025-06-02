@@ -9,17 +9,21 @@ use std::env;
 use dotenvy::dotenv;
 use crate::oauth::oauth2_flow;
 
+
+// login user command
 #[tauri::command]
 async fn login_user(email: String, password: String) -> Result<String, String> {
     crate::login::login_user_lambda(email, password).await
 }
 
+// register user command
 #[tauri::command]
 async fn register_user(email: String, password: String) -> Result<String, String> {
     crate::register::register_user_lambda(email, password).await
 }
 
-const TIMEOUT: u64 = 120; // 2 minutes
+// google oauth2 functionalities
+const TIMEOUT: u64 = 120;
 
 #[command]
 async fn run_oauth2_flow() -> Result<String, String> {
@@ -32,29 +36,7 @@ async fn run_oauth2_flow() -> Result<String, String> {
 
 #[tauri::command]
 fn get_oauth_timeout() -> u64 {
-    TIMEOUT // or read from config if you want
-}
-
-#[command]
-async fn fetch_lambda_endpoint() -> Result<String, String> {
-    use std::fs;
-    dotenv().ok();
-    let api_key = env::var("API_KEY").map_err(|e| e.to_string())?;
-    let url = "https://ywaixwivt3.execute-api.eu-west-2.amazonaws.com/prod/data";
-    // gert access token from the file
-    let data_dir = dirs::data_local_dir().ok_or("Could not get app data dir")?;
-    let token_path = data_dir.join("CalendarAssistantApp").join("access_token.txt");
-    let access_token = fs::read_to_string(token_path).map_err(|e| e.to_string())?;
-    let client = reqwest::Client::new();
-    let response = client
-        .get(url)
-        .header("x-api-key", api_key)
-        .bearer_auth(access_token.trim())
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    let body = response.text().await.map_err(|e| e.to_string())?;
-    Ok(body)
+    TIMEOUT
 }
 
 pub fn run() {
@@ -62,7 +44,6 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
       get_oauth_timeout,
       run_oauth2_flow,
-      fetch_lambda_endpoint,
       login_user,
       register_user
       ])

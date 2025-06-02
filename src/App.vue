@@ -1,5 +1,5 @@
 <template>
-  <div id="theme-background-element"></div>
+  <div id="theme-background-element"></div> <!-- background visual element -->
   <section v-if="loggedIn" id="main-page">
     <section id="side-bar"></section> <!-- future component -->
     <section id="sync-page"> <!-- future component -->
@@ -7,6 +7,7 @@
     </section> 
   </section>
   
+  <!-- login/register page -->
   <section v-else id="login-register-page">
     <login v-if="showLogin" />
     <register v-else />
@@ -65,5 +66,9 @@ const loggedIn = ref(false)
     color: var(--color-theme);
     cursor: pointer;
     font-size: 1rem;
+  }
+
+  #login-register-page button:hover {
+    text-decoration: underline;
   }
 </style>

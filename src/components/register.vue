@@ -13,6 +13,7 @@
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 
+// error values
 const email = ref('')
 const emailError = ref(false)
 const password = ref('')
@@ -21,12 +22,14 @@ const confirmPassword = ref('')
 const confirmPasswordError = ref(false)
 const error = ref('')
 
+// Function to handle registration
 function register() {
   error.value = ''
   emailError.value = false
   passwordError.value = false
   confirmPasswordError.value = false
 
+  // validation checks
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value)) {
     error.value = 'Please enter a valid email address.'
     emailError.value = true
@@ -54,7 +57,7 @@ function register() {
 
   
 
-
+  // Call the backend to register the user and handle response
   invoke('register_user', { email: email.value, password: password.value})
   .then((response: any) => {
     let respObj = response
@@ -86,7 +89,6 @@ function register() {
       }
     }
     error.value = msg
-    console.error('Error during registration:', err)
   })
 }
 </script>

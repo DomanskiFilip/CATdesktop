@@ -12,35 +12,64 @@
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 
+// error values
 const email = ref('')
 const emailError = ref(false)
 const password = ref('')
 const passwordError = ref(false)
 const error = ref('')
 
+// Function to handle login
 function login() {
   error.value = ''
-  if (!email.value || !password.value) {
-    error.value = 'Please fill in all fields.'
+  emailError.value = false
+  passwordError.value = false
+
+  // validation checks
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value)) {
+    error.value = 'Please enter a valid email address.'
     emailError.value = true
+    return
+  }
+
+  if (!password.value) {
+    error.value = 'Please enter password.'
     passwordError.value = true
     return
   }
 
-  invoke('login', { email: email.value, password: password.value })
+  // Call the backend to login the user and handle response
+  invoke('login_user', { email: email.value, password: password.value })
     .then((response: any) => {
-      if (response.status === 'ok') {
-        error.value = 'login successful!'
-      } else {
-        error.value = response.message || 'Login failed. Please try again.'
-        email.value = ''
-        password.value = ''
+    let respObj = response
+    if (typeof response === 'string') {
+      try {
+        respObj = JSON.parse(response)
+      } catch (e) {
+        error.value = 'Unexpected response from server.'
+        return
       }
-    })
-    .catch((err) => {
-      error.value = 'An error occurred'
-      console.error('Error during login:', err)
-    })
+    }
+    if (respObj.status === 'ok') {
+      error.value = 'Login successful!'
+    } else {
+      error.value = respObj.message || 'Login failed. Please try again.'
+      email.value = ''
+      password.value = ''
+    }
+  })
+  .catch((err) => {
+    let msg = 'An error occurred'
+    if (typeof err === 'string') {
+      try {
+        const parsed = JSON.parse(err)
+        msg = parsed.message || msg
+      } catch (_) {
+        msg = err
+      }
+    }
+    error.value = msg
+  })
 }
 </script>
 

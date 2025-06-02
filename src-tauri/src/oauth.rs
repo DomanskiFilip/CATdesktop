@@ -58,14 +58,12 @@ pub async fn oauth2_flow(timeout: u64) -> Result<String, String> {
     'outer: loop {
         // Check for timeout
         if start_time.elapsed().as_secs() > timeout {
-            return Err("OAuth authentication timed out after 2 minutes.".to_string());
+            return Err("OAuth authentication timed out".to_string());
         }
         let (mut stream, _) = listener.accept().map_err(|e| e.to_string())?;
         let mut buffer = [0; 2048];
         let bytes_read = stream.read(&mut buffer).map_err(|e| e.to_string())?;
         let request = String::from_utf8_lossy(&buffer[..bytes_read]);
-        println!("Incoming HTTP request:\n{}", request);
-
         // Try to extract the code from the request line
         if let Some(line) = request.lines().next() {
             if line.starts_with("GET /?") {
