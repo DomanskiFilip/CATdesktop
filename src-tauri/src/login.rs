@@ -12,9 +12,14 @@ struct LambdaResponse {
 }
 
 #[derive(Deserialize)]
+struct RefreshToken {
+    S: String,
+}
+
+#[derive(Deserialize)]
 struct Body {
     access_token: String,
-    refresh_token: String,
+    refresh_token: RefreshToken,
     expires_in: u64,
 }
 
@@ -75,7 +80,7 @@ pub async fn login_user_lambda(email: String, password: String) -> Result<String
         });
         return Err(frontend_response.to_string());
     }
-    
+
     let body: Body = serde_json::from_str(&lambda_resp.body).map_err(|e| e.to_string())?;
 
     // Pass status and message to frontend as JSON string

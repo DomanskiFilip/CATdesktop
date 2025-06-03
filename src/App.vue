@@ -9,7 +9,7 @@
   
   <!-- login/register page -->
   <section v-else id="login-register-page">
-    <login v-if="showLogin" />
+    <login v-if="showLogin" @updateLoggedIn="loggedIn = $event"/>
     <register v-else />
     <div>
       <span v-if="showLogin">
