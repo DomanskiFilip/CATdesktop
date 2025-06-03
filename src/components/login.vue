@@ -63,7 +63,11 @@ function login() {
     if (typeof err === 'string') {
       try {
         const parsed = JSON.parse(err)
-        msg = parsed.message || msg
+         if (parsed.errorType === 'Sandbox.Timedout') {
+          msg = 'Login timeout. Please try again.'
+        } else {
+          msg = parsed.message || msg
+        }
       } catch (_) {
         msg = err
       }
