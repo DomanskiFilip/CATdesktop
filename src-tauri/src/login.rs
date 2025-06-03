@@ -12,15 +12,11 @@ struct LambdaResponse {
 }
 
 #[derive(Deserialize)]
-struct RefreshToken {
-    S: String,
-}
-
-#[derive(Deserialize)]
 struct Body {
     access_token: String,
-    refresh_token: RefreshToken,
-    expires_in: u64,
+    refresh_token: String,
+    access_token_expires_in: u64,
+    refresh_token_expires_in: u64,
 }
 
 // Function to log in a user using AWS Lambda
@@ -87,7 +83,8 @@ pub async fn login_user_lambda(email: String, password: String) -> Result<String
     let frontend_response = serde_json::json!({
         "status": "ok",
         "access_token": body.access_token,
-        "expires_in": body.expires_in,
+        "access_token_expires_in": body.access_token_expires_in, 
+        "refresh_token_expires_in": body.refresh_token_expires_in,
     });
     
     Ok(frontend_response.to_string())
