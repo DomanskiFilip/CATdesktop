@@ -3,6 +3,7 @@ use std::env;
 use dotenvy::dotenv;
 use serde::Deserialize;
 use mac_address::get_mac_address;
+use crate::token_utils::{save_tokens_to_file, read_tokens_from_file};
 
 // Structs (classes/objects) to deserialize the Lambda response
 #[derive(Deserialize)]
@@ -61,6 +62,15 @@ pub async fn login_user_lambda(email: String, password: String) -> Result<String
     let text = response.text().await.map_err(|e| e.to_string())?;
     println!("Raw response text: {}", text);
     
+    // Check for Sandbox.Timedout error in the raw response
+    if text.contains("\"errorType\":\"Sandbox.Timedout\"") {
+        let frontend_response = serde_json::json!({
+            "status": "error",
+            "message": "Server timeout, please try again.",
+        });
+        return Err(frontend_response.to_string());
+    }
+
      // Parse Lambda response
     let lambda_resp: LambdaResponse = serde_json::from_str(&text).map_err(|e| e.to_string())?;
     
@@ -79,12 +89,33 @@ pub async fn login_user_lambda(email: String, password: String) -> Result<String
 
     let body: Body = serde_json::from_str(&lambda_resp.body).map_err(|e| e.to_string())?;
 
-    // Pass status and message to frontend as JSON string
+    // Save tokens to an encrypted file
+    save_tokens_to_file(
+        &body.access_token,
+        &body.refresh_token,
+        body.access_token_expires_in,
+        body.refresh_token_expires_in,
+    )
+    .map_err(|e| format!("Failed to save tokens: {}", e))?;
+
+    // Call read_tokens_from_file to verify the saved tokens
+    match crate::token_utils::read_tokens_from_file() {
+        Ok((access_token, refresh_token, access_expires, refresh_expires)) => {
+            println!("Tokens read successfully:");
+            println!("Access Token: {}", access_token);
+            println!("Refresh Token: {}", refresh_token);
+            println!("Access Token Expires In: {}", access_expires);
+            println!("Refresh Token Expires In: {}", refresh_expires);
+        }
+        Err(err) => {
+            println!("Failed to read tokens: {}", err);
+            return Err(format!("Failed to verify tokens: {}", err));
+        }
+    }
+
+    // Pass status to frontend
     let frontend_response = serde_json::json!({
         "status": "ok",
-        "access_token": body.access_token,
-        "access_token_expires_in": body.access_token_expires_in, 
-        "refresh_token_expires_in": body.refresh_token_expires_in,
     });
     
     Ok(frontend_response.to_string())

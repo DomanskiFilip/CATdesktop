@@ -3,6 +3,8 @@ pub mod window;
 mod oauth;
 mod login;
 mod register;
+mod token_utils;
+mod encription_key;
 
 use tauri::command;
 use std::env;
