@@ -5,12 +5,18 @@ mod login;
 mod register;
 mod token_utils;
 mod encription_key;
+mod auto_login;
 
 use tauri::command;
 use std::env;
 use dotenvy::dotenv;
 use crate::oauth::oauth2_flow;
 
+// auto-login command
+#[tauri::command]
+async fn auto_login() -> Result<bool, String> {
+    crate::auto_login::auto_login_lambda().await
+}
 
 // login user command
 #[tauri::command]
@@ -44,10 +50,11 @@ fn get_oauth_timeout() -> u64 {
 pub fn run() {
   tauri::Builder::default()
     .invoke_handler(tauri::generate_handler![
-      get_oauth_timeout,
-      run_oauth2_flow,
+      auto_login,
       login_user,
-      register_user
+      register_user,
+      get_oauth_timeout,
+      run_oauth2_flow
       ])
     .setup(|app| {
       // set window always on top

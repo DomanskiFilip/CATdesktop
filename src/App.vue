@@ -35,7 +35,7 @@
   
   <!-- login/register page -->
   <section v-else id="login-register-page">
-    <login v-if="showLogin" @updateLoggedIn="loggedIn = $event"/>
+    <Login v-if="showLogin" @updateLoggedIn="loggedIn = $event"/>
     <register v-else />
     <div>
       <span v-if="showLogin">
@@ -58,14 +58,29 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import GoogleOauth from './components/googleOauth.vue'
-import login from './components/Login.vue'
-import register from './components/Register.vue'
+import Login from './components/login.vue'
+import register from './components/register.vue'
 
 const showLogin = ref(true)
 const loggedIn = ref(false)
 const activeSection = ref('section1')
 const ismoreInfoVisible = ref(false)
+
+// auto login check on app load
+async function checkAutoLogin() {
+  try {
+    console.log("Invoking auto_login_lambda...");
+    const isLoggedIn = await invoke('auto_login');
+    console.log("Auto-login result:", isLoggedIn);
+    loggedIn.value = Boolean(isLoggedIn);
+  } catch (error) {
+    console.error("Auto-login failed:", error);
+    loggedIn.value = false;
+  }
+}
+checkAutoLogin();
 
 // Watch for changes in loggedIn and update the background element
 watch(loggedIn, (newValue) => {
@@ -96,12 +111,14 @@ const moreInfo = (isVisible: boolean) => {
       element.classList.remove('active')
     }
   })
-  if (ismoreInfoVisible.value) {
-    sideBar.style.width = '8.5rem'
-    mainContent.style.marginLeft = '8rem'
-  } else {
-    sideBar.style.width = '3rem'
-    mainContent.style.marginLeft = '3.5rem'
+  if (sideBar && mainContent) {
+    if (ismoreInfoVisible.value) {
+      sideBar.style.width = '8.5rem'
+      mainContent.style.marginLeft = '8rem'
+    } else {
+      sideBar.style.width = '3rem'
+      mainContent.style.marginLeft = '3.5rem'
+    }
   }
 }
   

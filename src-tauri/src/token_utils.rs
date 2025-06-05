@@ -16,8 +16,6 @@ fn generate_nonce() -> [u8; 12] {
 pub fn save_tokens_to_file(
     access_token: &str,
     refresh_token: &str,
-    access_token_expires_in: u64,
-    refresh_token_expires_in: u64,
 ) -> Result<(), String> {
     // Generate a key from an environment variable or other secure source
     let key = get_encryption_key()?;
@@ -28,8 +26,6 @@ pub fn save_tokens_to_file(
     let data = serde_json::json!({
         "access_token": access_token,
         "refresh_token": refresh_token,
-        "access_token_expires_in": access_token_expires_in,
-        "refresh_token_expires_in": refresh_token_expires_in,
     })
     .to_string();
 
@@ -53,7 +49,7 @@ pub fn save_tokens_to_file(
     Ok(())
 }
 
-pub fn read_tokens_from_file() -> Result<(String, String, u64, u64), String> {
+pub fn read_tokens_from_file() -> Result<(String, String), String> {
     // Retrieve and decode the encryption key
     let key = get_encryption_key()?;
 
@@ -79,13 +75,9 @@ pub fn read_tokens_from_file() -> Result<(String, String, u64, u64), String> {
 
     let access_token = data["access_token"].as_str().unwrap_or("").to_string();
     let refresh_token = data["refresh_token"].as_str().unwrap_or("").to_string();
-    let access_token_expires_in = data["access_token_expires_in"].as_u64().unwrap_or(0);
-    let refresh_token_expires_in = data["refresh_token_expires_in"].as_u64().unwrap_or(0);
 
     Ok((
         access_token,
         refresh_token,
-        access_token_expires_in,
-        refresh_token_expires_in,
     ))
 }
