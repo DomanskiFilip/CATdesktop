@@ -55,8 +55,8 @@ pub async fn auto_login_lambda() -> Result<bool, String> {
 
     let mut response = client
         .post(url)
+        .header("Content-Type", "application/json")
         .header("x-api-key", api_key.clone())
-        .header("Content-Type", "application-desktop/json")
         .body(payload.to_string())
         .send()
         .await
@@ -84,8 +84,8 @@ pub async fn auto_login_lambda() -> Result<bool, String> {
 
                 response = client
                     .post(url)
+                    .header("Content-Type", "application/json")
                     .header("x-api-key", api_key.clone())
-                    .header("Content-Type", "application-desktop/json")
                     .body(payload.to_string())
                     .send()
                     .await

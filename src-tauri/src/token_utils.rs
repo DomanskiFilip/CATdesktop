@@ -81,3 +81,14 @@ pub fn read_tokens_from_file() -> Result<(String, String), String> {
         refresh_token,
     ))
 }
+
+// Function to clear tokens from the file
+pub fn clear_tokens() -> Result<(), String> {
+    let file_path = Path::new("tokens.enc");
+    if file_path.exists() {
+        fs::remove_file(file_path)
+            .map_err(|e| format!("Failed to delete tokens file: {}", e))
+    } else {
+        Ok(())
+    }
+}

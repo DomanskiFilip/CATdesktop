@@ -50,8 +50,8 @@ pub async fn login_user_lambda(email: String, password: String) -> Result<String
     // send and handle login query
     let response = client
         .post(url)
+        .header("Content-Type", "application/json")
         .header("x-api-key", api_key)
-        .header("Content-Type", "application-desktop/json")
         .body(payload.to_string())
         .send()
         .await
@@ -70,7 +70,6 @@ pub async fn login_user_lambda(email: String, password: String) -> Result<String
 
     // Parse Lambda response
     let lambda_resp: LambdaResponse = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-    
     // Check status_code
     if lambda_resp.status_code != 200 {
         // Parse the error message from the Lambda response body

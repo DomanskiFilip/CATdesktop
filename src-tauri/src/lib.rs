@@ -30,6 +30,12 @@ async fn register_user(email: String, password: String) -> Result<String, String
     crate::register::register_user_lambda(email, password).await
 }
 
+// logout user command
+#[tauri::command]
+async fn logout_user() -> Result<bool, String> {
+    crate::token_utils::clear_tokens().map(|_| true)
+}
+
 // google oauth2 functionalities
 const TIMEOUT: u64 = 120;
 
@@ -53,6 +59,7 @@ pub fn run() {
       auto_login,
       login_user,
       register_user,
+      logout_user,
       get_oauth_timeout,
       run_oauth2_flow
       ])
