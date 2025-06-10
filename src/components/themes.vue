@@ -1,12 +1,14 @@
 <template>
-  <h2>THEMES:</h2>
-  <section>
-  <button id="light-1"></button>
-  <button id="light-2"></button>
-  <button id="light-3"></button>
-  <button id="dark-1"></button>
-  <button id="dark-2"></button>
-  <button id="dark-3"></button>
+  <section id="themes">  
+    <h2>themes:</h2>
+    <section>
+    <button id="light-1"></button>
+    <button id="light-2"></button>
+    <button id="light-3"></button>
+    <button id="dark-1"></button>
+    <button id="dark-2"></button>
+    <button id="dark-3"></button>
+    </section>
   </section>
 </template>
 
@@ -96,6 +98,10 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+#themes{
+  margin: 0.5rem;
+}
+
 h2 {
   color: var(--color-text);
   font-size: 1.2rem;

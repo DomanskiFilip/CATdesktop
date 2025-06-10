@@ -3,7 +3,7 @@
   <section v-if="loggedIn" id="main-page">
     <section id="side-bar">
       <button @click="moreInfo(ismoreInfoVisible)">
-        <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="20px" fill="#F0F0F0">
+        <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)">
           <path d="M120-240v-80h720v80H120Zm0-200v-80h720v80H120Zm0-200v-80h720v80H120Z"/>
         </svg>
       </button>
@@ -31,9 +31,13 @@
       </button>
     </section>
     <section id="main-content">
-      <section v-show="activeSection === 'section1'">Main Content</section>
+      <section v-show="activeSection === 'section1'">
+        <calendar />
+      </section>
       <section v-show="activeSection === 'section2'">AI Content</section>
       <section v-show="activeSection === 'section3'">
+        <h2>SETTINGS:</h2>
+        <hr>
         <themes />
       </section>
     </section>
@@ -69,6 +73,7 @@ import GoogleOauth from './components/googleOauth.vue'
 import Login from './components/login.vue'
 import register from './components/register.vue'
 import themes from './components/themes.vue'
+import calendar from './components/calendar.vue'
 
 const showLogin = ref(true)
 const loggedIn = ref(false)
@@ -139,9 +144,6 @@ const moreInfo = (isVisible: boolean) => {
     }
   }
 }
-
-
-
 </script>
 
 <style scoped>
