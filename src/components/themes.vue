@@ -12,6 +12,7 @@
 
 <script setup lang="ts">
 import { onMounted } from 'vue';
+import { invoke } from '@tauri-apps/api/core'
 
 interface Theme {
   [key: string]: string;
@@ -62,16 +63,33 @@ const themeMappings: Record<string, Theme> = {
   }
 };
 
-onMounted(() => {
+async function applyTheme(id: string) {
+  const theme = themeMappings[id];
+  for (const [property, value] of Object.entries(theme)) {
+    document.documentElement.style.setProperty(property, value);
+  }
+  try {
+    await invoke('save_theme', { theme: id });
+  } catch (error) {
+    console.error('Failed to save theme:', error);
+  }
+}
+
+onMounted(async () => {
+  try {
+    const savedTheme = await invoke('load_theme') as string;
+    if (savedTheme && savedTheme.trim() !== '') {
+      applyTheme(savedTheme);
+    }
+  } catch (error) {
+    console.error('Failed to load theme:', error);
+  }
+
+  // Add click listeners
   Object.keys(themeMappings).forEach((id) => {
     const button = document.getElementById(id);
     if (button) {
-      button.addEventListener("click", () => {
-        const theme = themeMappings[id];
-        for (const [property, value] of Object.entries(theme)) {
-          document.documentElement.style.setProperty(property, value);
-        }
-      });
+      button.addEventListener("click", () => applyTheme(id));
     }
   });
 });

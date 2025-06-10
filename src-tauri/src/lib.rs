@@ -4,6 +4,7 @@ mod oauth;
 mod login;
 mod register;
 mod token_utils;
+mod theme_utils;
 mod encription_key;
 mod auto_login;
 
@@ -36,6 +37,18 @@ async fn logout_user() -> Result<bool, String> {
     crate::token_utils::clear_tokens().map(|_| true)
 }
 
+// save and load theme commands
+#[tauri::command]
+async fn save_theme(app_handle: tauri::AppHandle, theme: String) -> Result<(), String> {
+    theme_utils::save_theme(app_handle, theme).await
+}
+
+// Load theme command
+#[tauri::command]
+async fn load_theme(app_handle: tauri::AppHandle) -> Result<String, String> {
+    theme_utils::load_theme(app_handle).await
+}
+
 // google oauth2 functionalities
 const TIMEOUT: u64 = 120;
 
@@ -60,6 +73,8 @@ pub fn run() {
       login_user,
       register_user,
       logout_user,
+      save_theme,
+      load_theme,
       get_oauth_timeout,
       run_oauth2_flow
       ])
