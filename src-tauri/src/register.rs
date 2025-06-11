@@ -1,8 +1,6 @@
 use reqwest::Client;
-use std::env;
-use dotenvy::dotenv;
 use serde::Deserialize;
-use std::path::Path;
+use crate::config::{AppConfig, get_device_info};
 
 // Structs (classes/objects) to deserialize the Lambda response
 #[derive(Deserialize)]
@@ -19,10 +17,9 @@ struct Body {
 
 // Function to register a user using AWS Lambda
 pub async fn register_user_lambda(email: String, password: String) -> Result<String, String> {
-    dotenv().ok();
-    // create register query
-    let api_key = env::var("API_KEY").map_err(|e| e.to_string())?;
-    let url = "https://ywaixwivt3.execute-api.eu-west-2.amazonaws.com/prod/register";
+    let config = AppConfig::new()?;
+    
+    let url = format!("{}/register", config.lambda_base_url);
     let client = Client::new();
     let user_data = serde_json::json!({
         "email": email,
@@ -35,7 +32,7 @@ pub async fn register_user_lambda(email: String, password: String) -> Result<Str
     let response = client
         .post(url)
         .header("Content-Type", "application/json")
-        .header("x-api-key", api_key)
+        .header("x-api-key", config.api_key)
         .body(payload.to_string())
         .send()
         .await

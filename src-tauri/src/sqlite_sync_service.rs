@@ -2,11 +2,20 @@ use crate::sqlite::CalendarEvent;
 use rusqlite::Connection;
 use std::time::Duration;
 use tokio::time;
-use dirs;
+use std::path::PathBuf;
+use tauri::{AppHandle, Manager};
 
-pub async fn start_sync_service() {
+// Function to get the database platform-agnostic path
+fn get_db_path(app_handle: &AppHandle) -> Result<PathBuf, String> {
+    app_handle.path().app_data_dir() 
+        .map(|path| path.join("calendar.db"))
+        .map_err(|e| format!("Failed to get app data directory: {}", e))
+}
+
+
+pub async fn start_sync_service(app_handle: &AppHandle) {
     // Perform initial sync on app start
-    if let Err(e) = sync_events().await {
+    if let Err(e) = sync_events(&app_handle).await {
         eprintln!("Initial sync failed: {}", e);
     }
 
@@ -14,14 +23,15 @@ pub async fn start_sync_service() {
     
     loop {
         interval.tick().await;
-        if let Err(e) = sync_events().await {
+        if let Err(e) = sync_events(&app_handle).await {
             eprintln!("Sync failed: {}", e);
         }
     }
 }
 
-async fn sync_events() -> Result<(), String> {
-    let conn = Connection::open("calendar.db")
+async fn sync_events(app_handle: &AppHandle) -> Result<(), String> {
+    let db_path = get_db_path(app_handle)?;
+    let conn = Connection::open(db_path)
         .map_err(|e| e.to_string())?;
     
     // get unsynced events
@@ -32,17 +42,15 @@ async fn sync_events() -> Result<(), String> {
     let events: Vec<CalendarEvent> = unsynced.query_map([], |row| {
         Ok(CalendarEvent {
             id: row.get(0)?,
-            title: row.get(1)?,
-            description: row.get(2)?,
-             time: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
+            description: row.get(1)?,
+             time: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(2)?)
                 .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
-                    3,
+                    2,
                     rusqlite::types::Type::Text,
                     Box::new(e),
                 ))?.with_timezone(&chrono::Utc),
-            synced: row.get(4)?,
-            last_modified: row.get(5)?,
-            deleted: row.get(6)?
+            synced: row.get(3)?,
+            deleted: row.get(4)?
         })
     }).map_err(|e| e.to_string())?
     .collect::<Result<Vec<_>, _>>()

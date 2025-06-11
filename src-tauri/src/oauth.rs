@@ -3,7 +3,8 @@ use std::time::Instant;
 use std::net::TcpListener;
 use std::io::Read;
 use urlencoding;
-use dirs;
+use std::path::PathBuf;
+use tauri::{AppHandle, Manager};
 
 #[derive(Deserialize)]
 struct Installed {
@@ -25,7 +26,7 @@ use open;
 use std::io::{self, Write};
 use std::fs;
 
-pub async fn oauth2_flow(timeout: u64) -> Result<String, String> {
+pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String, String> {
     // Read and parse the client secret JSON
     let secret_json = fs::read_to_string("src/client_secret_1_99017034100-i04dv1p35v7rmbvjffjro807b8vupeku.apps.googleusercontent.com.json")
         .map_err(|e| e.to_string())?;
@@ -110,8 +111,9 @@ pub async fn oauth2_flow(timeout: u64) -> Result<String, String> {
 println!("Token exchange complete, writing access_token.txt...");
 
 // Get a safe app data directory
-let data_dir = dirs::data_local_dir().ok_or("Could not get app data dir")?;
-let token_path = data_dir.join("CalendarAssistantApp").join("access_token.txt");
+let token_path = app_handle.path().app_data_dir()
+        .map_err(|e| format!("Failed to get app data directory: {}", e))?
+        .join("access_token.txt");
 fs::create_dir_all(token_path.parent().unwrap()).map_err(|e| e.to_string())?;
 fs::write(token_path, &token).map_err(|e| e.to_string())?;
 println!("data dir created and token written to access_token.txt");

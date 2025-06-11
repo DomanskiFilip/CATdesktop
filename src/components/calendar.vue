@@ -80,11 +80,9 @@ interface CalendarDay {
 
 interface CalendarEvent {
   id: string;
-  title: string;
   description: string;
   time: string;
   synced: boolean;
-  last_modified: number;
   deleted: boolean;
 }
 const calendarDays = ref<CalendarDay[]>([])
@@ -183,9 +181,8 @@ const isInPast = (hour: number): boolean => {
   }
   
   // If it's today, compare hours
-  // Special handling for midnight (hour 0)
   if (hour === 0) {
-    return false // Never mark midnight as in the past for current day
+    return false
   }
 
   // If it's today, compare hours
@@ -247,8 +244,8 @@ const loadEvents = async () => {
 
 const pendingSaves = new Map<string, ReturnType<typeof setTimeout>>()
 
-// Debounce function
-const debouncedSaveEvent = (event: CalendarEvent) => {
+// Save event function
+const saveEvent = (event: CalendarEvent) => {
   // Clear any existing timeout for this event
   const existingTimeout = pendingSaves.get(event.id)
   if (existingTimeout) {
@@ -287,10 +284,10 @@ const updateEventDescription = (event: Event, hour: number) => {
       events.value = events.value.filter(e => e.id !== existingEvent.id)
     } else {
       existingEvent.description = value
-      debouncedSaveEvent(existingEvent)
+      saveEvent(existingEvent)
     }
   } else if (value.trim()) {
-    // Only create new event if description is not empty
+    // Create new event if description is not empty
     const eventDate = new Date(
       currentDate.value.getFullYear(),
       currentDate.value.getMonth(), 
@@ -300,15 +297,13 @@ const updateEventDescription = (event: Event, hour: number) => {
     
     const newEvent = {
       id: crypto.randomUUID(),
-      title: `Event at ${hour}:00`,
       description: value,
       time: eventDate.toISOString(),
       synced: false,
-      last_modified: Date.now(),
       deleted: false
     }
     events.value.push(newEvent)
-    debouncedSaveEvent(newEvent)
+    saveEvent(newEvent)
   }
 }
 

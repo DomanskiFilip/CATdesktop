@@ -83,12 +83,16 @@ const ismoreInfoVisible = ref(false)
 // auto login check on app load
 async function checkAutoLogin() {
   try {
-    console.log("Invoking auto_login_lambda...");
+    console.log("Checking auto-login...");
     const isLoggedIn = await invoke('auto_login');
     console.log("Auto-login result:", isLoggedIn);
-    loggedIn.value = Boolean(isLoggedIn);
+    if (isLoggedIn === true) {
+      loggedIn.value = true;
+    } else {
+      loggedIn.value = false;
+    }
   } catch (error) {
-    console.error("Auto-login failed:", error);
+    console.error("Auto-login error:", error);
     loggedIn.value = false;
   }
 }

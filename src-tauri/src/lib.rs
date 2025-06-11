@@ -1,6 +1,7 @@
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub mod window;
 mod oauth;
+mod config;
 mod login;
 mod register;
 mod token_utils;
@@ -17,14 +18,14 @@ use crate::oauth::oauth2_flow;
 
 // auto-login command
 #[tauri::command]
-async fn auto_login() -> Result<bool, String> {
-    crate::auto_login::auto_login_lambda().await
+async fn auto_login(app_handle: tauri::AppHandle) -> Result<bool, String> {
+    crate::auto_login::auto_login_lambda(&app_handle).await
 }
 
 // login user command
 #[tauri::command]
-async fn login_user(email: String, password: String) -> Result<String, String> {
-    crate::login::login_user_lambda(email, password).await
+async fn login_user(app_handle: tauri::AppHandle, email: String, password: String) -> Result<String, String> {
+    crate::login::login_user_lambda(&app_handle, email, password).await
 }
 
 // register user command
@@ -35,8 +36,8 @@ async fn register_user(email: String, password: String) -> Result<String, String
 
 // logout user command
 #[tauri::command]
-async fn logout_user() -> Result<bool, String> {
-    crate::token_utils::clear_tokens().map(|_| true)
+async fn logout_user(app_handle: tauri::AppHandle) -> Result<bool, String> {
+    crate::token_utils::clear_tokens(&app_handle).map(|_| true)
 }
 
 // save and load theme commands
@@ -52,33 +53,33 @@ async fn load_theme(app_handle: tauri::AppHandle) -> Result<String, String> {
 
 // save, load and delete event commands
 #[tauri::command]
-async fn save_event(event: String) -> Result<(), String> {
-    sqlite::save_event(event)
+async fn save_event(app_handle: tauri::AppHandle, event: String) -> Result<(), String> {
+    sqlite::save_event(&app_handle, event)
 }
 
 #[tauri::command]
-async fn get_events() -> Result<Vec<String>, String> {
-    sqlite::get_events().map_err(|e| e.to_string())
+async fn get_events(app_handle: tauri::AppHandle) -> Result<Vec<String>, String> {
+    sqlite::get_events(&app_handle).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn delete_event(id: String) -> Result<(), String> {
-    sqlite::delete_event(id).map_err(|e| e.to_string())
+async fn delete_event(app_handle: tauri::AppHandle, id: String) -> Result<(), String> {
+    sqlite::delete_event(&app_handle, id).map_err(|e| e.to_string())
 }
 
 // clean old events comand
 #[tauri::command]
-async fn clean_old_events() -> Result<(), String> {
-    sqlite::clean_old_events().map_err(|e| e.to_string())
+async fn clean_old_events(app_handle: tauri::AppHandle) -> Result<(), String> {
+    sqlite::clean_old_events(&app_handle).map_err(|e| e.to_string())
 }
 
 // google oauth2 functionalities
 const TIMEOUT: u64 = 120;
 
 #[command]
-async fn run_oauth2_flow() -> Result<String, String> {
+async fn run_oauth2_flow(app_handle: tauri::AppHandle) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        tokio::runtime::Handle::current().block_on(crate::oauth::oauth2_flow(TIMEOUT))
+        tokio::runtime::Handle::current().block_on(crate::oauth::oauth2_flow(&app_handle, TIMEOUT))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -109,7 +110,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         ])
         .setup(|app| {
             // Initialize database on app startup
-            sqlite::init_db().map_err(|e| e.to_string())?;
+            sqlite::init_db(&app.handle()).map_err(|e| e.to_string())?;
             crate::window::set_always_on_top(&app.handle(), true);
             
             if cfg!(debug_assertions) {
