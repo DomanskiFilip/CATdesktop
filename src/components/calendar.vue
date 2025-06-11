@@ -30,34 +30,36 @@
         </div>
       </section>
     </section>
-    <section id="day-schedule-container">
+    <section id="schedule-container">
       <h3>{{ currentDate.toLocaleDateString('default', { month: 'long', day: 'numeric', year: 'numeric' }) }} Schedule</h3>
-      <span v-for="hour in Array.from({ length: 24 }, (_, i) => (i + 1) % 24)" 
-        :key="hour" 
-        class="hour">
-        <span :class="{ 'event-time': hasEventAtHour(hour) }">{{ hour < 10 ? '0' + hour : hour }}:00</span>
-        <textarea 
-          :value="getEventDescription(hour)"
-          @input="updateEventDescription($event, hour)"
-          :class="{ 'has-event': hasEventAtHour(hour) }"
-          name="description"
-        ></textarea>
-        <hr :class="{ 'event-time': hasEventAtHour(hour) }">
-      </span>
+      <section id="day-schedule-container">
+        
+        <span v-for="hour in Array.from({ length: 24 }, (_, i) => (i + 1) % 24)" 
+          :key="hour" 
+          class="hour">
+          <span :class="{ 'event-time': hasEventAtHour(hour) }">
+            {{ hour < 10 ? '0' + hour : hour }}:00
+          </span>
+          <textarea 
+            :value="getEventDescription(hour)"
+            @input="updateEventDescription($event, hour)"
+            :class="{
+               'in-the-past': isInPast(hour),
+               'has-event': hasEventAtHour(hour) 
+               }"
+            :readonly="isInPast(hour)"
+            name="description"
+          ></textarea>
+          <hr :class="{ 'event-time': hasEventAtHour(hour) }">
+        </span>
+      </section>
     </section>
    </section>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-
-interface CalendarEvent {
-  id: string
-  title: string
-  description: string
-  Time: Date
-}
 
 // State management
 const currentDate = ref(new Date())
@@ -71,9 +73,19 @@ const currentYear = ref(currentDate.value.getFullYear())
 
 // interface for calendar days
 interface CalendarDay {
-  id: string
-  day: number | string
-  date: Date | null
+  id: string;
+  day: number | string;
+  date: Date | null;
+}
+
+interface CalendarEvent {
+  id: string;
+  title: string;
+  description: string;
+  time: string;
+  synced: boolean;
+  last_modified: number;
+  deleted: boolean;
 }
 const calendarDays = ref<CalendarDay[]>([])
 
@@ -156,11 +168,42 @@ const renderCalendar = () => {
   currentYear.value = currentDate.value.getFullYear()
 }
 
+// check if hour is in the past
+const isInPast = (hour: number): boolean => {
+  const now = new Date()
+  
+  // If it's a future date, nothing is in the past
+  if (currentDate.value.getTime() > now.setHours(23,59,59,999)) {
+    return false
+  }
+  
+  // If it's a past date, everything is in the past
+  if (currentDate.value.getTime() < now.setHours(0,0,0,0)) {
+    return true
+  }
+  
+  // If it's today, compare hours
+  // Special handling for midnight (hour 0)
+  if (hour === 0) {
+    return false // Never mark midnight as in the past for current day
+  }
+
+  // If it's today, compare hours
+  if (currentDate.value.getDate() === now.getDate() && 
+      currentDate.value.getMonth() === now.getMonth() && 
+      currentDate.value.getFullYear() === now.getFullYear()) {
+    const currentHour = new Date().getHours()
+    return hour < currentHour
+  }
+  
+  return false
+}
+
 // Get events for specific date
 const getEventsForDate = (date: CalendarDay) => {
   if (!date.date) return []
   return events.value.filter(event => {
-    const eventDate = new Date(event.Time)
+    const eventDate = new Date(event.time)
     return eventDate.getDate() === date.date?.getDate() &&
            eventDate.getMonth() === date.date?.getMonth() &&
            eventDate.getFullYear() === date.date?.getFullYear()
@@ -170,8 +213,8 @@ const getEventsForDate = (date: CalendarDay) => {
 // Check if there is an event at a specific hour
 const hasEventAtHour = (hour: number) => {
   return events.value.some(event => {
-    const eventHour = new Date(event.Time).getHours()
-    const eventDate = new Date(event.Time)
+    const eventHour = new Date(event.time).getHours()
+    const eventDate = new Date(event.time)
     return eventHour === hour && 
            eventDate.getDate() === currentDate.value.getDate() &&
            eventDate.getMonth() === currentDate.value.getMonth() &&
@@ -182,8 +225,8 @@ const hasEventAtHour = (hour: number) => {
 // Get event description for a specific hour
 const getEventDescription = (hour: number) => {
   const event = events.value.find(event => {
-    const eventHour = new Date(event.Time).getHours()
-    const eventDate = new Date(event.Time)
+    const eventHour = new Date(event.time).getHours()
+    const eventDate = new Date(event.time)
     return eventHour === hour && 
            eventDate.getDate() === currentDate.value.getDate() &&
            eventDate.getMonth() === currentDate.value.getMonth() &&
@@ -192,11 +235,45 @@ const getEventDescription = (hour: number) => {
   return event ? event.description : ''
 }
 
+// function to lead events from database
+const loadEvents = async () => {
+  try {
+    const eventsData = await invoke<string[]>('get_events')
+    events.value = eventsData.map(eventStr => JSON.parse(eventStr))
+  } catch (error) {
+    console.error('Failed to load events:', error)
+  }
+}
+
+const pendingSaves = new Map<string, ReturnType<typeof setTimeout>>()
+
+// Debounce function
+const debouncedSaveEvent = (event: CalendarEvent) => {
+  // Clear any existing timeout for this event
+  const existingTimeout = pendingSaves.get(event.id)
+  if (existingTimeout) {
+    clearTimeout(existingTimeout)
+  }
+
+  // Create new timeout for this event
+  const timeout = setTimeout(async () => {
+    try {
+      await invoke('save_event', { event: JSON.stringify(event) })
+      pendingSaves.delete(event.id)
+    } catch (error) {
+      console.error('Failed to save event:', error)
+    }
+  }, 1000)
+
+  pendingSaves.set(event.id, timeout)
+}
+
+// Update event description
 const updateEventDescription = (event: Event, hour: number) => {
   const value = (event.target as HTMLTextAreaElement).value
   const existingEvent = events.value.find(event => {
-    const eventHour = new Date(event.Time).getHours()
-    const eventDate = new Date(event.Time)
+    const eventHour = new Date(event.time).getHours()
+    const eventDate = new Date(event.time)
     return eventHour === hour && 
            eventDate.getDate() === currentDate.value.getDate() &&
            eventDate.getMonth() === currentDate.value.getMonth() &&
@@ -204,46 +281,59 @@ const updateEventDescription = (event: Event, hour: number) => {
   })
 
   if (existingEvent) {
-    existingEvent.description = value
-  } else if (value) {
-    // Create new event if text is entered in empty textarea
-    events.value.push({
+    if (!value.trim()) {
+      // Delete event if description is empty
+      invoke('delete_event', { id: existingEvent.id })
+      events.value = events.value.filter(e => e.id !== existingEvent.id)
+    } else {
+      existingEvent.description = value
+      debouncedSaveEvent(existingEvent)
+    }
+  } else if (value.trim()) {
+    // Only create new event if description is not empty
+    const eventDate = new Date(
+      currentDate.value.getFullYear(),
+      currentDate.value.getMonth(), 
+      currentDate.value.getDate(),
+      hour
+    )
+    
+    const newEvent = {
       id: crypto.randomUUID(),
       title: `Event at ${hour}:00`,
       description: value,
-      Time: new Date(
-        currentDate.value.getFullYear(),
-        currentDate.value.getMonth(),
-        currentDate.value.getDate(),
-        hour
-      )
-    })
+      time: eventDate.toISOString(),
+      synced: false,
+      last_modified: Date.now(),
+      deleted: false
+    }
+    events.value.push(newEvent)
+    debouncedSaveEvent(newEvent)
   }
 }
 
-onMounted(() => {
-  renderCalendar()
-  // Add sample event
-  events.value.push({
-    id: '1',
-    title: 'Test Event 1',
-    description: 'Morning Meeting',
-    Time: new Date(2025, 5, 10, 10, 0, 0), // June 10, 2025 at 10:00
-  })
+// Refresh events function
+const refreshEvents = async () => {
+  await loadEvents()
+}
 
-  events.value.push({
-    id: '2',
-    title: 'Test Event 2',
-    description: 'Lunch with Team',
-    Time: new Date(2025, 5, 15, 13, 0, 0), // June 15, 2025 at 13:00
-  })
+// Clean up pending saves when component unmounts
+onBeforeUnmount(() => {
+  for (const timeout of pendingSaves.values()) {
+    clearTimeout(timeout)
+  }
+})
 
-  events.value.push({
-    id: '3',
-    title: 'Test Event 3',
-    description: 'Project Deadline',
-    Time: new Date(2025, 5, 25, 16, 0, 0), // June 25, 2025 at 16:00
-  })
+onMounted(async () => {
+  try {
+    await invoke('clean_old_events')
+    await loadEvents()
+    renderCalendar()
+    // Refresh events every minute
+    setInterval(refreshEvents, 60000)
+  } catch (error) {
+    console.error('Failed to initialize calendar:', error)
+  }
 })
 </script>
 
@@ -252,8 +342,9 @@ onMounted(() => {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1rem;
-  width: 100%;
-  height: 100%;
+  width: 64rem;
+  height: 30rem;
+  padding-top: 1rem;
 }
 
 /* calendar styles */
@@ -345,28 +436,34 @@ onMounted(() => {
 }
 
 /* day schedule styles */
+#schedule-container {
+  background: transparent;
+  border-radius: 10px;
+  padding: 1rem;
+  width: 32rem;
+  height: 30rem;
+  display: flex;
+  flex-direction: column;
+}
+
+  #schedule-container h3 {
+  color: var(--color-text);
+  font-size: 1.2rem;
+  text-align: center;
+  margin-bottom: 1rem;
+  }
+
 #day-schedule-container {
-  background: var(--color-main);
   border: 1px solid var(--color-theme);
   border-radius: 10px;
-  width: 16rem;
-  height: 25rem;
-  margin-top: 1rem;;
+  width: 100%;
+  height: 90%;
   display: flex;
   flex-direction: column;
   align-items: center;
   overflow-y: auto;
-  position: relative;
   scrollbar-width: none; /* Firefox */
   -ms-overflow-style: none; /* IE and Edge */
-}
-
-#day-schedule-container h3 {
-  position: fixed;
-  top: -0.1rem;
-  color: var(--color-text);
-  font-size: 1.2rem;
-  text-align: center;
 }
 
 .hour {
@@ -412,6 +509,13 @@ onMounted(() => {
     }
     
     .hour textarea.has-event {
-    color: var(--color-theme);
+      color: var(--color-theme);
+    }
+
+    .hour textarea.in-the-past {
+      opacity: 0.5;
+      cursor: not-allowed;
+      pointer-events: none;
+      background-color: var(--color-theme);
     }
 </style>

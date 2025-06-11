@@ -150,6 +150,7 @@ dependencies = [
  "aes",
  "aes-gcm",
  "base64 0.21.7",
+ "chrono",
  "dirs 5.0.1",
  "dotenvy",
  "google-calendar3",

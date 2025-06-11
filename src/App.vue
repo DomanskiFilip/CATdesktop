@@ -282,5 +282,6 @@ const moreInfo = (isVisible: boolean) => {
     height: 100vh;
     overflow-y: auto;
     transition: transform 0.2s ease, margin-left 0.4s ease;
+    overflow-x: hidden;
   }
 </style>

@@ -7,6 +7,8 @@ mod token_utils;
 mod theme_utils;
 mod encription_key;
 mod auto_login;
+mod sqlite;
+mod sqlite_sync_service;
 
 use tauri::command;
 use std::env;
@@ -43,10 +45,31 @@ async fn save_theme(app_handle: tauri::AppHandle, theme: String) -> Result<(), S
     theme_utils::save_theme(app_handle, theme).await
 }
 
-// Load theme command
 #[tauri::command]
 async fn load_theme(app_handle: tauri::AppHandle) -> Result<String, String> {
     theme_utils::load_theme(app_handle).await
+}
+
+// save, load and delete event commands
+#[tauri::command]
+async fn save_event(event: String) -> Result<(), String> {
+    sqlite::save_event(event)
+}
+
+#[tauri::command]
+async fn get_events() -> Result<Vec<String>, String> {
+    sqlite::get_events().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn delete_event(id: String) -> Result<(), String> {
+    sqlite::delete_event(id).map_err(|e| e.to_string())
+}
+
+// clean old events comand
+#[tauri::command]
+async fn clean_old_events() -> Result<(), String> {
+    sqlite::clean_old_events().map_err(|e| e.to_string())
 }
 
 // google oauth2 functionalities
@@ -66,32 +89,38 @@ fn get_oauth_timeout() -> u64 {
     TIMEOUT
 }
 
-pub fn run() {
-  tauri::Builder::default()
-    .invoke_handler(tauri::generate_handler![
-      auto_login,
-      login_user,
-      register_user,
-      logout_user,
-      save_theme,
-      load_theme,
-      get_oauth_timeout,
-      run_oauth2_flow
-      ])
-    .setup(|app| {
-      // set window always on top
-      crate::window::set_always_on_top(&app.handle(), true);
 
-
-      if cfg!(debug_assertions) {
-        app.handle().plugin(
-          tauri_plugin_log::Builder::default()
-            .level(log::LevelFilter::Info)
-            .build(),
-        )?;
-      }
-      Ok(())
-    })
-    .run(tauri::generate_context!())
-    .expect("error while running tauri application");
+pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+  // tokio::spawn(sqlite_sync_service::start_sync_service());
+    tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![
+            auto_login,
+            login_user,
+            register_user,
+            logout_user,
+            save_theme,
+            load_theme,
+            save_event,
+            delete_event,
+            get_events,
+            clean_old_events,
+            get_oauth_timeout,
+            run_oauth2_flow
+        ])
+        .setup(|app| {
+            // Initialize database on app startup
+            sqlite::init_db().map_err(|e| e.to_string())?;
+            crate::window::set_always_on_top(&app.handle(), true);
+            
+            if cfg!(debug_assertions) {
+                app.handle().plugin(
+                    tauri_plugin_log::Builder::default()
+                        .level(log::LevelFilter::Info)
+                        .build(),
+                )?;
+            }
+            Ok(())
+        })
+        .run(tauri::generate_context!())?;
+    Ok(())
 }
