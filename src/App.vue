@@ -67,8 +67,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import GoogleOauth from './components/googleOauth.vue'
 import Login from './components/login.vue'
 import register from './components/register.vue'
@@ -79,24 +80,6 @@ const showLogin = ref(true)
 const loggedIn = ref(false)
 const activeSection = ref('section1')
 const ismoreInfoVisible = ref(false)
-
-// auto login check on app load
-async function checkAutoLogin() {
-  try {
-    console.log("Checking auto-login...");
-    const isLoggedIn = await invoke('auto_login');
-    console.log("Auto-login result:", isLoggedIn);
-    if (isLoggedIn === true) {
-      loggedIn.value = true;
-    } else {
-      loggedIn.value = false;
-    }
-  } catch (error) {
-    console.error("Auto-login error:", error);
-    loggedIn.value = false;
-  }
-}
-checkAutoLogin();
 
 // Function to log out the user
 const logout = async () => {
@@ -148,6 +131,32 @@ const moreInfo = (isVisible: boolean) => {
     }
   }
 }
+
+onMounted(async () => {
+  // Listen for backend auto-login events
+  await listen('auto-login-completed', (event) => {
+    const loginResult = event.payload as boolean;
+    console.log('Auto-login event received:', loginResult);
+    loggedIn.value = loginResult;
+    
+    if (!loginResult) {
+      console.log('Auto-login failed - tokens may be expired or invalid');
+    }
+  });
+  
+  // Fallback: Check current login status if event was missed
+  setTimeout(async () => {
+    if (!loggedIn.value) {
+      try {
+        const isLoggedIn = await invoke('check_login_status') as boolean;
+        loggedIn.value = isLoggedIn;
+      } catch (error) {
+        console.error("Login status check failed:", error);
+        loggedIn.value = false;
+      }
+    }
+  }, 5000); // Give auto-login time to complete
+});
 </script>
 
 <style scoped>

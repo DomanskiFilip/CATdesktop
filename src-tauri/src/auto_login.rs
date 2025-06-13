@@ -24,8 +24,13 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
     let device_info = get_device_info();
 
     // Read tokens from file
-    let (access_token, refresh_token) = read_tokens_from_file(&app_handle)
-        .map_err(|e| format!("Failed to read tokens: {}", e))?;
+    let (access_token, refresh_token) = match read_tokens_from_file(&app_handle) {
+        Ok(tokens) => tokens,
+        Err(e) => {
+            println!("No tokens found or failed to read tokens: {}", e);
+            return Ok(false);
+        }
+    };
 
     let url = format!("{}/autologin", config.lambda_base_url);
     let client = Client::new();

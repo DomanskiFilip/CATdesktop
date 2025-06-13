@@ -11,7 +11,7 @@ mod auto_login;
 mod database_utils;
 mod notification_service;
 
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Emitter};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::menu::{Menu, MenuItem};
 use std::sync::Arc;
@@ -23,10 +23,12 @@ use crate::notification_service::NotificationService;
 
 pub type NotificationServiceState = Arc<Mutex<Option<NotificationService>>>;
 
-// auto-login command
 #[tauri::command]
-async fn auto_login(app_handle: tauri::AppHandle) -> Result<bool, String> {
-    crate::auto_login::auto_login_lambda(&app_handle).await
+async fn check_login_status(app_handle: tauri::AppHandle) -> Result<bool, String> {
+    match crate::auto_login::auto_login_lambda(&app_handle).await {
+        Ok(is_logged_in) => Ok(is_logged_in),
+        Err(_) => Ok(false)
+    }
 }
 
 // login user command
@@ -119,42 +121,27 @@ async fn setup_auto_launch(app_handle: tauri::AppHandle) -> Result<(), String> {
 }
 
 // Start auto-login process
-async fn start_auto_login(app_handle: AppHandle) -> Result<(), String> {
-    println!("Starting auto-login process...");
+async fn start_auto_login(app_handle: AppHandle) -> Result<bool, String> {
+    let login_success = match crate::auto_login::auto_login_lambda(&app_handle).await {
+        Ok(result) => result,
+        Err(e) => false,
+    };
     
-    match auto_login(app_handle).await {
-        Ok(result) => {
-            println!("Auto-login completed: {}", result);
-            Ok(())
-        }
-        Err(e) => {
-            println!("Auto-login failed: {}", e);
-            Err(e)
-        }
-    }
+    // Emit login status to frontend
+    app_handle.emit("auto-login-completed", login_success).ok();
+    
+    Ok(login_success)
 }
 
 // Start notification service
-async fn start_notification_service(app_handle: AppHandle) -> Result<(), String> {
-    println!("Starting notification service...");
-    
+async fn start_notification_service(app_handle: AppHandle, user_logged_in: bool) -> Result<(), String> {
     let notification_state = app_handle.state::<NotificationServiceState>();
     let mut service_guard = notification_state.lock().await;
     
     if service_guard.is_none() {
         let mut service = NotificationService::new();
-        service.start(app_handle.clone()).await;
+        service.start(app_handle.clone(), user_logged_in).await;
         *service_guard = Some(service);
-        drop(service_guard); // Release the lock
-        
-        // Now do the initial check without holding the lock
-        if let Err(e) = NotificationService::check_and_schedule_all_notifications(&app_handle).await {
-            eprintln!("Error in initial notification check: {}", e);
-        }
-        
-        println!("Notification service started successfully");
-    } else {
-        println!("Notification service already running");
     }
     
     Ok(())
@@ -166,7 +153,6 @@ async fn schedule_event_notification(
     event_json: String,
     app_handle: AppHandle,
 ) -> Result<String, String> {
-    // Parse the event from JSON
     let event: crate::database_utils::CalendarEvent = serde_json::from_str(&event_json)
         .map_err(|e| format!("Failed to parse event: {}", e))?;
     
@@ -203,7 +189,6 @@ fn create_system_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .on_tray_icon_event(|_tray, event| {
             if let TrayIconEvent::Click { button, button_state, .. } = event {
                 if button == tauri::tray::MouseButton::Left && button_state == tauri::tray::MouseButtonState::Up {
-                    // Handle left click on tray icon
                     if let Some(app) = _tray.app_handle().get_webview_window("main") {
                         if app.is_visible().unwrap_or(false) {
                             let _ = app.hide();
@@ -224,7 +209,7 @@ fn create_system_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
-            auto_login,
+            check_login_status,
             login_user,
             register_user,
             logout_user,
@@ -263,16 +248,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         .build(tauri::generate_context!())?
         .run(|app_handle, event| match event {
             tauri::RunEvent::Ready => {
-                // Start services after the app is ready
                 let app_handle_clone = app_handle.clone();
                 tauri::async_runtime::spawn(async move {
                     // Start auto-login
-                    if let Err(e) = start_auto_login(app_handle_clone.clone()).await {
-                        eprintln!("Failed to start auto-login: {}", e);
-                    }
-                    
+                    let login_success = start_auto_login(app_handle_clone.clone()).await
+                        .unwrap_or(false);
+                        
                     // Start notification service
-                    if let Err(e) = start_notification_service(app_handle_clone.clone()).await {
+                    if let Err(e) = start_notification_service(app_handle_clone.clone(), login_success).await {
                         eprintln!("Failed to start notification service: {}", e);
                     }
                 });
