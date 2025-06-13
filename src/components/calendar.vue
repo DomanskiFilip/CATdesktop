@@ -69,10 +69,11 @@ interface CalendarEvent {
   id: string;
   description: string;
   time: string;
-  alarm: boolean
+  alarm: boolean;
   synced: boolean;
   deleted: boolean;
 }
+
 const calendarDays = ref<CalendarDay[]>([])
 
 // current day
@@ -295,7 +296,7 @@ const alarm = (hour: number) => {
 const scheduleNativeNotification = async (event: CalendarEvent) => {
   try {
     await invoke('schedule_event_notification', { 
-      eventJson: JSON.stringify(event) 
+      event_json: JSON.stringify(event) 
     })
   } catch (error) {
     console.error('Failed to schedule notification:', error)

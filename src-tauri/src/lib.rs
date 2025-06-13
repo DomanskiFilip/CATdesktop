@@ -12,13 +12,17 @@ mod sqlite;
 mod sqlite_sync_service;
 mod notification_service;
 
-use tauri::Manager;
+use tauri::{AppHandle, Manager};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::menu::{Menu, MenuItem};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use auto_launch::AutoLaunchBuilder;
 use std::env;
+use crate::notification_service::NotificationService;
 
-use notification_service::NotificationService;
+
+pub type NotificationServiceState = Arc<Mutex<Option<NotificationService>>>;
 
 // auto-login command
 #[tauri::command]
@@ -114,18 +118,69 @@ async fn setup_auto_launch(app_handle: tauri::AppHandle) -> Result<(), String> {
     auto.enable().map_err(|e| e.to_string())?;
     Ok(())
 }
+
+// Start auto-login process
+async fn start_auto_login(app_handle: AppHandle) -> Result<(), String> {
+    println!("Starting auto-login process...");
+    
+    match auto_login(app_handle).await {
+        Ok(result) => {
+            println!("Auto-login completed: {}", result);
+            Ok(())
+        }
+        Err(e) => {
+            println!("Auto-login failed: {}", e);
+            Err(e)
+        }
+    }
+}
+
+// Start notification service
+async fn start_notification_service(app_handle: AppHandle) -> Result<(), String> {
+    println!("Starting notification service...");
+    
+    let notification_state = app_handle.state::<NotificationServiceState>();
+    let mut service_guard = notification_state.lock().await;
+    
+    if service_guard.is_none() {
+        let mut service = NotificationService::new();
+        service.start(app_handle.clone()).await;
+        *service_guard = Some(service);
+        drop(service_guard); // Release the lock
+        
+        // Now do the initial check without holding the lock
+        if let Err(e) = NotificationService::check_and_schedule_all_notifications(&app_handle).await {
+            eprintln!("Error in initial notification check: {}", e);
+        }
+        
+        println!("Notification service started successfully");
+    } else {
+        println!("Notification service already running");
+    }
+    
+    Ok(())
+}
+
 // Schedule event notification command
 #[tauri::command]
 async fn schedule_event_notification(
-    _app_handle: tauri::AppHandle,
-    event_json: String
-) -> Result<(), String> {
-    let _event = sqlite::CalendarEvent::from_json(&event_json)?;
+    event_json: String,
+    app_handle: AppHandle,
+) -> Result<String, String> {
+    // Parse the event from JSON
+    let event: crate::sqlite::CalendarEvent = serde_json::from_str(&event_json)
+        .map_err(|e| format!("Failed to parse event: {}", e))?;
     
-    // Access the global notification service and schedule
-    // This requires proper state management
+    let notification_state = app_handle.state::<NotificationServiceState>();
+    let mut service_guard = notification_state.lock().await;
     
-    Ok(())
+    if let Some(service) = service_guard.as_mut() {
+        service.schedule_event_notifications(&event).await
+            .map_err(|e| format!("Failed to schedule notification: {}", e))?;
+        Ok("Notification scheduled successfully".to_string())
+    } else {
+        Err("Notification service not available".to_string())
+    }
 }
 
 // Create system tray
@@ -186,6 +241,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             schedule_event_notification
         ])
         .setup(|app| {
+          // Request notification permissions on macOS
+            #[cfg(target_os = "macos")]
+            {
+                tauri::api::notification::request_permission();
+            }
+
             // Initialize database on app startup
             sqlite::init_db(&app.handle()).map_err(|e| e.to_string())?;
 
@@ -194,34 +255,39 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             //put window always on top
             crate::window::set_always_on_top(&app.handle(), true);
-
-            // Start notification service
-            let app_handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                let mut notification_service = NotificationService::new().await
-                    .expect("Failed to create notification service");
-                
-                notification_service.start(app_handle).await
-                    .expect("Failed to start notification service");
-            });
-
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+            
+            // Initialize notification service state
+            app.manage(Arc::new(Mutex::new(None::<NotificationService>)) as NotificationServiceState);
+            
             Ok(())
         })
-        .on_window_event(|_window, event| match event {
-            tauri::WindowEvent::CloseRequested { api, .. } => {
-                // Hide the window instead of closing it
-                _window.hide().unwrap();
-                api.prevent_close();
+        .build(tauri::generate_context!())?
+        .run(|app_handle, event| match event {
+            tauri::RunEvent::Ready => {
+                // Start services after the app is ready
+                let app_handle_clone = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    // Start auto-login
+                    if let Err(e) = start_auto_login(app_handle_clone.clone()).await {
+                        eprintln!("Failed to start auto-login: {}", e);
+                    }
+                    
+                    // Start notification service
+                    if let Err(e) = start_notification_service(app_handle_clone.clone()).await {
+                        eprintln!("Failed to start notification service: {}", e);
+                    }
+                });
+            }
+            tauri::RunEvent::WindowEvent { label, event, .. } => {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    // Hide the window instead of closing it
+                    if let Some(window) = app_handle.get_webview_window(&label) {
+                        let _ = window.hide();
+                    }
+                    api.prevent_close();
+                }
             }
             _ => {}
-        })
-        .run(tauri::generate_context!())?;
+        });
     Ok(())
 }
