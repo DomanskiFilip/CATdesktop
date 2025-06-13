@@ -13,16 +13,7 @@
           {{ day }}
         </div>
         <!-- Calendar days -->
-        <div 
-          v-for="date in calendarDays" 
-          :key="date.id"
-          class="calendar-cell"
-          :class="{
-            'current-day': isToday(date),
-            'active': activeCell === date.id 
-          }"
-          @click="selectDate(date)"
-        >
+        <div v-for="date in calendarDays" :key="date.id" class="calendar-cell" :class="{ 'current-day': isToday(date), 'active': activeCell === date.id }" @click="selectDate(date)">
           {{ date.day }}
           <div class="event-indicators" v-if="getEventsForDate(date).length > 0">
             <span class="event-dot"></span>
@@ -31,25 +22,21 @@
       </section>
     </section>
     <section id="schedule-container">
-      <h3>{{ currentDate.toLocaleDateString('default', { month: 'long', day: 'numeric', year: 'numeric' }) }} Schedule</h3>
+      <h3> {{ currentDate.toLocaleDateString('default', { month: 'long', day: 'numeric', year: 'numeric' }) }} Schedule </h3>
       <section id="day-schedule-container">
-        
         <span v-for="hour in Array.from({ length: 24 }, (_, i) => (i + 1) % 24)" 
           :key="hour" 
           class="hour">
-          <span :class="{ 'event-time': hasEventAtHour(hour) }">
-            {{ hour < 10 ? '0' + hour : hour }}:00
+          <span class="hour-wrapper">
+            <span :class="{ 'event-time': hasEventAtHour(hour) }">
+              {{ hour < 10 ? '0' + hour : hour }}:00
+            </span>
+            <button class="alarm" :class="{ 'in-the-past': isInPast(hour) || isNow(hour), 'alarm-on' : isAlarmOn(hour) }" @click="alarm(hour)" :disabled="isInPast(hour) || !hasEventAtHour(hour)" title="toggle alarm">
+              <svg v-if="isAlarmOn(hour)" xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M96-528q0-88.39 35.5-162.19Q167-764 230-818l51 50q-52 43-82.5 105.5T168-528H96Zm696 0q0-73-30.5-135.5T678-769l52-51q62 53 98 128.5T864-528h-72ZM192-216v-72h48v-240q0-87 53.5-153T432-763v-53q0-20 14-34t34-14q20 0 34 14t14 34v53q85 16 138.5 82T720-528v240h48v72H192Zm288-276Zm-.21 396Q450-96 429-117.15T408-168h144q0 30-21.21 51t-51 21ZM312-288h336v-240q0-70-49-119t-119-49q-70 0-119 49t-49 119v240Z"/></svg>
+              <svg v-else xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M192-216v-72h48v-240q0-87 53.5-153T432-763v-53q0-20 14-34t34-14q20 0 34 14t14 34v53q85 16 138.5 82T720-528v240h48v72H192Zm288-276Zm-.21 396Q450-96 429-117.15T408-168h144q0 30-21.21 51t-51 21ZM312-288h336v-240q0-70-49-119t-119-49q-70 0-119 49t-49 119v240Z"/></svg>
+             </button>
           </span>
-          <textarea 
-            :value="getEventDescription(hour)"
-            @input="updateEventDescription($event, hour)"
-            :class="{
-               'in-the-past': isInPast(hour),
-               'has-event': hasEventAtHour(hour) 
-               }"
-            :readonly="isInPast(hour)"
-            name="description"
-          ></textarea>
+          <textarea :value="getEventDescription(hour)" @input="updateEventDescription($event, hour)" :class="{ 'in-the-past': isInPast(hour), 'has-event': hasEventAtHour(hour) }" :readonly="isInPast(hour) || isNow(hour)" name="description" title="describe the event"></textarea>
           <hr :class="{ 'event-time': hasEventAtHour(hour) }">
         </span>
       </section>
@@ -63,13 +50,13 @@ import { invoke } from '@tauri-apps/api/core'
 
 // State management
 const currentDate = ref(new Date())
-const events = ref<CalendarEvent[]>([])
-const activeCell = ref<string | null>(null)
-
-// Calendar logic functions
-const daysOfWeek = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 const currentMonth = ref(currentDate.value.toLocaleString('default', { month: 'long' }))
 const currentYear = ref(currentDate.value.getFullYear())
+const events = ref<CalendarEvent[]>([])
+const activeCell = ref<string | null>(null)
+const daysOfWeek = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
+const pendingSaves = new Map<string, ReturnType<typeof setTimeout>>()
+const now = new Date()
 
 // interface for calendar days
 interface CalendarDay {
@@ -82,6 +69,7 @@ interface CalendarEvent {
   id: string;
   description: string;
   time: string;
+  alarm: boolean
   synced: boolean;
   deleted: boolean;
 }
@@ -94,6 +82,48 @@ const isToday = (date: CalendarDay) => {
          date.date.getMonth() === today.getMonth() &&
          date.date.getFullYear() === today.getFullYear()
 }
+
+// check if hour is in the past
+const isInPast = (hour: number): boolean => {
+  const currently = new Date()
+  // If it's a future date, nothing is in the past
+  if (currentDate.value.getTime() > currently.setHours(23,59,59,999)) {
+    return false
+  }
+  
+  // If it's a past date, everything is in the past
+  if (currentDate.value.getTime() < currently.setHours(0,0,0,0)) {
+    return true
+  }
+  
+  // If it's today, compare hours
+  if (hour === 0) {
+    return false
+  }
+
+  // If it's today, compare hours
+  if (currentDate.value.getDate() === currently.getDate() && 
+      currentDate.value.getMonth() === currently.getMonth() && 
+      currentDate.value.getFullYear() === currently.getFullYear()) {
+    const currentHour = new Date().getHours()
+    return hour < currentHour
+  }
+  
+  return false
+}
+
+// check if hour is the current hour
+const isNow = (hour: number): boolean => {
+  if (currentDate.value.getDate() === now.getDate() && 
+      currentDate.value.getMonth() === now.getMonth() && 
+      currentDate.value.getFullYear() === now.getFullYear()) {
+    const currentHour = new Date().getHours()
+    return hour == currentHour
+  }
+
+  return false
+}
+
 
 // previous and next month functions
 const previousMonth = () => {
@@ -166,35 +196,6 @@ const renderCalendar = () => {
   currentYear.value = currentDate.value.getFullYear()
 }
 
-// check if hour is in the past
-const isInPast = (hour: number): boolean => {
-  const now = new Date()
-  
-  // If it's a future date, nothing is in the past
-  if (currentDate.value.getTime() > now.setHours(23,59,59,999)) {
-    return false
-  }
-  
-  // If it's a past date, everything is in the past
-  if (currentDate.value.getTime() < now.setHours(0,0,0,0)) {
-    return true
-  }
-  
-  // If it's today, compare hours
-  if (hour === 0) {
-    return false
-  }
-
-  // If it's today, compare hours
-  if (currentDate.value.getDate() === now.getDate() && 
-      currentDate.value.getMonth() === now.getMonth() && 
-      currentDate.value.getFullYear() === now.getFullYear()) {
-    const currentHour = new Date().getHours()
-    return hour < currentHour
-  }
-  
-  return false
-}
 
 // Get events for specific date
 const getEventsForDate = (date: CalendarDay) => {
@@ -207,75 +208,39 @@ const getEventsForDate = (date: CalendarDay) => {
   })
 }
 
-// Check if there is an event at a specific hour
-const hasEventAtHour = (hour: number) => {
-  return events.value.some(event => {
-    const eventHour = new Date(event.time).getHours()
+// helper function to find an event at a specific hour
+const findEventAtHour = (hour: number, date: Date = currentDate.value): CalendarEvent | undefined => {
+  return events.value.find(event => {
     const eventDate = new Date(event.time)
+    const eventHour = eventDate.getHours()
     return eventHour === hour && 
-           eventDate.getDate() === currentDate.value.getDate() &&
-           eventDate.getMonth() === currentDate.value.getMonth() &&
-           eventDate.getFullYear() === currentDate.value.getFullYear()
+           eventDate.getDate() === date.getDate() &&
+           eventDate.getMonth() === date.getMonth() &&
+           eventDate.getFullYear() === date.getFullYear()
   })
+}
+
+// Check if there is an event at a specific hour for frontend display
+const hasEventAtHour = (hour: number) => {
+  return !!findEventAtHour(hour)
 }
 
 // Get event description for a specific hour
 const getEventDescription = (hour: number) => {
-  const event = events.value.find(event => {
-    const eventHour = new Date(event.time).getHours()
-    const eventDate = new Date(event.time)
-    return eventHour === hour && 
-           eventDate.getDate() === currentDate.value.getDate() &&
-           eventDate.getMonth() === currentDate.value.getMonth() &&
-           eventDate.getFullYear() === currentDate.value.getFullYear()
-  })
-  return event ? event.description : ''
+  const existingEvent = findEventAtHour(hour)
+  return existingEvent ? existingEvent.description : ''
 }
 
-// function to lead events from database
-const loadEvents = async () => {
-  try {
-    const eventsData = await invoke<string[]>('get_events')
-    events.value = eventsData.map(eventStr => JSON.parse(eventStr))
-  } catch (error) {
-    console.error('Failed to load events:', error)
-  }
-}
-
-const pendingSaves = new Map<string, ReturnType<typeof setTimeout>>()
-
-// Save event function
-const saveEvent = (event: CalendarEvent) => {
-  // Clear any existing timeout for this event
-  const existingTimeout = pendingSaves.get(event.id)
-  if (existingTimeout) {
-    clearTimeout(existingTimeout)
-  }
-
-  // Create new timeout for this event
-  const timeout = setTimeout(async () => {
-    try {
-      await invoke('save_event', { event: JSON.stringify(event) })
-      pendingSaves.delete(event.id)
-    } catch (error) {
-      console.error('Failed to save event:', error)
-    }
-  }, 1000)
-
-  pendingSaves.set(event.id, timeout)
+// Check if alarm is on for a specific hour
+const isAlarmOn = (hour: number): boolean => {
+  const existingEvent = findEventAtHour(hour)
+  return existingEvent ? existingEvent.alarm : false
 }
 
 // Update event description
 const updateEventDescription = (event: Event, hour: number) => {
   const value = (event.target as HTMLTextAreaElement).value
-  const existingEvent = events.value.find(event => {
-    const eventHour = new Date(event.time).getHours()
-    const eventDate = new Date(event.time)
-    return eventHour === hour && 
-           eventDate.getDate() === currentDate.value.getDate() &&
-           eventDate.getMonth() === currentDate.value.getMonth() &&
-           eventDate.getFullYear() === currentDate.value.getFullYear()
-  })
+  const existingEvent = findEventAtHour(hour)
 
   if (existingEvent) {
     if (!value.trim()) {
@@ -299,6 +264,7 @@ const updateEventDescription = (event: Event, hour: number) => {
       id: crypto.randomUUID(),
       description: value,
       time: eventDate.toISOString(),
+      alarm: false,
       synced: false,
       deleted: false
     }
@@ -307,8 +273,69 @@ const updateEventDescription = (event: Event, hour: number) => {
   }
 }
 
+// Set alarm function
+const alarm = (hour: number) => {
+  if (isInPast(hour)) return
+
+  const existingEvent = findEventAtHour(hour)
+
+  if (existingEvent) {
+    // Toggle alarm for existing event
+    existingEvent.alarm = !existingEvent.alarm
+    saveEvent(existingEvent)
+    
+    // Schedule native notifications through Tauri
+    if (existingEvent.alarm) {
+      scheduleNativeNotification(existingEvent)
+    }
+  }
+}
+
+// Schedule native notification function
+const scheduleNativeNotification = async (event: CalendarEvent) => {
+  try {
+    await invoke('schedule_event_notification', { 
+      eventJson: JSON.stringify(event) 
+    })
+  } catch (error) {
+    console.error('Failed to schedule notification:', error)
+  }
+}
+
+// function to lead events from database
+const loadEvents = async () => {
+  try {
+    const eventsData = await invoke<string[]>('get_events')
+    events.value = eventsData.map(eventStr => JSON.parse(eventStr))
+  } catch (error) {
+    console.error('Failed to load events:', error)
+  }
+}
+
+// Save event function
+const saveEvent = (event: CalendarEvent) => {
+  // Clear any existing timeout for this event
+  const existingTimeout = pendingSaves.get(event.id)
+  if (existingTimeout) {
+    clearTimeout(existingTimeout)
+  }
+
+  // Create new timeout for this event
+  const timeout = setTimeout(async () => {
+    try {
+      await invoke('save_event', { event: JSON.stringify(event) })
+      pendingSaves.delete(event.id)
+    } catch (error) {
+      console.error('Failed to save event:', error)
+    }
+  }, 1000)
+
+  pendingSaves.set(event.id, timeout)
+}
+
 // Refresh events function
 const refreshEvents = async () => {
+  await invoke('clean_old_events')
   await loadEvents()
 }
 
@@ -321,11 +348,22 @@ onBeforeUnmount(() => {
 
 onMounted(async () => {
   try {
+    // Try auto-launch setup but don't fail if it doesn't work
+    try {
+      await invoke('setup_auto_launch')
+    } catch (autoLaunchError) {
+      console.warn('Auto-launch setup failed:', autoLaunchError)
+    }
+    
     await invoke('clean_old_events')
     await loadEvents()
     renderCalendar()
     // Refresh events every minute
     setInterval(refreshEvents, 60000)
+    setInterval(async () => {
+      await invoke('clean_old_events')
+      await loadEvents()
+    }, 3600000)
   } catch (error) {
     console.error('Failed to initialize calendar:', error)
   }
@@ -461,6 +499,12 @@ onMounted(async () => {
   -ms-overflow-style: none; /* IE and Edge */
 }
 
+.hour-wrapper {
+  display: flex;
+  width: 100%;
+  align-items: center;
+}
+
 .hour {
   width: 100%;
   display: flex;
@@ -513,4 +557,27 @@ onMounted(async () => {
       pointer-events: none;
       background-color: var(--color-theme);
     }
+
+.alarm {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+  .alarm.in-the-past {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  .alarm:disabled{
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
 </style>

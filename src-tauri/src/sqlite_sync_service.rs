@@ -49,8 +49,9 @@ async fn sync_events(app_handle: &AppHandle) -> Result<(), String> {
                     rusqlite::types::Type::Text,
                     Box::new(e),
                 ))?.with_timezone(&chrono::Utc),
-            synced: row.get(3)?,
-            deleted: row.get(4)?
+            alarm: row.get(3)?,
+            synced: row.get(4)?,
+            deleted: row.get(5)?
         })
     }).map_err(|e| e.to_string())?
     .collect::<Result<Vec<_>, _>>()
@@ -60,12 +61,12 @@ async fn sync_events(app_handle: &AppHandle) -> Result<(), String> {
     if !events.is_empty() {
         match send_to_dynamodb(&events).await {
             Ok(_) => {
-                let mut stmt = conn.prepare(
+                let mut unsynced = conn.prepare(
                     "UPDATE events SET synced = TRUE WHERE id = ?"
                 ).map_err(|e| e.to_string())?;
                 
                 for event in events {
-                    stmt.execute([event.id])
+                    unsynced.execute([event.id])
                         .map_err(|e| e.to_string())?;
                 }
             }
@@ -76,7 +77,7 @@ async fn sync_events(app_handle: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-async fn send_to_dynamodb(events: &[CalendarEvent]) -> Result<(), String> {
+async fn send_to_dynamodb(_events: &[CalendarEvent]) -> Result<(), String> {
     // TODO: Implement DynamoDB sync
     // For now, just return Ok to test the flow
     Ok(())

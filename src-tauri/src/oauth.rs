@@ -3,7 +3,6 @@ use std::time::Instant;
 use std::net::TcpListener;
 use std::io::Read;
 use urlencoding;
-use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
 #[derive(Deserialize)]
@@ -23,7 +22,7 @@ use oauth2::{
     RedirectUrl, Scope, TokenResponse, TokenUrl, basic::BasicClient,
 };
 use open;
-use std::io::{self, Write};
+use std::io::Write;
 use std::fs;
 
 pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String, String> {

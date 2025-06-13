@@ -12,6 +12,7 @@ pub struct CalendarEvent {
     pub id: String,
     pub description: String,
     pub time: DateTime<Utc>,
+    pub alarm: bool,
     pub synced: bool,
     pub deleted: bool,
 }
@@ -58,6 +59,7 @@ pub fn init_db(app_handle: &AppHandle) -> Result<(), SqliteError> {
             id TEXT PRIMARY KEY,
             description TEXT,
             time TEXT NOT NULL,
+            alarm BOOLEAN DEFAULT FALSE,
             synced BOOLEAN DEFAULT FALSE,
             deleted BOOLEAN DEFAULT FALSE
         )"
@@ -85,12 +87,13 @@ pub fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), Stri
         .map_err(|e| format!("Transaction error: {}", e.to_string()))?;
 
     tx.execute(
-        "INSERT OR REPLACE INTO events (id, description, time, synced, deleted)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT OR REPLACE INTO events (id, description, time, alarm, synced, deleted)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         (
             &event.id,
             &event.description,
             &event.time_to_string(),
+            &event.alarm,
             false,
             false
         ),
@@ -104,7 +107,7 @@ pub fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), Stri
 pub fn get_events(app_handle: &AppHandle) -> Result<Vec<String>, SqliteError> {
     let conn = get_db_connection(app_handle)?;
     let mut stmt = conn.prepare(
-        "SELECT id, description, time, synced, deleted 
+        "SELECT id, description, time, alarm, synced, deleted 
          FROM events 
          WHERE deleted = FALSE
          ORDER BY time ASC"
@@ -120,8 +123,9 @@ pub fn get_events(app_handle: &AppHandle) -> Result<Vec<String>, SqliteError> {
                     rusqlite::types::Type::Text,
                     Box::new(e),
                 ))?.with_timezone(&Utc),
-            synced: row.get(3)?,
-            deleted: row.get(4)?
+            alarm: row.get(3)?,
+            synced: row.get(4)?,
+            deleted: row.get(5)?
         })
     })?
     .collect::<Result<Vec<_>, _>>()?;
@@ -153,11 +157,10 @@ pub fn delete_event(app_handle: &AppHandle, id: String) -> Result<(), SqliteErro
 pub fn clean_old_events(app_handle: &AppHandle) -> Result<(), SqliteError> {
     let conn = get_db_connection(app_handle)?;
     let now = chrono::Utc::now();
-    let today = now.date_naive();
     
     conn.execute(
-        "UPDATE events SET deleted = TRUE WHERE date(time) < date(?)",
-        [today.to_string()]
+        "UPDATE events SET deleted = TRUE WHERE time < ?",
+        [now.to_rfc3339()]
     )?;
     Ok(())
 }

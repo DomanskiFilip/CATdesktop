@@ -1,6 +1,6 @@
 use reqwest::Client;
 use serde::Deserialize;
-use crate::config::{AppConfig, get_device_info};
+use crate::config::AppConfig;
 
 // Structs (classes/objects) to deserialize the Lambda response
 #[derive(Deserialize)]

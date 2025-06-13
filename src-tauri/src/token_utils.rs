@@ -3,7 +3,6 @@ use aes_gcm::aead::Aead;
 use aes_gcm::KeyInit;
 use rand::Rng;
 use std::fs;
-use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 use crate::encription_key::get_encryption_key;
 
