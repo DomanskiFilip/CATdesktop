@@ -4,7 +4,7 @@ use chrono::{Duration, DateTime, Utc};
 use std::collections::HashMap;
 use tokio::time::{sleep, Duration as TokioDuration};
 use tokio::task::JoinHandle;
-use crate::sqlite::CalendarEvent;
+use crate::database_utils::CalendarEvent;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -157,7 +157,7 @@ impl NotificationService {
         let events = {
             let app_handle_clone = app_handle.clone();
             tokio::task::spawn_blocking(move || -> Result<Vec<CalendarEvent>, String> {
-                let conn = crate::sqlite::get_db_connection(&app_handle_clone)
+                let conn = crate::database_utils::get_db_connection(&app_handle_clone)
                     .map_err(|e| e.to_string())?;
                 
                 let now = Utc::now();

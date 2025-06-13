@@ -98,6 +98,16 @@ async function checkAutoLogin() {
 }
 checkAutoLogin();
 
+// Function to log out the user
+const logout = async () => {
+  try {
+    await invoke('logout_user');
+    loggedIn.value = false;
+  } catch (error) {
+    console.error("Logout failed:", error);
+  }
+}
+
 // Watch for changes in loggedIn and update the background element
 watch(loggedIn, (newValue) => {
   const backgroundElement = document.getElementById('theme-background-element')
@@ -109,16 +119,6 @@ watch(loggedIn, (newValue) => {
     }
   }
 })
-
-// Function to log out the user
-const logout = async () => {
-  try {
-    await invoke('logout_user');
-    loggedIn.value = false;
-  } catch (error) {
-    console.error("Logout failed:", error);
-  }
-}
 
 // Function to change sections useing buttons in sidebar
 const changeSection = (sectionId: string) => {

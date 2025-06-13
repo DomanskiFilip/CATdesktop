@@ -2,7 +2,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use tauri::AppHandle;
 use crate::token_utils::{read_tokens_from_file, save_tokens_to_file};
-use crate::config::{AppConfig, get_device_info};
+use crate::api_utils::{AppConfig, get_device_info};
 
 // Structs (classes/objects) to deserialize the Lambda response
 #[derive(Deserialize)]

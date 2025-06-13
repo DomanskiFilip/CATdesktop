@@ -1,15 +1,14 @@
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub mod window;
 mod oauth;
-mod config;
+mod api_utils;
 mod login;
 mod register;
 mod token_utils;
 mod theme_utils;
 mod encription_key;
 mod auto_login;
-mod sqlite;
-mod sqlite_sync_service;
+mod database_utils;
 mod notification_service;
 
 use tauri::{AppHandle, Manager};
@@ -62,23 +61,23 @@ async fn load_theme(app_handle: tauri::AppHandle) -> Result<String, String> {
 // save, load and delete event commands
 #[tauri::command]
 async fn save_event(app_handle: tauri::AppHandle, event: String) -> Result<(), String> {
-    sqlite::save_event(&app_handle, event)
+    database_utils::save_event(&app_handle, event)
 }
 
 #[tauri::command]
 async fn get_events(app_handle: tauri::AppHandle) -> Result<Vec<String>, String> {
-    sqlite::get_events(&app_handle).map_err(|e| e.to_string())
+    database_utils::get_events(&app_handle).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn delete_event(app_handle: tauri::AppHandle, id: String) -> Result<(), String> {
-    sqlite::delete_event(&app_handle, id).map_err(|e| e.to_string())
+    database_utils::delete_event(&app_handle, id).map_err(|e| e.to_string())
 }
 
 // clean old events comand
 #[tauri::command]
 async fn clean_old_events(app_handle: tauri::AppHandle) -> Result<(), String> {
-    sqlite::clean_old_events(&app_handle).map_err(|e| e.to_string())
+    database_utils::clean_old_events(&app_handle).map_err(|e| e.to_string())
 }
 
 // google oauth2 functionalities
@@ -168,7 +167,7 @@ async fn schedule_event_notification(
     app_handle: AppHandle,
 ) -> Result<String, String> {
     // Parse the event from JSON
-    let event: crate::sqlite::CalendarEvent = serde_json::from_str(&event_json)
+    let event: crate::database_utils::CalendarEvent = serde_json::from_str(&event_json)
         .map_err(|e| format!("Failed to parse event: {}", e))?;
     
     let notification_state = app_handle.state::<NotificationServiceState>();
@@ -248,7 +247,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             // Initialize database on app startup
-            sqlite::init_db(&app.handle()).map_err(|e| e.to_string())?;
+            database_utils::init_db(&app.handle()).map_err(|e| e.to_string())?;
 
             // Create system tray
             create_system_tray(&app.handle())?;
