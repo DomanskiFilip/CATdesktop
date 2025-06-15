@@ -1,5 +1,4 @@
 <template>
-  <!-- time debug help: <span style="position: fixed;">{{ currentDate }}</span> -->
   <section id="calendar">
     <section id="calendar-container">
       <section id="calendar-header">
@@ -48,16 +47,6 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 
-// State management
-const currentDate = ref(new Date())
-const currentMonth = ref(currentDate.value.toLocaleString('default', { month: 'long' }))
-const currentYear = ref(currentDate.value.getFullYear())
-const events = ref<CalendarEvent[]>([])
-const activeCell = ref<string | null>(null)
-const daysOfWeek = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
-const pendingSaves = new Map<string, ReturnType<typeof setTimeout>>()
-const now = new Date()
-
 // interface for calendar days
 interface CalendarDay {
   id: string;
@@ -74,9 +63,23 @@ interface CalendarEvent {
   deleted: boolean;
 }
 
+// constant for days of the week
+const daysOfWeek = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
+const now = new Date()
+const refreshInterval = 60000 // 1 minute in milliseconds
+const cleanupInterval = 3600000 // 1 hour in milliseconds
+
+// state managment variables
+const currentDate = ref(new Date())
+const currentMonth = ref(currentDate.value.toLocaleString('default', { month: 'long' }))
+const currentYear = ref(currentDate.value.getFullYear())
+const events = ref<CalendarEvent[]>([])
+const activeCell = ref<string | null>(null)
 const calendarDays = ref<CalendarDay[]>([])
 
-// current day
+
+// == Utility functions == //
+// utility function -> check if its current day
 const isToday = (date: CalendarDay) => {
   const today = new Date()
   return date.date && date.date.getDate() === today.getDate() &&
@@ -84,7 +87,7 @@ const isToday = (date: CalendarDay) => {
          date.date.getFullYear() === today.getFullYear()
 }
 
-// check if hour is in the past
+// utility function -> check if hour is in the past
 const isInPast = (hour: number): boolean => {
   const currently = new Date()
   // If it's a future date, nothing is in the past
@@ -113,7 +116,7 @@ const isInPast = (hour: number): boolean => {
   return false
 }
 
-// check if hour is the current hour
+// utility function -> check if hour is the current hour
 const isNow = (hour: number): boolean => {
   if (currentDate.value.getDate() === now.getDate() && 
       currentDate.value.getMonth() === now.getMonth() && 
@@ -125,8 +128,138 @@ const isNow = (hour: number): boolean => {
   return false
 }
 
+// helper function -> find an event at a specific hour
+const findEventAtHour = (hour: number, date: Date = currentDate.value): CalendarEvent | undefined => {
+  return events.value.find(event => {
+    const eventDate = new Date(event.time)
+    const eventHour = eventDate.getHours()
+    return eventHour === hour && 
+           eventDate.getDate() === date.getDate() &&
+           eventDate.getMonth() === date.getMonth() &&
+           eventDate.getFullYear() === date.getFullYear()
+  })
+}
 
-// previous and next month functions
+//  utility function -> Get event description for a specific hour
+const getEventDescription = (hour: number) => {
+  const existingEvent = findEventAtHour(hour)
+  return existingEvent ? existingEvent.description : ''
+}
+
+// utility function -> Check if alarm is on for a specific hour
+const isAlarmOn = (hour: number): boolean => {
+  const existingEvent = findEventAtHour(hour)
+  return existingEvent ? existingEvent.alarm : false
+}
+
+// utility function -> Check if there is an event at a specific hour for frontend display
+const hasEventAtHour = (hour: number) => {
+  return !!findEventAtHour(hour)
+}
+
+// utility function -> Get events for specific date
+const getEventsForDate = (date: CalendarDay) => {
+  if (!date.date) return []
+  return events.value.filter(event => {
+    const eventDate = new Date(event.time)
+    return eventDate.getDate() === date.date?.getDate() &&
+           eventDate.getMonth() === date.date?.getMonth() &&
+           eventDate.getFullYear() === date.date?.getFullYear()
+  })
+}
+
+// == Event logic == //
+// Map to keep track of pending saves for debouncing
+const pendingSaves = new Map<string, ReturnType<typeof setTimeout>>()
+
+// helper function -> Save event function
+const saveEvent = (event: CalendarEvent) => {
+  // Clear any existing timeout for this event
+  const existingTimeout = pendingSaves.get(event.id)
+  if (existingTimeout) {
+    clearTimeout(existingTimeout)
+  }
+
+  // Create new timeout for this event
+  const timeout = setTimeout(async () => {
+    try {
+      await invoke('save_event', { event: JSON.stringify(event) })
+      pendingSaves.delete(event.id)
+    } catch (error) {
+      console.error('Failed to save event:', error)
+    }
+  }, 1000)
+
+  pendingSaves.set(event.id, timeout)
+}
+
+// function to update and save event description
+const updateEventDescription = (event: Event, hour: number) => {
+  const value = (event.target as HTMLTextAreaElement).value
+  const existingEvent = findEventAtHour(hour)
+
+  if (existingEvent) {
+    if (!value.trim()) {
+      // Delete event if description is empty
+      invoke('delete_event', { id: existingEvent.id })
+      events.value = events.value.filter(e => e.id !== existingEvent.id)
+    } else {
+      existingEvent.description = value
+      saveEvent(existingEvent)
+    }
+  } else if (value.trim()) {
+    // Create new event if description is not empty
+    const eventDate = new Date(
+      currentDate.value.getFullYear(),
+      currentDate.value.getMonth(), 
+      currentDate.value.getDate(),
+      hour
+    )
+    
+    const newEvent = {
+      id: crypto.randomUUID(),
+      description: value,
+      time: eventDate.toISOString(),
+      alarm: false,
+      synced: false,
+      deleted: false
+    }
+    events.value.push(newEvent)
+    saveEvent(newEvent)
+  }
+}
+
+// helper function -> Schedule native notification helper function
+const scheduleNativeNotification = async (event: CalendarEvent) => {
+  try {
+    await invoke('schedule_event_notification', { 
+      event_json: JSON.stringify(event) 
+    })
+  } catch (error) {
+    console.error('Failed to schedule notification:', error)
+  }
+}
+
+// Set alarm function
+const alarm = (hour: number) => {
+  if (isInPast(hour)) return
+
+  const existingEvent = findEventAtHour(hour)
+
+  if (existingEvent) {
+    // Toggle alarm for existing event
+    existingEvent.alarm = !existingEvent.alarm
+    saveEvent(existingEvent)
+    
+    // Schedule native notifications through Tauri
+    if (existingEvent.alarm) {
+      scheduleNativeNotification(existingEvent)
+    }
+  }
+}
+
+// == Calendar render + navigaton + interacion logic == //
+// functions to controle calendar navigation
 const previousMonth = () => {
   currentDate.value = new Date(
     currentDate.value.getFullYear(),
@@ -155,7 +288,7 @@ const nextMonth = () => {
   }
 }
 
-// select date function
+// select date function for calendar interaction
 const selectDate = (date: CalendarDay) => {
   if (date.date) {
     currentDate.value = new Date(date.date)
@@ -198,112 +331,8 @@ const renderCalendar = () => {
 }
 
 
-// Get events for specific date
-const getEventsForDate = (date: CalendarDay) => {
-  if (!date.date) return []
-  return events.value.filter(event => {
-    const eventDate = new Date(event.time)
-    return eventDate.getDate() === date.date?.getDate() &&
-           eventDate.getMonth() === date.date?.getMonth() &&
-           eventDate.getFullYear() === date.date?.getFullYear()
-  })
-}
-
-// helper function to find an event at a specific hour
-const findEventAtHour = (hour: number, date: Date = currentDate.value): CalendarEvent | undefined => {
-  return events.value.find(event => {
-    const eventDate = new Date(event.time)
-    const eventHour = eventDate.getHours()
-    return eventHour === hour && 
-           eventDate.getDate() === date.getDate() &&
-           eventDate.getMonth() === date.getMonth() &&
-           eventDate.getFullYear() === date.getFullYear()
-  })
-}
-
-// Check if there is an event at a specific hour for frontend display
-const hasEventAtHour = (hour: number) => {
-  return !!findEventAtHour(hour)
-}
-
-// Get event description for a specific hour
-const getEventDescription = (hour: number) => {
-  const existingEvent = findEventAtHour(hour)
-  return existingEvent ? existingEvent.description : ''
-}
-
-// Check if alarm is on for a specific hour
-const isAlarmOn = (hour: number): boolean => {
-  const existingEvent = findEventAtHour(hour)
-  return existingEvent ? existingEvent.alarm : false
-}
-
-// Update event description
-const updateEventDescription = (event: Event, hour: number) => {
-  const value = (event.target as HTMLTextAreaElement).value
-  const existingEvent = findEventAtHour(hour)
-
-  if (existingEvent) {
-    if (!value.trim()) {
-      // Delete event if description is empty
-      invoke('delete_event', { id: existingEvent.id })
-      events.value = events.value.filter(e => e.id !== existingEvent.id)
-    } else {
-      existingEvent.description = value
-      saveEvent(existingEvent)
-    }
-  } else if (value.trim()) {
-    // Create new event if description is not empty
-    const eventDate = new Date(
-      currentDate.value.getFullYear(),
-      currentDate.value.getMonth(), 
-      currentDate.value.getDate(),
-      hour
-    )
-    
-    const newEvent = {
-      id: crypto.randomUUID(),
-      description: value,
-      time: eventDate.toISOString(),
-      alarm: false,
-      synced: false,
-      deleted: false
-    }
-    events.value.push(newEvent)
-    saveEvent(newEvent)
-  }
-}
-
-// Set alarm function
-const alarm = (hour: number) => {
-  if (isInPast(hour)) return
-
-  const existingEvent = findEventAtHour(hour)
-
-  if (existingEvent) {
-    // Toggle alarm for existing event
-    existingEvent.alarm = !existingEvent.alarm
-    saveEvent(existingEvent)
-    
-    // Schedule native notifications through Tauri
-    if (existingEvent.alarm) {
-      scheduleNativeNotification(existingEvent)
-    }
-  }
-}
-
-// Schedule native notification function
-const scheduleNativeNotification = async (event: CalendarEvent) => {
-  try {
-    await invoke('schedule_event_notification', { 
-      event_json: JSON.stringify(event) 
-    })
-  } catch (error) {
-    console.error('Failed to schedule notification:', error)
-  }
-}
-
-// function to lead events from database
+// == initialization logic == //
+// helper function -> function to load events from database
 const loadEvents = async () => {
   try {
     const eventsData = await invoke<string[]>('get_events')
@@ -313,28 +342,7 @@ const loadEvents = async () => {
   }
 }
 
-// Save event function
-const saveEvent = (event: CalendarEvent) => {
-  // Clear any existing timeout for this event
-  const existingTimeout = pendingSaves.get(event.id)
-  if (existingTimeout) {
-    clearTimeout(existingTimeout)
-  }
-
-  // Create new timeout for this event
-  const timeout = setTimeout(async () => {
-    try {
-      await invoke('save_event', { event: JSON.stringify(event) })
-      pendingSaves.delete(event.id)
-    } catch (error) {
-      console.error('Failed to save event:', error)
-    }
-  }, 1000)
-
-  pendingSaves.set(event.id, timeout)
-}
-
-// Refresh events function
+// helper function -> Refresh events function
 const refreshEvents = async () => {
   await invoke('clean_old_events')
   await loadEvents()
@@ -347,6 +355,7 @@ onBeforeUnmount(() => {
   }
 })
 
+// Initialize calendar on component mount
 onMounted(async () => {
   try {
     // Try auto-launch setup but don't fail if it doesn't work
@@ -360,11 +369,11 @@ onMounted(async () => {
     await loadEvents()
     renderCalendar()
     // Refresh events every minute
-    setInterval(refreshEvents, 60000)
+    setInterval(refreshEvents, refreshInterval)
     setInterval(async () => {
       await invoke('clean_old_events')
       await loadEvents()
-    }, 3600000)
+    }, cleanupInterval)
   } catch (error) {
     console.error('Failed to initialize calendar:', error)
   }

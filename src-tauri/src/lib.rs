@@ -23,6 +23,7 @@ use crate::notification_service::NotificationService;
 
 pub type NotificationServiceState = Arc<Mutex<Option<NotificationService>>>;
 
+// Check login status command
 #[tauri::command]
 async fn check_login_status(app_handle: tauri::AppHandle) -> Result<bool, String> {
     match crate::auto_login::auto_login_lambda(&app_handle).await {
@@ -221,7 +222,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             clean_old_events,
             get_oauth_timeout,
             run_oauth2_flow,
-            setup_auto_launch,
+
             schedule_event_notification
         ])
         .setup(|app| {
