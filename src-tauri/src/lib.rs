@@ -38,17 +38,20 @@ async fn login_user(app_handle: tauri::AppHandle, email: String, password: Strin
     // Attempt login
     let login_result = crate::login::login_user_lambda(&app_handle, email, password).await?;
 
-    // If login was successful, start notification service
+    // If login was successful, start notification service asynchronously
     if login_result.contains("\"status\":\"ok\"") {
-        if let Err(e) = start_notification_service(app_handle, true).await {
-            eprintln!("Failed to start notification service after login: {}", e);
-        } else {
-          eprintln!("Notification service started successfully after login.");
-        }
+        let app_handle_clone = app_handle.clone();
+        tokio::spawn(async move {
+            if let Err(e) = start_notification_service(app_handle_clone, true).await {
+                eprintln!("Failed to start notification service after login: {}", e);
+            } else {
+                println!("Notification service started successfully after login.");
+            }
+        });
     }
+    
     Ok(login_result)
-  }
-
+}
 // register user command
 #[tauri::command]
 async fn register_user(email: String, password: String) -> Result<String, String> {
@@ -61,12 +64,17 @@ async fn logout_user(app_handle: tauri::AppHandle) -> Result<bool, String> {
     // Clear tokens first
     crate::token_utils::clear_tokens(&app_handle)?;
     
-    // Stop notification service
-    let notification_state = app_handle.state::<NotificationServiceState>();
-    let mut service_guard = notification_state.lock().await;
-    
-    // Clear the service to stop notifications
-    *service_guard = None;
+    // Stop notification service asynchronously
+    let app_handle_clone = app_handle.clone();
+    tokio::spawn(async move {
+        let notification_state = app_handle_clone.state::<NotificationServiceState>();
+        let mut service_guard = notification_state.lock().await;
+        
+        if let Some(mut existing_service) = service_guard.take() {
+            println!("Stopping existing notification service...");
+            existing_service.stop().await;
+        }
+    });
     
     Ok(true)
 }
@@ -159,12 +167,18 @@ async fn start_auto_login(app_handle: AppHandle) -> Result<bool, String> {
 async fn start_notification_service(app_handle: AppHandle, user_logged_in: bool) -> Result<(), String> {
     let notification_state = app_handle.state::<NotificationServiceState>();
     let mut service_guard = notification_state.lock().await;
-    
-    if service_guard.is_none() {
-        let mut service = NotificationService::new();
-        service.start(app_handle.clone(), user_logged_in).await;
-        *service_guard = Some(service);
+
+    // Stop existing service if it exists
+    if let Some(mut existing_service) = service_guard.take() {
+        println!("Stopping existing notification service...");
+        existing_service.stop().await;
     }
+    
+    // Always create and start a new service
+    println!("Creating new notification service with login state: {}", user_logged_in);
+    let mut service = NotificationService::new();
+    service.start(app_handle.clone(), user_logged_in).await;
+    *service_guard = Some(service);
     
     Ok(())
 }

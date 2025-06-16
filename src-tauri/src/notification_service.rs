@@ -6,39 +6,50 @@ use tokio::time::{sleep, Duration as TokioDuration};
 use tokio::task::JoinHandle;
 use crate::database_utils::CalendarEvent;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::Mutex as TokioMutex;
 
 pub struct NotificationService {
   scheduled_tasks: HashMap<String, JoinHandle<()>>,
-  user_logged_in: bool,
 }
 
 impl NotificationService {
   pub fn new() -> Self {
       Self {
           scheduled_tasks: HashMap::new(),
-          user_logged_in: false,
       }
   }
 
-  pub async fn start(&mut self, app_handle: AppHandle, user_logged_in: bool) {
-      println!("Starting notification service...");
-      self.user_logged_in = user_logged_in;
+  pub async fn stop(&mut self) {
+        println!("Stopping notification service and cancelling all scheduled tasks...");
+        for (task_id, task) in self.scheduled_tasks.drain() {
+            println!("Cancelling task: {}", task_id);
+            task.abort();
+        }
+    }
 
-      // Start periodic checking
-      let app_handle_clone = app_handle.clone();
-      let user_logged_in = self.user_logged_in; 
-      tokio::spawn(async move {
-          let mut interval = tokio::time::interval(TokioDuration::from_secs(300)); // 5 minutes
-          
-          loop {
-              interval.tick().await;
-              if let Err(e) = Self::check_and_schedule_all_notifications(&app_handle_clone, user_logged_in).await {
-                  eprintln!("Error checking notifications: {}", e);
-              }
-          }
-      });
-  }
+
+  pub async fn start(&mut self, app_handle: AppHandle, user_logged_in: bool) {
+    println!("Starting notification service...");
+
+    // Schedule notifications for existing events immediately
+    if let Err(e) = Self::check_and_schedule_all_notifications(&app_handle, user_logged_in).await {
+        eprintln!("Error scheduling existing notifications: {}", e);
+    }
+
+    // Start periodic checking
+    let app_handle_clone = app_handle.clone();
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(TokioDuration::from_secs(300)); // 5 minutes
+        
+        loop {
+            interval.tick().await;
+            if let Err(e) = Self::check_and_schedule_all_notifications(&app_handle_clone, user_logged_in).await {
+                eprintln!("Error checking notifications: {}", e);
+            }
+        }
+    });
+}
 
   pub async fn schedule_event_notifications(&mut self, event: &CalendarEvent) -> Result<(), Box<dyn std::error::Error>> {
       println!("Scheduling notifications for event: {} (alarm: {})", event.description, event.alarm);
@@ -196,7 +207,7 @@ impl NotificationService {
             println!("Found {} events with alarms in next 24 hours", events.len());
 
             // Access the notification service and schedule each event
-            if let Some(service_state) = app_handle.try_state::<Arc<Mutex<Option<NotificationService>>>>() {
+            if let Some(service_state) = app_handle.try_state::<Arc<TokioMutex<Option<NotificationService>>>>() {
                 let mut service_guard = service_state.lock().await;
                 
                 if let Some(service) = service_guard.as_mut() {
