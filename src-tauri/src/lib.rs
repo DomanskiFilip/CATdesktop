@@ -165,9 +165,10 @@ async fn start_auto_login(app_handle: AppHandle) -> Result<bool, String> {
 
 // Start notification service
 async fn start_notification_service(app_handle: AppHandle, user_logged_in: bool) -> Result<(), String> {
+    println!("Attempting to lock notification service mutex...");
     let notification_state = app_handle.state::<NotificationServiceState>();
     let mut service_guard = notification_state.lock().await;
-
+    println!("Notification service mutex locked successfully");
     // Stop existing service if it exists
     if let Some(mut existing_service) = service_guard.take() {
         println!("Stopping existing notification service...");

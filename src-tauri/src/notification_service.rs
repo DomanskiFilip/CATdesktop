@@ -28,7 +28,7 @@ impl NotificationService {
     }
 
 
-  pub async fn start(&mut self, app_handle: AppHandle, user_logged_in: bool) {
+  pub async fn start(&self, app_handle: AppHandle, user_logged_in: bool) {
     println!("Starting notification service...");
 
     // Schedule notifications for existing events immediately
@@ -208,8 +208,18 @@ impl NotificationService {
 
             // Access the notification service and schedule each event
             if let Some(service_state) = app_handle.try_state::<Arc<TokioMutex<Option<NotificationService>>>>() {
-                let mut service_guard = service_state.lock().await;
-                
+              // Use a timeout to avoid indefinite waiting
+              let lock_future = service_state.lock();
+              let mut service_guard = match tokio::time::timeout(std::time::Duration::from_secs(5), lock_future).await {
+                  Ok(guard) => guard,
+                  Err(_) => {
+                      println!("Timed out waiting for notification service lock - possible deadlock");
+                      return Err("Timed out waiting for notification service lock".to_string());
+                  }
+              };
+              
+              println!("Service guard locked, checking if service exists");
+        
                 if let Some(service) = service_guard.as_mut() {
                     println!("Got notification service, starting to process {} events", events.len());
                     for (index, event) in events.iter().enumerate() {
