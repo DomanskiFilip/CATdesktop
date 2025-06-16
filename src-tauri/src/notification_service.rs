@@ -19,7 +19,7 @@ impl NotificationService {
       }
   }
 
-  // stop service and cancel all scheduled tasks
+  // Stop service and cancel all scheduled tasks //
   pub async fn stop(&mut self) {
         println!("Stopping notification service and cancelling all scheduled tasks...");
         for (task_id, task) in self.scheduled_tasks.drain() {
@@ -28,7 +28,7 @@ impl NotificationService {
         }
     }
 
-  // Start the notification service
+  // Start the notification service //
   pub async fn start(&self, app_handle: AppHandle, user_logged_in: bool) {
     println!("Starting notification service...");
 
@@ -53,7 +53,7 @@ impl NotificationService {
 }
 
 
-  // helper for schedule_event_notifications -> Remove notifications for an event
+  // Helper function for schedule_event_notifications -> Remove notifications for an event //
   pub async fn remove_event_notifications(&mut self, event_id: &str) -> Result<(), Box<dyn std::error::Error>> {
       
       // Cancel warning task
@@ -69,7 +69,7 @@ impl NotificationService {
       Ok(())
   }
 
-  // helper for check_and_schedule_all_notifications -> schedule notifications for a single event
+  // Helper function for check_and_schedule_all_notifications -> schedule notifications for a single event //
   pub async fn schedule_event_notifications(&mut self, event: &CalendarEvent) -> Result<(), Box<dyn std::error::Error>> {
       println!("Scheduling notifications for event: {} (alarm: {})", event.description, event.alarm);
       
@@ -163,7 +163,7 @@ impl NotificationService {
   }
 
 
-  // Check database and schedule notifications for all upcoming events
+  // Function to check database and schedule notifications for all upcoming events //
   pub async fn check_and_schedule_all_notifications(app_handle: &AppHandle, user_logged_in: bool) -> Result<(), String> {
       println!("Checking for upcoming events to schedule notifications...");
 

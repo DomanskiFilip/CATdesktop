@@ -206,10 +206,7 @@ async fn start_notification_service(app_handle: AppHandle, user_logged_in: bool)
 
 // Schedule event notification command
 #[tauri::command]
-async fn schedule_event_notification(
-    event_json: String,
-    app_handle: AppHandle,
-) -> Result<String, String> {
+async fn schedule_event_notification( event_json: String, app_handle: AppHandle) -> Result<String, String> {
     let event: crate::database_utils::CalendarEvent = serde_json::from_str(&event_json)
         .map_err(|e| format!("Failed to parse event: {}", e))?;
     

@@ -15,7 +15,7 @@ struct Body {
     message: String,
 }
 
-// Function to register a user using AWS Lambda
+// Function to register a user using AWS Lambda //
 pub async fn register_user_lambda(email: String, password: String) -> Result<String, String> {
     let config = AppConfig::new()?;
     

@@ -7,7 +7,7 @@ use tauri::{AppHandle, Manager};
 use crate::encription_key::get_encryption_key;
 
 
-// Function to get platform-agnostic path for storing tokens
+// Helper function -> get platform-agnostic path for storing tokens //
 fn get_tokens_path(app_handle: &AppHandle) -> Result<std::path::PathBuf, String> {
     let path = app_handle.path().app_data_dir()
         .map_err(|e| format!("Failed to get app data directory: {}", e))?;
@@ -25,6 +25,7 @@ fn generate_nonce() -> [u8; 12] {
     nonce
 }
 
+// Function to save access and refresh tokens to a file with encryption //
 pub fn save_tokens_to_file(app_handle: &AppHandle, access_token: &str, refresh_token: &str) -> Result<(), String> {
     // Generate a key from an environment variable or other secure source
     let key = get_encryption_key()?;
@@ -58,6 +59,7 @@ pub fn save_tokens_to_file(app_handle: &AppHandle, access_token: &str, refresh_t
     Ok(())
 }
 
+// Function to read access and refresh tokens from a file with decryption //
 pub fn read_tokens_from_file(app_handle: &AppHandle) -> Result<(String, String), String> {
     // Retrieve and decode the encryption key
     let key = get_encryption_key()?;
@@ -91,7 +93,7 @@ pub fn read_tokens_from_file(app_handle: &AppHandle) -> Result<(String, String),
     ))
 }
 
-// Function to clear tokens from the file
+// Function to clear tokens from the file //
 pub fn clear_tokens(app_handle: &AppHandle) -> Result<(), String> {
     let file_path = get_tokens_path(app_handle)?;
     if file_path.exists() {

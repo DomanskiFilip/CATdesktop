@@ -22,7 +22,7 @@ impl DbSyncService {
         })
     }
 
-    /// Starts the Db sync service
+    /// Starts the Db sync service //
     pub async fn start(&self, app_handle: &AppHandle, user_logged_in: bool) {
         println!("Starting Db sync service...");
         
@@ -42,6 +42,7 @@ impl DbSyncService {
         }
     }
 
+    // Method to sync events to DynamoDB (upload changes) //
     async fn sync_events(&self, app_handle: &AppHandle) -> Result<(), String> {
         let conn = get_db_connection(app_handle)
             .map_err(|e| format!("Database connection failed: {}", e))?;
@@ -86,6 +87,7 @@ impl DbSyncService {
         Ok(())
     }
 
+    // Helper function -> send events to DynamoDB //
     async fn send_to_dynamodb(&self, events: &[CalendarEvent]) -> Result<(), String> {
         let device_info = get_device_info();
         
@@ -139,7 +141,7 @@ impl DbSyncService {
         Ok(())
     }
 
-    // Method to sync from DynamoDB to local (download changes)
+    // function to sync from DynamoDB to local (download changes) //
     pub async fn sync_from_dynamodb(&self, app_handle: &AppHandle) -> Result<(), String> {
         let device_info = get_device_info();
         let sync_url = format!("{}/get-events", self.config.lambda_base_url);

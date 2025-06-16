@@ -17,7 +17,7 @@ struct Body {
     message: Option<String>,
 }
 
-// Function to handle auto-login using AWS Lambda
+// Function to handle auto-login using AWS Lambda //
 pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
     println!("Starting auto-login process...");
     let config = AppConfig::new()?;

@@ -6,6 +6,7 @@ use aes_gcm::aead::Aead;
 use aes_gcm::KeyInit; 
 use rand::RngCore;
 
+// Helper function -> to get the user file path //
 fn get_user_file_path(app_handle: &AppHandle) -> Result<PathBuf, String> {
     let app_dir = app_handle.path().app_data_dir()
         .map_err(|e| format!("Failed to get app data directory: {}", e))?;
@@ -16,6 +17,7 @@ fn get_user_file_path(app_handle: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_dir.join("user.enc"))
 }
 
+// Function to save the current user ID to a file with encryption //
 pub fn save_current_user_id(app_handle: &AppHandle, user_id: &str) -> Result<(), String> {
     // Get encryption key
     let key = crate::encription_key::get_encryption_key()?;
@@ -45,6 +47,7 @@ pub fn save_current_user_id(app_handle: &AppHandle, user_id: &str) -> Result<(),
     Ok(())
 }
 
+// Function to get the current user ID from the encrypted file //
 pub fn get_current_user_id(app_handle: &AppHandle) -> Result<String, String> {
     let file_path = get_user_file_path(app_handle)?;
     
@@ -81,6 +84,7 @@ pub fn get_current_user_id(app_handle: &AppHandle) -> Result<String, String> {
     Ok(user_id)
 }
 
+// Function to clear the current user ID by removing the encrypted file //
 pub fn clear_current_user_id(app_handle: &AppHandle) -> Result<(), String> {
     let file_path = get_user_file_path(app_handle)?;
     

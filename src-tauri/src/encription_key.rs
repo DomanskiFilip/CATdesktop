@@ -8,13 +8,14 @@ use tauri::{ AppHandle, Manager };
 use chacha20poly1305::{ ChaCha20Poly1305, Key, Nonce };
 use chacha20poly1305::aead::{ Aead, KeyInit };
 
+// Helper function -> generate a random 32-byte encryption key
 fn generate_encryption_key() -> [u8; 32] {
     let mut key = [0u8; 32];
     rand::thread_rng().fill(&mut key);
     key
 }
 
-// application wide encription key
+// Application wide encription key //
 pub fn initialize_encryption_key() -> Result<(), String> {
     let env_path = Path::new(".env");
 
@@ -49,7 +50,7 @@ pub fn initialize_encryption_key() -> Result<(), String> {
     Ok(())
 }
 
-// get application wide encription key
+// Get application wide encription key //
 pub fn get_encryption_key() -> Result<[u8; 32], String> {
   // Attempt to retrieve the encryption key from the environment
     if let Err(_) = env::var("ENCRYPTION_KEY") {
@@ -76,36 +77,7 @@ pub fn get_encryption_key() -> Result<[u8; 32], String> {
     Ok(key)
 }
 
-// Create a user-specific encryption key
-pub fn create_user_encryption_key(app_handle: &AppHandle, email: &str) -> Result<[u8; 32], String> {
-    let app_dir = app_handle.path().app_data_dir()
-        .map_err(|e| format!("Failed to get app data directory: {}", e))?;
-    
-    fs::create_dir_all(&app_dir)
-        .map_err(|e| format!("Failed to create app data directory: {}", e))?;
-    
-    // Generate key filename based on email
-    let key_filename = format!("{}_ENC_KEY", email);
-    let key_path = app_dir.join(&key_filename);
-    
-    // Check if key already exists
-    if key_path.exists() {
-        // Load existing key
-        return load_user_encryption_key(app_handle, email);
-    }
-    
-    // Generate a new encryption key
-    let key = generate_encryption_key();
-    let key_base64 = general_purpose::STANDARD.encode(key);
-    
-    // Save encrypted key
-    fs::write(&key_path, &key_base64)
-        .map_err(|e| format!("Failed to write user encryption key: {}", e))?;
-    
-    Ok(key)
-}
-
-// Load a user-specific encryption key
+// Helper function -> Load a user-specific encryption key //
 pub fn load_user_encryption_key(app_handle: &AppHandle, email: &str) -> Result<[u8; 32], String> {
     let app_dir = app_handle.path().app_data_dir()
         .map_err(|e| format!("Failed to get app data directory: {}", e))?;
@@ -138,8 +110,37 @@ pub fn load_user_encryption_key(app_handle: &AppHandle, email: &str) -> Result<[
     Ok(key)
 }
 
+// Function to create a user-specific encryption key //
+pub fn create_user_encryption_key(app_handle: &AppHandle, email: &str) -> Result<[u8; 32], String> {
+    let app_dir = app_handle.path().app_data_dir()
+        .map_err(|e| format!("Failed to get app data directory: {}", e))?;
+    
+    fs::create_dir_all(&app_dir)
+        .map_err(|e| format!("Failed to create app data directory: {}", e))?;
+    
+    // Generate key filename based on email
+    let key_filename = format!("{}_ENC_KEY", email);
+    let key_path = app_dir.join(&key_filename);
+    
+    // Check if key already exists
+    if key_path.exists() {
+        // Load existing key
+        return load_user_encryption_key(app_handle, email);
+    }
+    
+    // Generate a new encryption key
+    let key = generate_encryption_key();
+    let key_base64 = general_purpose::STANDARD.encode(key);
+    
+    // Save encrypted key
+    fs::write(&key_path, &key_base64)
+        .map_err(|e| format!("Failed to write user encryption key: {}", e))?;
+    
+    Ok(key)
+}
 
-// Utility function to encrypt data with a user's key
+
+// Function to encrypt data with a user's key //
 pub fn encrypt_user_data(app_handle: &AppHandle, email: &str, data: &[u8]) -> Result<Vec<u8>, String> {
     // Get the user's encryption key
     let encryption_key = load_user_encryption_key(app_handle, email)?;
@@ -170,7 +171,7 @@ pub fn encrypt_user_data(app_handle: &AppHandle, email: &str, data: &[u8]) -> Re
     Ok(encrypted_data)
 }
 
-// Utility function to decrypt data with a user's key
+// Function to decrypt data with a user's key //
 pub fn decrypt_user_data(app_handle: &AppHandle, email: &str, encrypted_data: &[u8]) -> Result<Vec<u8>, String> {
     if encrypted_data.len() < 12 {
         return Err("Encrypted data is too short".to_string());

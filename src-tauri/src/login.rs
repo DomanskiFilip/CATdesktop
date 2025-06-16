@@ -18,7 +18,7 @@ struct Body {
     refresh_token: String,
 }
 
-// Function to log in a user using AWS Lambda
+// Function to log in a user using AWS Lambda //
 pub async fn login_user_lambda(app_handle: &AppHandle, email: String, password: String) -> Result<String, String> {
     let config = AppConfig::new()?;
     let device_info = get_device_info();

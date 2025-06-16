@@ -10,7 +10,7 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn new() -> Result<Self, String> {
-        dotenv().ok(); // Load .env file once
+        dotenv().ok();
         
         let api_key = env::var("API_KEY").map_err(|e| e.to_string())?;
         let lambda_base_url = env::var("LAMBDA_BASE_URL")

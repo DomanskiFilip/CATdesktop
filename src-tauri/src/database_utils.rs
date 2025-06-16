@@ -33,7 +33,7 @@ impl CalendarEvent {
     }
 }
 
-// function to get platform-agnostic app data dir
+// Helper function -> to get platform-agnostic app data dir //
 fn get_app_data_dir(app_handle: &AppHandle) -> Result<PathBuf, SqliteError> {
     app_handle.path().app_data_dir()
         .map_err(|e| SqliteError::SqliteFailure(
@@ -42,7 +42,16 @@ fn get_app_data_dir(app_handle: &AppHandle) -> Result<PathBuf, SqliteError> {
         ))
 }
 
-// function to initialize the local database
+// Helper function -> get database connection //
+pub fn get_db_connection(app_handle: &AppHandle) -> Result<Connection, SqliteError> {
+    let app_dir = get_app_data_dir(app_handle)?;
+    let db_path = app_dir.join("calendar.db");
+    
+    Connection::open(&db_path)
+        .map_err(|e| e.into())
+}
+
+// Function to initialize the local database //
 pub fn init_db(app_handle: &AppHandle) -> Result<(), SqliteError> {
     let app_dir = get_app_data_dir(app_handle)?;
     
@@ -72,16 +81,7 @@ pub fn init_db(app_handle: &AppHandle) -> Result<(), SqliteError> {
     Ok(())
 }
 
-// function to get database connection
-pub fn get_db_connection(app_handle: &AppHandle) -> Result<Connection, SqliteError> {
-    let app_dir = get_app_data_dir(app_handle)?;
-    let db_path = app_dir.join("calendar.db");
-    
-    Connection::open(&db_path)
-        .map_err(|e| e.into())
-}
-
-// function to save events
+// Function to save events //
 pub fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), String> {
     let mut event = CalendarEvent::from_json(&event_json)?;
 
@@ -133,7 +133,7 @@ pub fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), Stri
     Ok(())
 }
 
-// function to get all events
+// Function to get all events //
 pub fn get_events(app_handle: &AppHandle) -> Result<Vec<String>, SqliteError> {
   let conn = match get_db_connection(app_handle) {
     Ok(conn) => conn,
@@ -223,7 +223,7 @@ pub fn get_events(app_handle: &AppHandle) -> Result<Vec<String>, SqliteError> {
     Ok(events_json)
 }
 
-// function to delete an event
+// Function to delete an event //
 pub fn delete_event(app_handle: &AppHandle, id: String) -> Result<(), SqliteError> {
     let conn = get_db_connection(app_handle)?;
 
@@ -240,7 +240,7 @@ pub fn delete_event(app_handle: &AppHandle, id: String) -> Result<(), SqliteErro
     Ok(())
 }
 
-// function to clean old events
+// Function to clean old events //
 pub fn clean_old_events(app_handle: &AppHandle) -> Result<(), SqliteError> {
     let conn = get_db_connection(app_handle)?;
     let now = chrono::Utc::now();
