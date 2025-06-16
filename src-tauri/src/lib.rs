@@ -35,8 +35,19 @@ async fn check_login_status(app_handle: tauri::AppHandle) -> Result<bool, String
 // login user command
 #[tauri::command]
 async fn login_user(app_handle: tauri::AppHandle, email: String, password: String) -> Result<String, String> {
-    crate::login::login_user_lambda(&app_handle, email, password).await
-}
+    // Attempt login
+    let login_result = crate::login::login_user_lambda(&app_handle, email, password).await?;
+
+    // If login was successful, start notification service
+    if login_result.contains("\"status\":\"ok\"") {
+        if let Err(e) = start_notification_service(app_handle, true).await {
+            eprintln!("Failed to start notification service after login: {}", e);
+        } else {
+          eprintln!("Notification service started successfully after login.");
+        }
+    }
+    Ok(login_result)
+  }
 
 // register user command
 #[tauri::command]

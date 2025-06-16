@@ -136,7 +136,7 @@ impl SyncService {
     }
 
     // Method to sync from DynamoDB to local (download changes)
-    pub async fn sync_from_remote(&self, app_handle: &AppHandle) -> Result<(), String> {
+    pub async fn sync_from_dynamodb(&self, app_handle: &AppHandle) -> Result<(), String> {
         let device_info = get_device_info();
         let sync_url = format!("{}/get-events", self.config.lambda_base_url);
         
