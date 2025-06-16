@@ -58,7 +58,17 @@ async fn register_user(email: String, password: String) -> Result<String, String
 // logout user command
 #[tauri::command]
 async fn logout_user(app_handle: tauri::AppHandle) -> Result<bool, String> {
-    crate::token_utils::clear_tokens(&app_handle).map(|_| true)
+    // Clear tokens first
+    crate::token_utils::clear_tokens(&app_handle)?;
+    
+    // Stop notification service
+    let notification_state = app_handle.state::<NotificationServiceState>();
+    let mut service_guard = notification_state.lock().await;
+    
+    // Clear the service to stop notifications
+    *service_guard = None;
+    
+    Ok(true)
 }
 
 // save and load theme commands

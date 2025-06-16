@@ -10,20 +10,24 @@ use tokio::sync::Mutex;
 
 pub struct NotificationService {
   scheduled_tasks: HashMap<String, JoinHandle<()>>,
+  user_logged_in: bool,
 }
 
 impl NotificationService {
   pub fn new() -> Self {
       Self {
           scheduled_tasks: HashMap::new(),
+          user_logged_in: false,
       }
   }
 
   pub async fn start(&mut self, app_handle: AppHandle, user_logged_in: bool) {
       println!("Starting notification service...");
-  
+      self.user_logged_in = user_logged_in;
+
       // Start periodic checking
       let app_handle_clone = app_handle.clone();
+      let user_logged_in = self.user_logged_in; 
       tokio::spawn(async move {
           let mut interval = tokio::time::interval(TokioDuration::from_secs(300)); // 5 minutes
           
