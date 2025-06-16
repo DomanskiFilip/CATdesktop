@@ -6,12 +6,12 @@ use tauri::AppHandle;
 use reqwest::Client;
 use serde_json::{json, Value};
 
-pub struct SyncService {
+pub struct DbSyncService {
     config: AppConfig,
     client: Client,
 }
 
-impl SyncService {
+impl DbSyncService {
     pub fn new() -> Result<Self, String> {
         let config = AppConfig::new()?;
         let client = Client::new();
@@ -22,17 +22,21 @@ impl SyncService {
         })
     }
 
-    pub async fn start_sync_service(&self, app_handle: &AppHandle) {
+    /// Starts the Db sync service
+    pub async fn start(&self, app_handle: &AppHandle, user_logged_in: bool) {
+        println!("Starting Db sync service...");
+        
         // Perform initial sync on app start
-        if let Err(e) = self.sync_events(app_handle).await {
+        if let Err(e) = self.sync_events(app_handle, user_logged_in).await {
             eprintln!("Initial sync failed: {}", e);
         }
 
+        // Start periodic checking
         let mut interval = time::interval(Duration::from_secs(300)); // Sync every 5 minutes
         
         loop {
             interval.tick().await;
-            if let Err(e) = self.sync_events(app_handle).await {
+            if let Err(e) = self.sync_events(app_handle, user_logged_in).await {
                 eprintln!("Sync failed: {}", e);
             }
         }

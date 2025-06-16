@@ -1,15 +1,17 @@
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub mod window;
-mod oauth;
 mod api_utils;
-mod login;
-mod register;
 mod token_utils;
 mod theme_utils;
+mod database_utils;
+mod user_utils;
+mod oauth;
+mod login;
+mod register;
+mod notification_service;
 mod encription_key;
 mod auto_login;
-mod database_utils;
-mod notification_service;
+
 
 use tauri::{AppHandle, Manager, Emitter};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
@@ -36,10 +38,24 @@ async fn check_login_status(app_handle: tauri::AppHandle) -> Result<bool, String
 #[tauri::command]
 async fn login_user(app_handle: tauri::AppHandle, email: String, password: String) -> Result<String, String> {
     // Attempt login
-    let login_result = crate::login::login_user_lambda(&app_handle, email, password).await?;
+    let login_result = crate::login::login_user_lambda(&app_handle, email.clone(), password).await?;
 
-    // If login was successful, start notification service asynchronously
+    // If login was successful, store the email as user ID and start notification service
     if login_result.contains("\"status\":\"ok\"") {
+        // Store the email as user ID
+        user_utils::save_current_user_id(&app_handle, &email)?;
+
+        // Create or load the user's encryption key
+        match crate::encription_key::create_user_encryption_key(&app_handle, &email) {
+            Ok(_) => println!("User encryption key created/loaded successfully"),
+            Err(e) => eprintln!("Failed to create/load user encryption key: {}", e),
+        }
+
+        // initialize database
+        if let Err(e) = database_utils::init_db(&app_handle) {
+            eprintln!("Failed to initialize database after login: {}", e);
+        }
+        
         let app_handle_clone = app_handle.clone();
         tokio::spawn(async move {
             if let Err(e) = start_notification_service(app_handle_clone, true).await {
@@ -52,6 +68,7 @@ async fn login_user(app_handle: tauri::AppHandle, email: String, password: Strin
     
     Ok(login_result)
 }
+
 // register user command
 #[tauri::command]
 async fn register_user(email: String, password: String) -> Result<String, String> {
@@ -64,6 +81,9 @@ async fn logout_user(app_handle: tauri::AppHandle) -> Result<bool, String> {
     // Clear tokens first
     crate::token_utils::clear_tokens(&app_handle)?;
     
+    // Clear current user ID
+    user_utils::clear_current_user_id(&app_handle)?;
+
     // Stop notification service asynchronously
     let app_handle_clone = app_handle.clone();
     tokio::spawn(async move {

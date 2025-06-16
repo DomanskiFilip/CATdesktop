@@ -5,11 +5,14 @@ use tauri::{AppHandle, Manager};
 use std::fs;
 use chrono::{DateTime, Utc};
 use rusqlite::Error as SqliteError;
-
+use crate::user_utils::get_current_user_id;
+use crate::encription_key::{encrypt_user_data, decrypt_user_data};
+use base64::{ engine::general_purpose, Engine };
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CalendarEvent {
     pub id: String,
+    pub user_id: String, 
     pub description: String,
     pub time: DateTime<Utc>,
     pub alarm: bool,
@@ -57,6 +60,7 @@ pub fn init_db(app_handle: &AppHandle) -> Result<(), SqliteError> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS events (
             id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
             description TEXT,
             time TEXT NOT NULL,
             alarm BOOLEAN DEFAULT FALSE,
@@ -79,7 +83,32 @@ pub fn get_db_connection(app_handle: &AppHandle) -> Result<Connection, SqliteErr
 
 // function to save events
 pub fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), String> {
-    let event = CalendarEvent::from_json(&event_json)?;
+    let mut event = CalendarEvent::from_json(&event_json)?;
+
+    // Get current user ID and assign to event
+    let user_id = match get_current_user_id(app_handle) {
+        Ok(id) => id,
+        Err(e) => return Err(format!("Failed to get current user: {}", e))
+    };
+
+    event.user_id = user_id.clone();
+
+    // Encrypt the event description before saving
+    let encrypted_description = if !event.description.is_empty() {
+        let encryption_result = encrypt_user_data(
+            app_handle, 
+            &user_id, 
+            event.description.as_bytes()
+        );
+        
+        match encryption_result {
+            Ok(encrypted) => general_purpose::STANDARD.encode(encrypted),
+            Err(e) => return Err(format!("Failed to encrypt event data: {}", e))
+        }
+    } else {
+        String::new()
+    };
+
     let mut conn = get_db_connection(app_handle)
         .map_err(|e| format!("Connection error: {}", e.to_string()))?;
 
@@ -87,11 +116,12 @@ pub fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), Stri
         .map_err(|e| format!("Transaction error: {}", e.to_string()))?;
 
     tx.execute(
-        "INSERT OR REPLACE INTO events (id, description, time, alarm, synced, deleted)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT OR REPLACE INTO events (id, user_id, description, time, alarm, synced, deleted)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         (
             &event.id,
-            &event.description,
+            &event.user_id,
+            &encrypted_description,
             &event.time_to_string(),
             &event.alarm,
             false,
@@ -105,30 +135,80 @@ pub fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), Stri
 
 // function to get all events
 pub fn get_events(app_handle: &AppHandle) -> Result<Vec<String>, SqliteError> {
-    let conn = get_db_connection(app_handle)?;
-    let mut stmt = conn.prepare(
-        "SELECT id, description, time, alarm, synced, deleted 
+  let conn = match get_db_connection(app_handle) {
+    Ok(conn) => conn,
+    Err(e) => {
+      eprintln!("Database connection error: {}", e);
+      return Ok(Vec::new()); // Return empty list on connection error
+    }
+  };
+
+  // Get current user ID
+    let user_id = match get_current_user_id(app_handle) {
+        Ok(id) => id,
+        Err(_) => return Ok(Vec::new()),  // Return empty list if no user is logged in
+    };
+  
+    let mut query = conn.prepare(
+        "SELECT id, user_id, description, time, alarm, synced, deleted 
          FROM events 
          WHERE deleted = FALSE
+         AND user_id = ?1
          ORDER BY time ASC"
     )?;
 
-    let events = stmt.query_map([], |row| {
+    let rows = query.query_map([&user_id], |row| {
         Ok(CalendarEvent {
             id: row.get(0)?,
-            description: row.get(1)?,
-            time: DateTime::parse_from_rfc3339(&row.get::<_, String>(2)?)
+            user_id: row.get(1)?,
+            description: row.get(2)?,
+            time: DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
                 .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
-                    2,
+                    3,
                     rusqlite::types::Type::Text,
                     Box::new(e),
                 ))?.with_timezone(&Utc),
-            alarm: row.get(3)?,
-            synced: row.get(4)?,
-            deleted: row.get(5)?
+            alarm: row.get(4)?,
+            synced: row.get(5)?,
+            deleted: row.get(6)?
         })
-    })?
-    .collect::<Result<Vec<_>, _>>()?;
+    })?;
+
+    let mut events = Vec::new();
+    for row_result in rows {
+        // Get the event from the result
+        let mut event = row_result?;
+        
+        // Skip deleted events (if this check is needed)
+        if event.deleted {
+            continue;
+        }
+        
+        // Decrypt the description
+        if !event.description.is_empty() {
+            let decoded = match general_purpose::STANDARD.decode(&event.description) {
+                Ok(decoded) => decoded,
+                Err(_) => {
+                    // If base64 decoding fails, assume it's not encrypted (legacy data)
+                    event.description.as_bytes().to_vec()
+                }
+            };
+            
+            match decrypt_user_data(app_handle, &event.user_id, &decoded) {
+                Ok(decrypted) => {
+                    if let Ok(s) = String::from_utf8(decrypted) {
+                        event.description = s;
+                    }
+                },
+                Err(e) => {
+                    // If decryption fails, log the error but keep the encrypted data
+                    eprintln!("Failed to decrypt event data: {}", e);
+                }
+            }
+        }
+
+        events.push(event);
+    }
 
     // Convert events to JSON strings
     let events_json: Vec<String> = events.into_iter()
@@ -146,9 +226,16 @@ pub fn get_events(app_handle: &AppHandle) -> Result<Vec<String>, SqliteError> {
 // function to delete an event
 pub fn delete_event(app_handle: &AppHandle, id: String) -> Result<(), SqliteError> {
     let conn = get_db_connection(app_handle)?;
+
+    // Get current user ID
+    let user_id = match get_current_user_id(app_handle) {
+        Ok(id) => id,
+        Err(_) => return Ok(()),
+    };
+
     conn.execute(
-        "UPDATE events SET deleted = TRUE WHERE id = ?",
-        [id]
+        "UPDATE events SET deleted = TRUE WHERE id = ? AND user_id = ?",
+        [id, user_id]
     )?;
     Ok(())
 }
@@ -158,9 +245,15 @@ pub fn clean_old_events(app_handle: &AppHandle) -> Result<(), SqliteError> {
     let conn = get_db_connection(app_handle)?;
     let now = chrono::Utc::now();
     
+    // Get current user ID
+    let user_id = match get_current_user_id(app_handle) {
+        Ok(id) => id,
+        Err(_) => return Ok(()),
+    };
+
     conn.execute(
-        "UPDATE events SET deleted = TRUE WHERE time < ?",
-        [now.to_rfc3339()]
+        "UPDATE events SET deleted = TRUE WHERE time < ? AND user_id = ?",
+        [now.to_rfc3339(), user_id]
     )?;
     Ok(())
 }

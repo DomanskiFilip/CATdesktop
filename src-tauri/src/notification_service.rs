@@ -19,6 +19,7 @@ impl NotificationService {
       }
   }
 
+  // stop service and cancel all scheduled tasks
   pub async fn stop(&mut self) {
         println!("Stopping notification service and cancelling all scheduled tasks...");
         for (task_id, task) in self.scheduled_tasks.drain() {
@@ -27,7 +28,7 @@ impl NotificationService {
         }
     }
 
-
+  // Start the notification service
   pub async fn start(&self, app_handle: AppHandle, user_logged_in: bool) {
     println!("Starting notification service...");
 
@@ -51,6 +52,24 @@ impl NotificationService {
     });
 }
 
+
+  // helper for schedule_event_notifications -> Remove notifications for an event
+  pub async fn remove_event_notifications(&mut self, event_id: &str) -> Result<(), Box<dyn std::error::Error>> {
+      
+      // Cancel warning task
+      if let Some(task) = self.scheduled_tasks.remove(&format!("{}_warning", event_id)) {
+          task.abort();
+      }
+      
+      // Cancel event task
+      if let Some(task) = self.scheduled_tasks.remove(&format!("{}_event", event_id)) {
+          task.abort();
+      }
+      
+      Ok(())
+  }
+
+  // helper for check_and_schedule_all_notifications -> schedule notifications for a single event
   pub async fn schedule_event_notifications(&mut self, event: &CalendarEvent) -> Result<(), Box<dyn std::error::Error>> {
       println!("Scheduling notifications for event: {} (alarm: {})", event.description, event.alarm);
       
@@ -143,21 +162,6 @@ impl NotificationService {
       Ok(())
   }
 
-  // Remove notifications for an event
-  pub async fn remove_event_notifications(&mut self, event_id: &str) -> Result<(), Box<dyn std::error::Error>> {
-      
-      // Cancel warning task
-      if let Some(task) = self.scheduled_tasks.remove(&format!("{}_warning", event_id)) {
-          task.abort();
-      }
-      
-      // Cancel event task
-      if let Some(task) = self.scheduled_tasks.remove(&format!("{}_event", event_id)) {
-          task.abort();
-      }
-      
-      Ok(())
-  }
 
   // Check database and schedule notifications for all upcoming events
   pub async fn check_and_schedule_all_notifications(app_handle: &AppHandle, user_logged_in: bool) -> Result<(), String> {
@@ -166,6 +170,16 @@ impl NotificationService {
       // Verify user is actually logged in before proceeding
         if user_logged_in {
             println!("User verified as logged in, proceeding with notifications...");
+            
+            // Get user ID
+            let user_id = match crate::user_utils::get_current_user_id(app_handle) {
+                Ok(id) => id,
+                Err(e) => {
+                    println!("Failed to get user ID: {}", e);
+                    return Ok(());
+                }
+            };
+            
             // Get events using a blocking task to avoid Send issues
             let events = {
                 let app_handle_clone = app_handle.clone();
@@ -176,25 +190,26 @@ impl NotificationService {
                     let now = Utc::now();
                     let next_24_hours = now + Duration::hours(24);
                     
-                    let mut stmt = conn.prepare(
-                        "SELECT id, description, time, alarm, synced, deleted 
+                    let mut query = conn.prepare(
+                        "SELECT id, user_id, description, time, alarm, synced, deleted 
                         FROM events 
-                        WHERE deleted = FALSE AND alarm = TRUE AND time > ?1 AND time <= ?2"
+                        WHERE deleted = FALSE AND alarm = TRUE AND time > ?1 AND time <= ?2 AND user_id = ?3"
                     ).map_err(|e| e.to_string())?;
 
-                    let events: Vec<CalendarEvent> = stmt.query_map([now.to_rfc3339(), next_24_hours.to_rfc3339()], |row| {
+                    let events: Vec<CalendarEvent> = query.query_map([&now.to_rfc3339(), &next_24_hours.to_rfc3339(), &user_id], |row| {
                         Ok(CalendarEvent {
                             id: row.get(0)?,
-                            description: row.get(1)?,
-                            time: DateTime::parse_from_rfc3339(&row.get::<_, String>(2)?)
+                            user_id: row.get(1)?,
+                            description: row.get(2)?,
+                            time: DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
                                 .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
                                     2,
                                     rusqlite::types::Type::Text,
                                     Box::new(e),
                                 ))?.with_timezone(&Utc),
-                            alarm: row.get(3)?,
-                            synced: row.get(4)?,
-                            deleted: row.get(5)?
+                            alarm: row.get(4)?,
+                            synced: row.get(5)?,
+                            deleted: row.get(6)?
                         })
                     }).map_err(|e| e.to_string())?
                     .collect::<Result<Vec<_>, _>>()

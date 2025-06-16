@@ -56,6 +56,7 @@ interface CalendarDay {
 
 interface CalendarEvent {
   id: string;
+  user_id: string;
   description: string;
   time: string;
   alarm: boolean;
@@ -218,6 +219,7 @@ const updateEventDescription = (event: Event, hour: number) => {
     
     const newEvent = {
       id: crypto.randomUUID(),
+      user_id: "",
       description: value,
       time: eventDate.toISOString(),
       alarm: false,
@@ -339,6 +341,7 @@ const loadEvents = async () => {
     events.value = eventsData.map(eventStr => JSON.parse(eventStr))
   } catch (error) {
     console.error('Failed to load events:', error)
+    events.value = []
   }
 }
 
@@ -358,6 +361,7 @@ onBeforeUnmount(() => {
 // Initialize calendar on component mount
 onMounted(async () => {
   try {
+    renderCalendar()
     // Try auto-launch setup but don't fail if it doesn't work
     try {
       await invoke('setup_auto_launch')
@@ -365,9 +369,10 @@ onMounted(async () => {
       console.warn('Auto-launch setup failed:', autoLaunchError)
     }
     
+    // Clean and load events, but don't block the calendar UI
     await invoke('clean_old_events')
     await loadEvents()
-    renderCalendar()
+
     // Refresh events every minute
     setInterval(refreshEvents, refreshInterval)
     setInterval(async () => {

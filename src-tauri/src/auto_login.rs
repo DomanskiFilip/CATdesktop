@@ -57,6 +57,24 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
 
     match lambda_resp.status_code {
         200 => {
+            // Access token is valid, save email as user_id
+            let body_json: serde_json::Value = serde_json::from_str(&lambda_resp.body)
+                .map_err(|e| format!("Failed to parse response body: {}", e))?;
+      
+              // Extract email from the body
+              if let Some(email) = body_json["email"].as_str() {
+                  // Save the email as the user ID
+                  crate::user_utils::save_current_user_id(app_handle, email)?;
+
+                  // Load the user's encryption key for decryption
+                  match crate::encription_key::load_user_encryption_key(app_handle, email) {
+                      Ok(_) => println!("Successfully loaded user encryption key"),
+                      Err(e) => eprintln!("Failed to load user encryption key: {}", e),
+                  }
+              } else {
+                  return Err("Failed to extract email from response body".to_string());
+              }
+
             // User is logged in
             println!("User is logged in successfully.");
             Ok(true)
@@ -85,6 +103,17 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
                 let lambda_resp: LambdaResponse = serde_json::from_str(&text).map_err(|e| e.to_string())?;
 
                 if lambda_resp.status_code == 300 {
+                    let body_json: serde_json::Value = serde_json::from_str(&lambda_resp.body)
+                        .map_err(|e| format!("Failed to parse response body: {}", e))?;
+              
+                      // Extract email from the body
+                      if let Some(email) = body_json["email"].as_str() {
+                          // Save the email as the user ID
+                          crate::user_utils::save_current_user_id(app_handle, email)?;
+                      } else {
+                          return Err("Failed to extract email from response body".to_string());
+                      }
+
                     // Save new access token
                     let body: Body = serde_json::from_str(&lambda_resp.body).map_err(|e| e.to_string())?;
                     if let Some(new_access_token) = body.access_token {
