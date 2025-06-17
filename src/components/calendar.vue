@@ -185,6 +185,13 @@ const saveEvent = (event: CalendarEvent) => {
   const timeout = setTimeout(async () => {
     try {
       await invoke('save_event', { event: JSON.stringify(event) })
+      
+      try {
+        await invoke('trigger_sync')
+      } catch (error) {
+        console.warn('Failed to trigger sync:', error)
+      }
+      
       pendingSaves.delete(event.id)
     } catch (error) {
       console.error('Failed to save event:', error)
@@ -195,7 +202,7 @@ const saveEvent = (event: CalendarEvent) => {
 }
 
 // function to update and save event description
-const updateEventDescription = (event: Event, hour: number) => {
+const updateEventDescription = async (event: Event, hour: number) => {
   const value = (event.target as HTMLTextAreaElement).value
   const existingEvent = findEventAtHour(hour)
 
@@ -204,9 +211,21 @@ const updateEventDescription = (event: Event, hour: number) => {
       // Delete event if description is empty
       invoke('delete_event', { id: existingEvent.id })
       events.value = events.value.filter(e => e.id !== existingEvent.id)
+      // Trigger sync after update
+       try {
+        await invoke('trigger_sync')
+      } catch (error) {
+        console.warn('Failed to trigger sync after deletion:', error)
+      }
     } else {
       existingEvent.description = value
       saveEvent(existingEvent)
+      // Trigger sync after update
+      try {
+        await invoke('trigger_sync')
+      } catch (error) {
+        console.warn('Failed to trigger sync after update:', error)
+      }
     }
   } else if (value.trim()) {
     // Create new event if description is not empty
@@ -228,6 +247,12 @@ const updateEventDescription = (event: Event, hour: number) => {
     }
     events.value.push(newEvent)
     saveEvent(newEvent)
+    // Trigger sync after creation
+    try {
+      await invoke('trigger_sync')
+    } catch (error) {
+      console.warn('Failed to trigger sync after creation:', error)
+    }
   }
 }
 
@@ -243,7 +268,7 @@ const scheduleNativeNotification = async (event: CalendarEvent) => {
 }
 
 // Set alarm function
-const alarm = (hour: number) => {
+const alarm = async (hour: number) => {
   if (isInPast(hour)) return
 
   const existingEvent = findEventAtHour(hour)
@@ -256,6 +281,12 @@ const alarm = (hour: number) => {
     // Schedule native notifications through Tauri
     if (existingEvent.alarm) {
       scheduleNativeNotification(existingEvent)
+    }
+    // Trigger sync after alarm change
+    try {
+      await invoke('trigger_sync')
+    } catch (error) {
+      console.warn('Failed to trigger sync after alarm change:', error)
     }
   }
 }

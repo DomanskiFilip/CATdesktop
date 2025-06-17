@@ -119,8 +119,26 @@ pub fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), Stri
     let json_value: serde_json::Value = serde_json::from_str(&event_json)
       .map_err(|_| "Failed to re-parse event JSON".to_string())?;
     
-    // Use the values from JSON if present, otherwise default to false
-    let synced = json_value.get("synced").and_then(|v| v.as_bool()).unwrap_or(false);
+    // Check if this is an existing event being updated
+    let is_existing_event = {
+        let existing_event_query = tx.prepare("SELECT id FROM events WHERE id = ? AND user_id = ?");
+        match existing_event_query {
+            Ok(mut stmt) => {
+                stmt.exists([&event.id, &event.user_id]).unwrap_or(false)
+            },
+            Err(_) => false
+        }
+    };
+    
+    // Use the values from JSON if present, otherwise determine based on whether it's a new or existing event
+    let synced = if json_value.get("synced").is_some() {
+        // If synced is explicitly provided in JSON, use that value
+        json_value.get("synced").and_then(|v| v.as_bool()).unwrap_or(false)
+    } else {
+        // If not provided, mark as unsynced if it's an existing event being edited
+        !is_existing_event
+    };
+    
     let deleted = json_value.get("deleted").and_then(|v| v.as_bool()).unwrap_or(false);
 
     tx.execute(

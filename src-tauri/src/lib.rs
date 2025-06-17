@@ -39,42 +39,46 @@ async fn check_login_status(app_handle: tauri::AppHandle) -> Result<bool, String
 // login user command
 #[tauri::command]
 async fn login_user(app_handle: tauri::AppHandle, email: String, password: String) -> Result<String, String> {
+// Wrap in Arc for the async tasks
+    let app_handle_arc = Arc::new(app_handle);
+    
     // Attempt login
-    let login_result = crate::login::login_user_lambda(&app_handle, email.clone(), password).await?;
+    let login_result = crate::login::login_user_lambda(&app_handle_arc, email.clone(), password).await?;
 
     // If login was successful, store the email as user ID and start notification service
     if login_result.contains("\"status\":\"ok\"") {
         // Store the email as user ID
-        user_utils::save_current_user_id(&app_handle, &email)?;
+        user_utils::save_current_user_id(&app_handle_arc, &email)?;
 
         // Create or load the user's encryption key
-        match crate::encription_key::create_user_encryption_key(&app_handle, &email) {
+        match crate::encription_key::create_user_encryption_key(&app_handle_arc, &email) {
             Ok(_) => println!("User encryption key created/loaded successfully"),
             Err(e) => eprintln!("Failed to create/load user encryption key: {}", e),
         }
 
         // initialize database
-        if let Err(e) = database_utils::init_db(&app_handle) {
+        if let Err(e) = database_utils::init_db(&app_handle_arc) {
             eprintln!("Failed to initialize database after login: {}", e);
         }
         
         // Start notification service and database sync service asynchronously
-        let app_handle_clone1 = app_handle.clone();
+        let app_handle_ref1 = Arc::clone(&app_handle_arc);
         tauri::async_runtime::spawn(async move {
-            if let Err(e) = start_notification_service(app_handle_clone1, true).await {
+            if let Err(e) = start_notification_service(app_handle_ref1, true).await {
                 eprintln!("Failed to start notification service after login: {}", e);
             } else {
                 println!("Notification service started successfully after login.");
             }
         });
-        let app_handle_clone2 = app_handle.clone();
+        
+        let app_handle_ref2 = Arc::clone(&app_handle_arc);
         tauri::async_runtime::spawn(async move {
-          if let Err(e) = start_database_sync_service(app_handle_clone2, true).await {
-              eprintln!("Failed to start database sync service after login: {}", e);
-          } else {
-              println!("Database sync service started successfully after login.");
-          }
-      });
+            if let Err(e) = start_database_sync_service(app_handle_ref2, true).await {
+                eprintln!("Failed to start database sync service after login: {}", e);
+            } else {
+                println!("Database sync service started successfully after login.");
+            }
+        });
     }
     
     Ok(login_result)
@@ -95,10 +99,13 @@ async fn logout_user(app_handle: tauri::AppHandle) -> Result<bool, String> {
     // Clear current user ID
     user_utils::clear_current_user_id(&app_handle)?;
 
+    // Wrap in Arc for the async tasks
+    let app_handle_arc = Arc::new(app_handle);
+
     // Stop notification service asynchronously
-    let app_handle_clone1 = app_handle.clone();
+    let app_handle_ref1 = Arc::clone(&app_handle_arc);
     tokio::spawn(async move {
-        let notification_state = app_handle_clone1.state::<NotificationServiceState>();
+        let notification_state = app_handle_ref1.state::<NotificationServiceState>();
         let mut service_guard = notification_state.lock().await;
         
         if let Some(mut existing_service) = service_guard.take() {
@@ -107,9 +114,9 @@ async fn logout_user(app_handle: tauri::AppHandle) -> Result<bool, String> {
         }
     });
     // Stop database sync service asynchronously
-    let app_handle_clone2 = app_handle.clone();
+    let app_handle_ref2 = Arc::clone(&app_handle_arc);
     tokio::spawn(async move {
-        let db_state = app_handle_clone2.state::<DbSyncServiceState>();
+        let db_state = app_handle_ref2.state::<DbSyncServiceState>();
         let mut service_guard = db_state.lock().await;
         
         if let Some(mut existing_service) = service_guard.take() {
@@ -173,7 +180,7 @@ fn get_oauth_timeout() -> u64 {
 
 // Setup auto-launch command
 #[tauri::command]
-async fn setup_auto_launch(app_handle: tauri::AppHandle) -> Result<(), String> {
+async fn setup_auto_launch() -> Result<(), String> {
     // Only enable auto-launch in release builds
     if cfg!(debug_assertions) {
         return Ok(());
@@ -193,39 +200,40 @@ async fn setup_auto_launch(app_handle: tauri::AppHandle) -> Result<(), String> {
 }
 
 // Start auto-login process //
-async fn start_auto_login(app_handle: AppHandle) -> Result<bool, String> {
-    let login_success = match crate::auto_login::auto_login_lambda(&app_handle).await {
+async fn start_auto_login(app_handle_arc: Arc<AppHandle>) -> Result<bool, String> {
+    let login_success = match crate::auto_login::auto_login_lambda(&app_handle_arc).await {
         Ok(result) => result,
         Err(e) => false,
     };
     
     // Emit login status to frontend
-    app_handle.emit("auto-login-completed", login_success).ok();
+    app_handle_arc.emit("auto-login-completed", login_success).ok();
     
     Ok(login_success)
 }
 
 // Start notification service //
-async fn start_notification_service(app_handle: AppHandle, user_logged_in: bool) -> Result<(), String> {
-    let notification_state = app_handle.state::<NotificationServiceState>();
+async fn start_notification_service(app_handle_arc: Arc<AppHandle>, user_logged_in: bool) -> Result<(), String> {
+    let notification_state = app_handle_arc.state::<NotificationServiceState>();
     let mut service_guard = notification_state.lock().await;
+    
     // Stop existing service if it exists
     if let Some(mut existing_service) = service_guard.take() {
         existing_service.stop().await;
     }
     
     // Always create and start a new service
-    let mut service = NotificationService::new();
-    service.start(app_handle.clone(), user_logged_in).await;
+    let service = NotificationService::new();
+    service.start(Arc::clone(&app_handle_arc), user_logged_in).await;
     *service_guard = Some(service);
-    
     Ok(())
 }
 
 // Start database sync service //
-async fn start_database_sync_service(app_handle: AppHandle, user_logged_in: bool) -> Result<(), String> {
-    let db_state = app_handle.state::<DbSyncServiceState>();
+async fn start_database_sync_service(app_handle_arc: Arc<AppHandle>, user_logged_in: bool) -> Result<(), String> {
+    let db_state = app_handle_arc.state::<DbSyncServiceState>();
     let mut service_guard = db_state.lock().await;
+    
     // Stop existing service if it exists
     if let Some(mut existing_service) = service_guard.take() {
         existing_service.stop().await;
@@ -234,7 +242,7 @@ async fn start_database_sync_service(app_handle: AppHandle, user_logged_in: bool
     // Always create and start a new service
     match DbSyncService::new() {
         Ok(mut service) => {
-            service.start(&app_handle, user_logged_in).await;
+            service.start(Arc::clone(&app_handle_arc), user_logged_in).await;
             *service_guard = Some(service);
             Ok(())
         },
@@ -258,6 +266,31 @@ async fn schedule_event_notification( event_json: String, app_handle: AppHandle)
     } else {
         Err("Notification service not available".to_string())
     }
+}
+
+// Trigger immediate sync command //
+#[tauri::command]
+async fn trigger_sync(app_handle: tauri::AppHandle) -> Result<(), String> {
+    let app_handle_arc = Arc::new(app_handle);
+    
+    // Trigger immediate sync to DynamoDB
+    let db_state = app_handle_arc.state::<DbSyncServiceState>();
+    let service_guard = db_state.lock().await;
+    
+    if let Some(service) = service_guard.as_ref() {
+        // Check if user is logged in
+        let user_logged_in = match crate::user_utils::get_current_user_id(&app_handle_arc) {
+            Ok(_) => true,
+            Err(_) => false,
+        };
+        
+        if user_logged_in {
+            service.sync_to_dynamodb(&app_handle_arc, true).await?;
+            println!("Immediate sync to DynamoDB completed");
+        }
+    }
+    
+    Ok(())
 }
 
 // Create system tray
@@ -311,9 +344,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             delete_event,
             get_events,
             clean_old_events,
+            trigger_sync,
             get_oauth_timeout,
             run_oauth2_flow,
-
             schedule_event_notification
         ])
         .setup(|app| {
@@ -343,19 +376,20 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         .build(tauri::generate_context!())?
         .run(|app_handle, event| match event {
             tauri::RunEvent::Ready => {
-                let app_handle_clone = app_handle.clone();
+              let app_handle_owned = app_handle.clone();
                 tauri::async_runtime::spawn(async move {
+                  let app_handle_arc = Arc::new(app_handle_owned);
                   // Start auto-login
-                  let login_success = start_auto_login(app_handle_clone.clone()).await
+                  let login_success = start_auto_login(Arc::clone(&app_handle_arc)).await
                       .unwrap_or(false);
                       
                   // Start notification service
-                  if let Err(e) = start_notification_service(app_handle_clone.clone(), login_success).await {
+                  if let Err(e) = start_notification_service(Arc::clone(&app_handle_arc), login_success).await {
                       eprintln!("Failed to start notification service: {}", e);
                   }
 
                   // Start database sync service using a connection pool or other thread-safe approach
-                  if let Err(e) = start_database_sync_service(app_handle_clone, login_success).await {
+                  if let Err(e) = start_database_sync_service(Arc::clone(&app_handle_arc), login_success).await {
                       eprintln!("Failed to start database sync service: {}", e);
                   }
               });
