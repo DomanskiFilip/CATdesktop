@@ -115,6 +115,14 @@ pub fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), Stri
     let tx = conn.transaction()
         .map_err(|e| format!("Transaction error: {}", e.to_string()))?;
 
+    // Extract synced and deleted status from original JSON to determine if they were explicitly provided
+    let json_value: serde_json::Value = serde_json::from_str(&event_json)
+      .map_err(|_| "Failed to re-parse event JSON".to_string())?;
+    
+    // Use the values from JSON if present, otherwise default to false
+    let synced = json_value.get("synced").and_then(|v| v.as_bool()).unwrap_or(false);
+    let deleted = json_value.get("deleted").and_then(|v| v.as_bool()).unwrap_or(false);
+
     tx.execute(
         "INSERT OR REPLACE INTO events (id, user_id, description, time, alarm, synced, deleted)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -124,8 +132,8 @@ pub fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), Stri
             &encrypted_description,
             &event.time_to_string(),
             &event.alarm,
-            false,
-            false
+            synced,
+            deleted
         ),
     ).map_err(|e| format!("Execute error: {}", e.to_string()))?;
 

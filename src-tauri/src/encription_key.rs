@@ -5,8 +5,7 @@ use std::env;
 use base64::{ engine::general_purpose, Engine };
 use dotenvy::dotenv;
 use tauri::{ AppHandle, Manager };
-use chacha20poly1305::{ ChaCha20Poly1305, Key, Nonce };
-use chacha20poly1305::aead::{ Aead, KeyInit };
+
 
 // Helper function -> generate a random 32-byte encryption key
 fn generate_encryption_key() -> [u8; 32] {

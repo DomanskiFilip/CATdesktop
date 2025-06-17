@@ -9,6 +9,7 @@ mod oauth;
 mod login;
 mod register;
 mod notification_service;
+mod database_sync_service;
 mod encription_key;
 mod auto_login;
 
@@ -21,9 +22,10 @@ use tokio::sync::Mutex;
 use auto_launch::AutoLaunchBuilder;
 use std::env;
 use crate::notification_service::NotificationService;
-
+use crate::database_sync_service::DbSyncService;
 
 pub type NotificationServiceState = Arc<Mutex<Option<NotificationService>>>;
+pub type DbSyncServiceState = Arc<Mutex<Option<DbSyncService>>>;
 
 // Check login status command
 #[tauri::command]
@@ -56,14 +58,23 @@ async fn login_user(app_handle: tauri::AppHandle, email: String, password: Strin
             eprintln!("Failed to initialize database after login: {}", e);
         }
         
-        let app_handle_clone = app_handle.clone();
-        tokio::spawn(async move {
-            if let Err(e) = start_notification_service(app_handle_clone, true).await {
+        // Start notification service and database sync service asynchronously
+        let app_handle_clone1 = app_handle.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = start_notification_service(app_handle_clone1, true).await {
                 eprintln!("Failed to start notification service after login: {}", e);
             } else {
                 println!("Notification service started successfully after login.");
             }
         });
+        let app_handle_clone2 = app_handle.clone();
+        tauri::async_runtime::spawn(async move {
+          if let Err(e) = start_database_sync_service(app_handle_clone2, true).await {
+              eprintln!("Failed to start database sync service after login: {}", e);
+          } else {
+              println!("Database sync service started successfully after login.");
+          }
+      });
     }
     
     Ok(login_result)
@@ -85,13 +96,24 @@ async fn logout_user(app_handle: tauri::AppHandle) -> Result<bool, String> {
     user_utils::clear_current_user_id(&app_handle)?;
 
     // Stop notification service asynchronously
-    let app_handle_clone = app_handle.clone();
+    let app_handle_clone1 = app_handle.clone();
     tokio::spawn(async move {
-        let notification_state = app_handle_clone.state::<NotificationServiceState>();
+        let notification_state = app_handle_clone1.state::<NotificationServiceState>();
         let mut service_guard = notification_state.lock().await;
         
         if let Some(mut existing_service) = service_guard.take() {
             println!("Stopping existing notification service...");
+            existing_service.stop().await;
+        }
+    });
+    // Stop database sync service asynchronously
+    let app_handle_clone2 = app_handle.clone();
+    tokio::spawn(async move {
+        let db_state = app_handle_clone2.state::<DbSyncServiceState>();
+        let mut service_guard = db_state.lock().await;
+        
+        if let Some(mut existing_service) = service_guard.take() {
+            println!("Stopping existing database sync service...");
             existing_service.stop().await;
         }
     });
@@ -170,7 +192,7 @@ async fn setup_auto_launch(app_handle: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-// Start auto-login process
+// Start auto-login process //
 async fn start_auto_login(app_handle: AppHandle) -> Result<bool, String> {
     let login_success = match crate::auto_login::auto_login_lambda(&app_handle).await {
         Ok(result) => result,
@@ -183,20 +205,16 @@ async fn start_auto_login(app_handle: AppHandle) -> Result<bool, String> {
     Ok(login_success)
 }
 
-// Start notification service
+// Start notification service //
 async fn start_notification_service(app_handle: AppHandle, user_logged_in: bool) -> Result<(), String> {
-    println!("Attempting to lock notification service mutex...");
     let notification_state = app_handle.state::<NotificationServiceState>();
     let mut service_guard = notification_state.lock().await;
-    println!("Notification service mutex locked successfully");
     // Stop existing service if it exists
     if let Some(mut existing_service) = service_guard.take() {
-        println!("Stopping existing notification service...");
         existing_service.stop().await;
     }
     
     // Always create and start a new service
-    println!("Creating new notification service with login state: {}", user_logged_in);
     let mut service = NotificationService::new();
     service.start(app_handle.clone(), user_logged_in).await;
     *service_guard = Some(service);
@@ -204,7 +222,27 @@ async fn start_notification_service(app_handle: AppHandle, user_logged_in: bool)
     Ok(())
 }
 
-// Schedule event notification command
+// Start database sync service //
+async fn start_database_sync_service(app_handle: AppHandle, user_logged_in: bool) -> Result<(), String> {
+    let db_state = app_handle.state::<DbSyncServiceState>();
+    let mut service_guard = db_state.lock().await;
+    // Stop existing service if it exists
+    if let Some(mut existing_service) = service_guard.take() {
+        existing_service.stop().await;
+    }
+    
+    // Always create and start a new service
+    match DbSyncService::new() {
+        Ok(mut service) => {
+            service.start(&app_handle, user_logged_in).await;
+            *service_guard = Some(service);
+            Ok(())
+        },
+        Err(e) => Err(format!("Failed to create database sync service: {}", e))
+    }
+}
+
+// Schedule event notification command //
 #[tauri::command]
 async fn schedule_event_notification( event_json: String, app_handle: AppHandle) -> Result<String, String> {
     let event: crate::database_utils::CalendarEvent = serde_json::from_str(&event_json)
@@ -297,6 +335,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             // Initialize notification service state
             app.manage(Arc::new(Mutex::new(None::<NotificationService>)) as NotificationServiceState);
             
+            // Initialize database sync service state
+            app.manage(Arc::new(Mutex::new(None::<DbSyncService>)) as DbSyncServiceState);
+
             Ok(())
         })
         .build(tauri::generate_context!())?
@@ -304,15 +345,20 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             tauri::RunEvent::Ready => {
                 let app_handle_clone = app_handle.clone();
                 tauri::async_runtime::spawn(async move {
-                    // Start auto-login
-                    let login_success = start_auto_login(app_handle_clone.clone()).await
-                        .unwrap_or(false);
-                        
-                    // Start notification service
-                    if let Err(e) = start_notification_service(app_handle_clone.clone(), login_success).await {
-                        eprintln!("Failed to start notification service: {}", e);
-                    }
-                });
+                  // Start auto-login
+                  let login_success = start_auto_login(app_handle_clone.clone()).await
+                      .unwrap_or(false);
+                      
+                  // Start notification service
+                  if let Err(e) = start_notification_service(app_handle_clone.clone(), login_success).await {
+                      eprintln!("Failed to start notification service: {}", e);
+                  }
+
+                  // Start database sync service using a connection pool or other thread-safe approach
+                  if let Err(e) = start_database_sync_service(app_handle_clone, login_success).await {
+                      eprintln!("Failed to start database sync service: {}", e);
+                  }
+              });
             }
             tauri::RunEvent::WindowEvent { label, event, .. } => {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {

@@ -53,7 +53,7 @@ pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String,
 
     // Listen for the redirect with the code
     let listener = TcpListener::bind("127.0.0.1:1420").map_err(|e| e.to_string())?;
-    let mut code = String::new();
+    let code: String;
     let start_time = Instant::now();
     'outer: loop {
         // Check for timeout

@@ -1,8 +1,10 @@
+use crate::token_utils::{read_tokens_from_file, save_tokens_to_file};
+use crate::api_utils::{AppConfig, get_device_info};
+use crate::user_utils::save_current_user_id;
 use reqwest::Client;
 use serde::Deserialize;
 use tauri::AppHandle;
-use crate::token_utils::{read_tokens_from_file, save_tokens_to_file};
-use crate::api_utils::{AppConfig, get_device_info};
+
 
 // Structs (classes/objects) to deserialize the Lambda response
 #[derive(Deserialize)]
@@ -64,7 +66,7 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
               // Extract email from the body
               if let Some(email) = body_json["email"].as_str() {
                   // Save the email as the user ID
-                  crate::user_utils::save_current_user_id(app_handle, email)?;
+                  save_current_user_id(app_handle, email)?;
 
                   // Load the user's encryption key for decryption
                   match crate::encription_key::load_user_encryption_key(app_handle, email) {
@@ -109,7 +111,7 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
                       // Extract email from the body
                       if let Some(email) = body_json["email"].as_str() {
                           // Save the email as the user ID
-                          crate::user_utils::save_current_user_id(app_handle, email)?;
+                          save_current_user_id(app_handle, email)?;
                       } else {
                           return Err("Failed to extract email from response body".to_string());
                       }

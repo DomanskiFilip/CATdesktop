@@ -1,3 +1,4 @@
+use crate::encription_key::get_encryption_key;
 use tauri::{AppHandle, Manager};
 use std::path::PathBuf;
 use std::fs;
@@ -20,7 +21,7 @@ fn get_user_file_path(app_handle: &AppHandle) -> Result<PathBuf, String> {
 // Function to save the current user ID to a file with encryption //
 pub fn save_current_user_id(app_handle: &AppHandle, user_id: &str) -> Result<(), String> {
     // Get encryption key
-    let key = crate::encription_key::get_encryption_key()?;
+    let key = get_encryption_key()?;
     let key = Key::<aes_gcm::aes::Aes256>::from_slice(&key);
     let cipher = Aes256Gcm::new(key);
 
@@ -56,7 +57,7 @@ pub fn get_current_user_id(app_handle: &AppHandle) -> Result<String, String> {
     }
     
     // Get encryption key
-    let key = crate::encription_key::get_encryption_key()?;
+    let key = get_encryption_key()?;
     let key = Key::<aes_gcm::aes::Aes256>::from_slice(&key);
     let cipher = Aes256Gcm::new(key);
 
