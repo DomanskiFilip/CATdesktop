@@ -39,8 +39,10 @@
               <svg v-else xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M480-528 296-344l-56-56 240-240 240 240-56 56-184-184Z"/></svg>
              </button>
           </span>
-          <textarea :value="getEventDescription(hour)" @input="updateEventDescription($event, hour)" :class="{ 'in-the-past': isInPast(hour), 'has-event': hasEventAtHour(hour), expand: expand[hour] }" :readonly="isInPast(hour) || isNow(hour)" name="description" title="describe the event"></textarea>
-          <hr :class="{ 'event-time': hasEventAtHour(hour) }"> 
+          <!-- Hidden textarea for editing (shows when clicking the display div) -->
+          <textarea v-show="activeEditor === `editor-${hour}`" :class="{ 'text-editor': true, 'in-the-past': isInPast(hour), 'has-event': hasEventAtHour(hour), 'expand': expand[hour] }" :id="`editor-${hour}`" v-model="hourInputs[hour]" @input="updateEventDescription($event, hour)" @blur="activeEditor = null" :disabled="isInPast(hour) || isNow(hour)" :placeholder="isInPast(hour) || isNow(hour) ? '' : 'Add event...'"></textarea>
+          <!-- Display div with linked text (shows when not editing) -->
+          <div v-show="activeEditor !== `editor-${hour}`" :class="{ 'link-display': true, 'in-the-past': isInPast(hour), 'has-event': hasEventAtHour(hour), 'expand': expand[hour] }" v-html="formatLinkedText(hourInputs[hour] || getEventDescription(hour))" @click="startEditing(hour)"></div>
         </span>
       </section>
     </section>
@@ -50,6 +52,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import linkify from 'linkifyjs'
+import linkifyStr from 'linkify-string'
 
 // interface for calendar days
 interface CalendarDay {
@@ -82,6 +86,8 @@ const events = ref<CalendarEvent[]>([])
 const activeCell = ref<string | null>(null)
 const calendarDays = ref<CalendarDay[]>([])
 const expand = ref<Record<number, boolean>>({})
+const hourInputs = ref<Record<number, string>>({})
+const activeEditor = ref<string | null>(null)
 
 
 // == Utility functions == //
@@ -179,6 +185,18 @@ const getEventsForDate = (date: CalendarDay) => {
   })
 }
 
+// utility function -> format text with linkify
+const formatLinkedText = (text: string): string => {
+  if (!text) return '';
+  
+  // Use linkify-string to convert URLs to HTML links
+  return linkifyStr(text, {
+    defaultProtocol: 'https',
+    target: '_blank',
+    rel: 'noopener noreferrer'
+  });
+}
+
 // == Event logic == //
 // Map to keep track of pending saves for debouncing
 const pendingSaves = new Map<string, ReturnType<typeof setTimeout>>()
@@ -211,9 +229,32 @@ const saveEvent = (event: CalendarEvent) => {
   pendingSaves.set(event.id, timeout)
 }
 
-// function to update and save event description
+// Function to start editing a specific hour
+const startEditing = (hour: number) => {
+  if (isInPast(hour) || isNow(hour)) return;
+  
+  // Set the input value if not already set
+  if (hourInputs.value[hour] === undefined) {
+    hourInputs.value[hour] = getEventDescription(hour) || '';
+  }
+  
+  activeEditor.value = `editor-${hour}`;
+  
+  // Focus the textarea after it becomes visible
+  setTimeout(() => {
+    const editor = document.getElementById(`editor-${hour}`);
+    if (editor) {
+      editor.focus();
+    }
+  }, 0);
+}
+
+// Update the event description function
 const updateEventDescription = async (event: Event, hour: number) => {
-  const value = (event.target as HTMLTextAreaElement).value
+  const target = event.target as HTMLTextAreaElement;
+  const value = target.value;
+  hourInputs.value[hour] = value;
+  
   const existingEvent = findEventAtHour(hour)
 
   if (existingEvent) {
@@ -586,43 +627,67 @@ onMounted(async () => {
     border-color: var(--color-theme);
     }
 
-  .hour textarea {
-    width: 100%;
-    height: 2rem;
-    border: none;
-    background: transparent;
-    color: var(--color-text);
-    resize: none;
-    outline: none;
-    overflow-y: auto;
-    scrollbar-width: none; /* Firefox */
-    -ms-overflow-style: none; /* IE and Edge */
-    transition: transform 0.3s ease, height 0.3s ease;
-    margin: 0;
-    padding: 0.1rem;
-  }
+  .hour textarea, .hour .link-display {
+  width: 100%;
+  height: 2rem;
+  font-size: 1rem;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    Oxygen,
+    Ubuntu,
+    Cantarell,
+    'Fira Sans',
+    'Droid Sans',
+    'Helvetica Neue',
+    sans-serif;
+  border: none;
+  background: transparent;
+  color: var(--color-text);
+  resize: none;
+  outline: none;
+  overflow-y: auto;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
+  transition: transform 0.3s ease, height 0.3s ease;
+  margin: 0;
+  padding: 0.1rem;
+  min-height: 2rem; /* Ensure minimum height */
+  cursor: text; /* Show text cursor */
+  line-height: 1.5;
+  vertical-align: middle;
+  box-sizing: border-box;
+}
 
-    .hour textarea::-webkit-scrollbar {
-      display: none; /* Chrome, Safari, Opera */
-    }
-    
-    .hour textarea.has-event {
-      color: var(--color-theme);
-    }
 
-    .hour textarea.in-the-past {
-      opacity: 0.5;
-      cursor: not-allowed;
-      pointer-events: none;
-      background-color: var(--color-theme);
-    }
+.hour .link-display:empty::before {
+  opacity: 0.7;
+}
 
-    .hour textarea.expand {
-      height: 6rem;
-      max-height: 200px;
-      margin: 0;
-      padding: 0.1rem;
-    }
+.hour textarea::-webkit-scrollbar, .hour .link-display::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
+}
+
+.hour textarea.has-event, .hour .link-display.has-event {
+  color: var(--color-theme);
+}
+
+.hour textarea.in-the-past, .hour .link-display.in-the-past {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+  background-color: var(--color-theme);
+}
+
+.hour textarea.expand, .hour .link-display.expand {
+  display: block;
+  height: 6rem;
+  margin: 0;
+  padding: 0.1rem;
+}
 
 .alarm {
   background: transparent;
