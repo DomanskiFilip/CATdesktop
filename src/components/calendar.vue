@@ -598,6 +598,8 @@ onMounted(async () => {
     scrollbar-width: none; /* Firefox */
     -ms-overflow-style: none; /* IE and Edge */
     transition: transform 0.3s ease, height 0.3s ease;
+    margin: 0;
+    padding: 0.1rem;
   }
 
     .hour textarea::-webkit-scrollbar {
@@ -618,7 +620,8 @@ onMounted(async () => {
     .hour textarea.expand {
       height: 6rem;
       max-height: 200px;
-      overflow-y: auto;
+      margin: 0;
+      padding: 0.1rem;
     }
 
 .alarm {
