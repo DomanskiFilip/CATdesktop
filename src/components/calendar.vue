@@ -34,9 +34,13 @@
               <svg v-if="isAlarmOn(hour)" xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M96-528q0-88.39 35.5-162.19Q167-764 230-818l51 50q-52 43-82.5 105.5T168-528H96Zm696 0q0-73-30.5-135.5T678-769l52-51q62 53 98 128.5T864-528h-72ZM192-216v-72h48v-240q0-87 53.5-153T432-763v-53q0-20 14-34t34-14q20 0 34 14t14 34v53q85 16 138.5 82T720-528v240h48v72H192Zm288-276Zm-.21 396Q450-96 429-117.15T408-168h144q0 30-21.21 51t-51 21ZM312-288h336v-240q0-70-49-119t-119-49q-70 0-119 49t-49 119v240Z"/></svg>
               <svg v-else xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M192-216v-72h48v-240q0-87 53.5-153T432-763v-53q0-20 14-34t34-14q20 0 34 14t14 34v53q85 16 138.5 82T720-528v240h48v72H192Zm288-276Zm-.21 396Q450-96 429-117.15T408-168h144q0 30-21.21 51t-51 21ZM312-288h336v-240q0-70-49-119t-119-49q-70 0-119 49t-49 119v240Z"/></svg>
              </button>
+             <button class="expand" @click="toggleExpand(hour)" title="expand/collapse">
+              <svg v-if="!expand[hour]" xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M480-344 240-584l56-56 184 184 184-184 56 56-240 240Z"/></svg>
+              <svg v-else xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M480-528 296-344l-56-56 240-240 240 240-56 56-184-184Z"/></svg>
+             </button>
           </span>
-          <textarea :value="getEventDescription(hour)" @input="updateEventDescription($event, hour)" :class="{ 'in-the-past': isInPast(hour), 'has-event': hasEventAtHour(hour) }" :readonly="isInPast(hour) || isNow(hour)" name="description" title="describe the event"></textarea>
-          <hr :class="{ 'event-time': hasEventAtHour(hour) }">
+          <textarea :value="getEventDescription(hour)" @input="updateEventDescription($event, hour)" :class="{ 'in-the-past': isInPast(hour), 'has-event': hasEventAtHour(hour), expand: expand[hour] }" :readonly="isInPast(hour) || isNow(hour)" name="description" title="describe the event"></textarea>
+          <hr :class="{ 'event-time': hasEventAtHour(hour) }"> 
         </span>
       </section>
     </section>
@@ -77,6 +81,7 @@ const currentYear = ref(currentDate.value.getFullYear())
 const events = ref<CalendarEvent[]>([])
 const activeCell = ref<string | null>(null)
 const calendarDays = ref<CalendarDay[]>([])
+const expand = ref<Record<number, boolean>>({})
 
 
 // == Utility functions == //
@@ -127,6 +132,11 @@ const isNow = (hour: number): boolean => {
   }
 
   return false
+}
+
+// utility function -> toggle expand state for a specific hour
+const toggleExpand = (hour: number) => {
+  expand.value[hour] = !expand.value[hour]
 }
 
 // helper function -> find an event at a specific hour
@@ -587,6 +597,7 @@ onMounted(async () => {
     overflow-y: auto;
     scrollbar-width: none; /* Firefox */
     -ms-overflow-style: none; /* IE and Edge */
+    transition: transform 0.3s ease, height 0.3s ease;
   }
 
     .hour textarea::-webkit-scrollbar {
@@ -602,6 +613,12 @@ onMounted(async () => {
       cursor: not-allowed;
       pointer-events: none;
       background-color: var(--color-theme);
+    }
+
+    .hour textarea.expand {
+      height: 6rem;
+      max-height: 200px;
+      overflow-y: auto;
     }
 
 .alarm {
@@ -626,4 +643,14 @@ onMounted(async () => {
     pointer-events: none;
   }
 
+.expand {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+}
 </style>
