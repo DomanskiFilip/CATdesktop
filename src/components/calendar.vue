@@ -40,9 +40,9 @@
              </button>
           </span>
           <!-- Hidden textarea for editing (shows when clicking the display div) -->
-          <textarea v-show="activeEditor === `editor-${hour}`" :class="{ 'text-editor': true, 'in-the-past': isInPast(hour), 'has-event': hasEventAtHour(hour), 'expand': expand[hour] }" :id="`editor-${hour}`" v-model="hourInputs[hour]" @input="updateEventDescription($event, hour)" @blur="activeEditor = null" :disabled="isInPast(hour) || isNow(hour)" :placeholder="isInPast(hour) || isNow(hour) ? '' : 'Add event...'"></textarea>
+          <textarea v-show="activeEditor === `editor-${getHourKey(hour)}`" :class="{ 'text-editor': true, 'in-the-past': isInPast(hour), 'has-event': hasEventAtHour(hour), 'expand': expand[hour] }" :id="`editor-${getHourKey(hour)}`" v-model="hourInputs[getHourKey(hour)]" @input="updateEventDescription($event, hour)" @blur="activeEditor = null" :disabled="isInPast(hour) || isNow(hour)" :placeholder="isInPast(hour) || isNow(hour) ? '' : 'Add event...'"></textarea>
           <!-- Display div with linked text (shows when not editing) -->
-          <div v-show="activeEditor !== `editor-${hour}`" :class="{ 'link-display': true, 'in-the-past': isInPast(hour), 'has-event': hasEventAtHour(hour), 'expand': expand[hour] }" v-html="formatLinkedText(hourInputs[hour] || getEventDescription(hour))" @click="startEditing(hour)"></div>
+          <div v-show="activeEditor !== `editor-${getHourKey(hour)}`" :class="{ 'link-display': true, 'in-the-past': isInPast(hour), 'has-event': hasEventAtHour(hour), 'expand': expand[hour] }" v-html="formatLinkedText(hourInputs[getHourKey(hour)] || getEventDescription(hour))" @click="startEditing(hour)"></div>
         </span>
       </section>
     </section>
@@ -52,8 +52,10 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import linkify from 'linkifyjs'
 import linkifyStr from 'linkify-string'
+
 
 // interface for calendar days
 interface CalendarDay {
@@ -86,7 +88,7 @@ const events = ref<CalendarEvent[]>([])
 const activeCell = ref<string | null>(null)
 const calendarDays = ref<CalendarDay[]>([])
 const expand = ref<Record<number, boolean>>({})
-const hourInputs = ref<Record<number, string>>({})
+const hourInputs = ref<Record<string, string>>({});
 const activeEditor = ref<string | null>(null)
 
 
@@ -150,7 +152,7 @@ const findEventAtHour = (hour: number, date: Date = currentDate.value): Calendar
   return events.value.find(event => {
     const eventDate = new Date(event.time)
     const eventHour = eventDate.getHours()
-    return eventHour === hour && 
+    return eventHour === hour &&
            eventDate.getDate() === date.getDate() &&
            eventDate.getMonth() === date.getMonth() &&
            eventDate.getFullYear() === date.getFullYear()
@@ -229,64 +231,60 @@ const saveEvent = (event: CalendarEvent) => {
   pendingSaves.set(event.id, timeout)
 }
 
+// Helper function to generate a unique key for each hour and date
+const getHourKey = (hour: number, date: Date = currentDate.value): string => {
+  return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}-${hour}`;
+};
+
 // Function to start editing a specific hour
 const startEditing = (hour: number) => {
   if (isInPast(hour) || isNow(hour)) return;
+
+  const key = getHourKey(hour);
   
   // Set the input value if not already set
-  if (hourInputs.value[hour] === undefined) {
-    hourInputs.value[hour] = getEventDescription(hour) || '';
+  if (hourInputs.value[key] === undefined) {
+    hourInputs.value[key] = getEventDescription(hour) || '';
   }
   
-  activeEditor.value = `editor-${hour}`;
+  activeEditor.value = `editor-${key}`;
   
   // Focus the textarea after it becomes visible
   setTimeout(() => {
-    const editor = document.getElementById(`editor-${hour}`);
+    const editor = document.getElementById(`editor-${key}`);
     if (editor) {
       editor.focus();
     }
   }, 0);
-}
+};
 
 // Update the event description function
 const updateEventDescription = async (event: Event, hour: number) => {
   const target = event.target as HTMLTextAreaElement;
   const value = target.value;
-  hourInputs.value[hour] = value;
-  
-  const existingEvent = findEventAtHour(hour)
+  const key = getHourKey(hour);
+  hourInputs.value[key] = value;
+
+  const existingEvent = findEventAtHour(hour);
 
   if (existingEvent) {
     if (!value.trim()) {
       // Delete event if description is empty
-      invoke('delete_event', { id: existingEvent.id })
-      events.value = events.value.filter(e => e.id !== existingEvent.id)
-      // Trigger sync after update
-       try {
-        await invoke('trigger_sync')
-      } catch (error) {
-        console.warn('Failed to trigger sync after deletion:', error)
-      }
+      await invoke('delete_event', { id: existingEvent.id });
+      events.value = events.value.filter(e => e.id !== existingEvent.id);
     } else {
-      existingEvent.description = value
-      saveEvent(existingEvent)
-      // Trigger sync after update
-      try {
-        await invoke('trigger_sync')
-      } catch (error) {
-        console.warn('Failed to trigger sync after update:', error)
-      }
+      existingEvent.description = value;
+      saveEvent(existingEvent);
     }
   } else if (value.trim()) {
     // Create new event if description is not empty
     const eventDate = new Date(
       currentDate.value.getFullYear(),
-      currentDate.value.getMonth(), 
+      currentDate.value.getMonth(),
       currentDate.value.getDate(),
       hour
-    )
-    
+    );
+
     const newEvent = {
       id: crypto.randomUUID(),
       user_id: "",
@@ -294,18 +292,14 @@ const updateEventDescription = async (event: Event, hour: number) => {
       time: eventDate.toISOString(),
       alarm: false,
       synced: false,
-      deleted: false
-    }
-    events.value.push(newEvent)
-    saveEvent(newEvent)
-    // Trigger sync after creation
-    try {
-      await invoke('trigger_sync')
-    } catch (error) {
-      console.warn('Failed to trigger sync after creation:', error)
-    }
+      synced_google: false,
+      deleted: false,
+      recurrence: null,
+    };
+    events.value.push(newEvent);
+    saveEvent(newEvent);
   }
-}
+};
 
 // helper function -> Schedule native notification helper function
 const scheduleNativeNotification = async (event: CalendarEvent) => {
@@ -454,7 +448,9 @@ onMounted(async () => {
     // Clean and load events, but don't block the calendar UI
     await invoke('clean_old_events')
     await loadEvents()
-
+    listen('google_sync_complete', async () => {
+    await loadEvents()
+    })
     // Refresh events every minute
     setInterval(refreshEvents, refreshInterval)
     setInterval(async () => {
@@ -645,7 +641,7 @@ onMounted(async () => {
     'Helvetica Neue',
     sans-serif;
   border: none;
-  background: transparent;
+  background: var(--color-shadow);
   color: var(--color-text);
   resize: none;
   outline: none;

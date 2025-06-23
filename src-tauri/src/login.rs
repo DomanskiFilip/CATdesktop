@@ -44,7 +44,7 @@ pub async fn login_user_lambda(app_handle: &AppHandle, email: String, password: 
         .send()
         .await
         .map_err(|e| e.to_string())?;
-    let status = response.status();
+    let _status = response.status();
     let text = response.text().await.map_err(|e| e.to_string())?;
     
     // Check for Sandbox.Timedout error in the raw response

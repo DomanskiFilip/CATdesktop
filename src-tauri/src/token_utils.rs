@@ -1,4 +1,4 @@
-use crate::encription_key::get_encryption_key;
+use crate::encryption_utils::get_encryption_key;
 use aes_gcm::{Aes256Gcm, Key, Nonce};
 use aes_gcm::aead::Aead;
 use aes_gcm::KeyInit;
@@ -22,7 +22,7 @@ fn get_tokens_path(app_handle: &AppHandle) -> Result<std::path::PathBuf, String>
 
 fn generate_nonce() -> [u8; 12] {
     let mut nonce = [0u8; 12];
-    rand::thread_rng().fill(&mut nonce);
+    rand::rng().fill(&mut nonce);
     nonce
 }
 

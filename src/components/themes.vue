@@ -26,42 +26,48 @@ const themeMappings: Record<string, Theme> = {
     "--color-border": "var(--color-dark)",
     "--color-text": "var(--color-dark)",
     "--color-theme": "var(--color-whale)",
-    "--color-action": "var(--color-theme)"
+    "--color-action": "var(--color-theme)",
+    "--color-shadow": "var(--color-shadow-light)"
   },
   "light-2": {
     "--color-main": "var(--color-light)",
     "--color-border": "var(--color-dark)",
     "--color-text": "var(--color-dark)",
     "--color-theme": "var(--color-lemon)",
-    "--color-action": "var(--color-theme)"
+    "--color-action": "var(--color-theme)",
+    "--color-shadow": "var(--color-shadow-light)"
   },
   "light-3": {
     "--color-main": "var(--color-light)",
     "--color-border": "var(--color-dark)",
     "--color-text": "var(--color-dark)",
     "--color-theme": "var(--color-rasberry)",
-    "--color-action": "var(--color-theme)"
+    "--color-action": "var(--color-theme)",
+    "--color-shadow": "var(--color-shadow-light)"
   },
   "dark-1": {
     "--color-main": "var(--color-dark)",
     "--color-border": "var(--color-light)",
     "--color-text": "var(--color-light)",
     "--color-theme": "var(--color-whale)",
-    "--color-action": "var(--color-theme)"
+    "--color-action": "var(--color-theme)",
+    "--color-shadow": "var(--color-shadow-dark)"
   },
   "dark-2": {
    "--color-main": "var(--color-dark)",
     "--color-border": "var(--color-light)",
     "--color-text": "var(--color-light)",
     "--color-theme": "var(--color-lemon)",
-    "--color-action": "var(--color-theme)"
+    "--color-action": "var(--color-theme)",
+    "--color-shadow": "var(--color-shadow-dark)"
   },
   "dark-3": {
    "--color-main": "var(--color-dark)",
     "--color-border": "var(--color-light)",
     "--color-text": "var(--color-light)",
     "--color-theme": "var(--color-rasberry)",
-    "--color-action": "var(--color-theme)"
+    "--color-action": "var(--color-theme)",
+    "--color-shadow": "var(--color-shadow-dark)"
   }
 };
 

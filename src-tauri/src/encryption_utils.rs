@@ -10,7 +10,7 @@ use tauri::{ AppHandle, Manager };
 // Helper function -> generate a random 32-byte encryption key
 fn generate_encryption_key() -> [u8; 32] {
     let mut key = [0u8; 32];
-    rand::thread_rng().fill(&mut key);
+    rand::rng().fill(&mut key);
     key
 }
 
@@ -155,7 +155,7 @@ pub fn encrypt_user_data(app_handle: &AppHandle, email: &str, data: &[u8]) -> Re
     
     // Generate a random nonce
     let mut nonce_bytes = [0u8; 12];
-    rand::thread_rng().fill_bytes(&mut nonce_bytes);
+    rand::rng().fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
     
     // Encrypt the data

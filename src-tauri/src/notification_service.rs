@@ -8,6 +8,9 @@ use tokio::time::{sleep, Duration as TokioDuration};
 use tokio::task::JoinHandle;
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
+use rrule::{RRuleSet, Tz};
+use std::str::FromStr;
+use futures::FutureExt;
 
 pub struct NotificationService {
   scheduled_tasks: HashMap<String, JoinHandle<()>>,
@@ -81,6 +84,11 @@ impl NotificationService {
 
       // Remove existing notifications for this event first
       self.remove_event_notifications(&event.id).await?;
+
+      // Handle recurrence if present
+      if let Some(recurrence) = &event.recurrence {
+          return Box::pin(self.schedule_recurring_event_notifications(event, recurrence)).await;
+      }
 
       // Calculate delays
       let event_time = event.time;
@@ -185,29 +193,17 @@ impl NotificationService {
                 let next_24_hours = now + Duration::hours(24);
                 
                 let mut query = conn.prepare(
-                    "SELECT id, user_id, description, time, alarm, synced, deleted 
+                    "SELECT id, user_id, description, time, alarm, synced, synced_google, deleted, recurrence
                     FROM events 
                     WHERE deleted = FALSE AND alarm = TRUE AND time > ?1 AND time <= ?2 AND user_id = ?3"
                 ).map_err(|e| e.to_string())?;
 
-                let events: Vec<CalendarEvent> = query.query_map([&now.to_rfc3339(), &next_24_hours.to_rfc3339(), &user_id], |row| {
-                    Ok(CalendarEvent {
-                        id: row.get(0)?,
-                        user_id: row.get(1)?,
-                        description: row.get(2)?,
-                        time: DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
-                            .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
-                                2,
-                                rusqlite::types::Type::Text,
-                                Box::new(e),
-                            ))?.with_timezone(&Utc),
-                        alarm: row.get(4)?,
-                        synced: row.get(5)?,
-                        deleted: row.get(6)?
-                    })
-                }).map_err(|e| e.to_string())?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())?;
+                let events: Vec<CalendarEvent> = query
+                  .query_map([&now.to_rfc3339(), &next_24_hours.to_rfc3339(), &user_id], |row| CalendarEvent::from_row(row))
+                  .map_err(|e| e.to_string())?
+                  .collect::<Result<Vec<_>, _>>()
+                  .map_err(|e| e.to_string())?;
+
 
                 Ok(events)
             }).await.map_err(|e| e.to_string())?
@@ -243,4 +239,84 @@ impl NotificationService {
             Ok(())
         }
   }
+
+
+  // Method to schedule notifications for recurring events //
+  pub async fn schedule_recurring_event_notifications(&mut self, event: &CalendarEvent, recurrence: &str) -> Result<(), Box<dyn std::error::Error>> {
+        println!("Scheduling notifications for recurring event with rule: {}", recurrence);
+        
+        // Initialize RRule parser
+        let rrule_str = if recurrence.starts_with("RRULE:") {
+            recurrence.to_string()
+        } else {
+            format!("RRULE:{}", recurrence)
+        };
+        
+        // Parse the RRULE
+        let rrule = match rrule::RRule::from_str(&rrule_str) {
+            Ok(rule) => rule,
+            Err(e) => return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, 
+                format!("Failed to parse RRule: {}", e))))
+        };
+
+        // Setup the RRULE with the event start time
+        let tz = Tz::UTC;
+        let dt_start = event.time.with_timezone(&tz);
+
+        // Create a new RRuleSet with the start time
+        let mut rruleset = RRuleSet::new(dt_start);
+
+        // Validate the rrule and add it to the set
+        match rrule.validate(dt_start) {
+            Ok(validated_rrule) => {
+                rruleset.clone().rrule(validated_rrule);
+            },
+            Err(e) => return Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other, format!("Invalid RRule: {:?}", e))))
+        };
+
+        // Calculate occurrences (limit to 5)
+        let occurrences = rruleset.all(5);
+        let now = chrono::Utc::now();
+
+        // Filter out past occurrences
+        let future_occurrences: Vec<_> = occurrences.dates
+          .iter()
+          .filter(|date| *date > &now)
+          .cloned()
+          .collect();
+
+
+        if future_occurrences.is_empty() {
+            println!("No future occurrences found for recurring event");
+            return Ok(());
+        }
+
+        println!("Found {} future occurrences", future_occurrences.len());
+
+        // Schedule notifications for each occurrence
+        for (i, occurrence_time) in future_occurrences.into_iter().enumerate() {
+            // Create a single instance of the recurring event
+            let instance_id = format!("{}_instance_{}", event.id, i);
+            let instance_event = CalendarEvent {
+                id: instance_id,
+                user_id: event.user_id.clone(),
+                description: event.description.clone(),
+                time: occurrence_time.with_timezone(&Utc),
+                alarm: event.alarm,
+                synced: event.synced,
+                synced_google: event.synced_google,
+                deleted: event.deleted,
+                recurrence: None::<String>,
+            };
+            
+            // Schedule the notification for this instance
+            if let Err(e) = self.schedule_event_notifications(&instance_event).await {
+                eprintln!("Failed to schedule notification for recurring instance {}: {}", instance_event.id, e);
+            }
+        }
+        
+        println!("Total scheduled tasks after adding recurring event: {}", self.scheduled_tasks.len());
+        Ok(())
+    }
 }

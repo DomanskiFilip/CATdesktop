@@ -5,13 +5,15 @@ mod token_utils;
 mod theme_utils;
 mod database_utils;
 mod user_utils;
-mod oauth;
+mod google_oauth;
 mod login;
 mod register;
 mod notification_service;
 mod database_sync_service;
-mod encription_key;
+mod google_sync_service;
+mod encryption_utils;
 mod auto_login;
+mod ai_assistant;
 
 
 use tauri::{AppHandle, Manager, Emitter};
@@ -23,9 +25,11 @@ use auto_launch::AutoLaunchBuilder;
 use std::env;
 use crate::notification_service::NotificationService;
 use crate::database_sync_service::DbSyncService;
+use crate::google_sync_service::GoogleSyncService;
 
 pub type NotificationServiceState = Arc<Mutex<Option<NotificationService>>>;
 pub type DbSyncServiceState = Arc<Mutex<Option<DbSyncService>>>;
+pub type GoogleSyncServiceState = Arc<Mutex<Option<GoogleSyncService>>>;
 
 // Check login status command
 #[tauri::command]
@@ -51,7 +55,7 @@ async fn login_user(app_handle: tauri::AppHandle, email: String, password: Strin
         user_utils::save_current_user_id(&app_handle_arc, &email)?;
 
         // Create or load the user's encryption key
-        match crate::encription_key::create_user_encryption_key(&app_handle_arc, &email) {
+        match crate::encryption_utils::create_user_encryption_key(&app_handle_arc, &email) {
             Ok(_) => println!("User encryption key created/loaded successfully"),
             Err(e) => eprintln!("Failed to create/load user encryption key: {}", e),
         }
@@ -167,7 +171,7 @@ const TIMEOUT: u64 = 120;
 #[tauri::command]
 async fn run_oauth2_flow(app_handle: tauri::AppHandle) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        tokio::runtime::Handle::current().block_on(crate::oauth::oauth2_flow(&app_handle, TIMEOUT))
+        tokio::runtime::Handle::current().block_on(crate::google_oauth::oauth2_flow(&app_handle, TIMEOUT))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -197,6 +201,46 @@ async fn setup_auto_launch() -> Result<(), String> {
     
     auto.enable().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+// ai assistant comands //
+#[tauri::command]
+async fn process_ai_message(app_handle: AppHandle, query: String) -> Result<String, String> {
+    // Call your AI processing logic here (e.g., SageMaker, OpenAI, etc.)
+    match crate::ai_assistant::process_message(&app_handle, query).await {
+        Ok(response) => Ok(response),
+        Err(e) => Err(format!("Failed to process AI message: {}", e)),
+    }
+}
+
+#[tauri::command]
+async fn save_event_from_ai(event_json: String, app_handle: AppHandle) -> Result<(), String> {
+    let event: crate::database_utils::CalendarEvent = serde_json::from_str(&event_json)
+        .map_err(|e| format!("Failed to parse event: {}", e))?;
+    
+    database_utils::save_event(&app_handle, serde_json::to_string(&event).unwrap())
+        .map_err(|e| format!("Failed to save event: {}", e))
+}
+
+#[tauri::command]
+async fn reject_event_suggestion(event_id: String) -> Result<(), String> {
+    println!("Event suggestion with ID {} rejected.", event_id);
+    Ok(())
+}
+
+#[tauri::command]
+async fn trigger_immediate_sync(app_handle: AppHandle) -> Result<(), String> {
+    trigger_sync(app_handle).await
+}
+
+#[tauri::command]
+async fn schedule_notification(event_json: String, app_handle: AppHandle) -> Result<String, String> {
+    schedule_event_notification(event_json, app_handle).await
+}
+
+#[tauri::command]
+async fn get_events_for_ai(app_handle: AppHandle) -> Result<Vec<String>, String> {
+    get_events(app_handle).await
 }
 
 // Start auto-login process //
@@ -248,6 +292,23 @@ async fn start_database_sync_service(app_handle_arc: Arc<AppHandle>, user_logged
         },
         Err(e) => Err(format!("Failed to create database sync service: {}", e))
     }
+}
+
+// Start google sync service //
+async fn start_google_sync_service(app_handle_arc: Arc<AppHandle>, user_logged_in: bool) -> Result<(), String> {
+    let db_state = app_handle_arc.state::<GoogleSyncServiceState>();
+    let mut service_guard = db_state.lock().await;
+
+    // Stop existing service if it exists
+    if let Some(mut existing_service) = service_guard.take() {
+        existing_service.stop().await;
+    }
+
+    // Always create and start a new service
+    let mut service = GoogleSyncService::new();
+    service.start(Arc::clone(&app_handle_arc), user_logged_in).await;
+    *service_guard = Some(service);
+    Ok(())
 }
 
 // Schedule event notification command //
@@ -347,7 +408,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             trigger_sync,
             get_oauth_timeout,
             run_oauth2_flow,
-            schedule_event_notification
+            schedule_event_notification,
+            process_ai_message,
+            save_event_from_ai,
+            reject_event_suggestion,
+            trigger_immediate_sync,
+            get_events_for_ai,
+            schedule_notification
         ])
         .setup(|app| {
           // Request notification permissions on macOS
@@ -371,6 +438,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             // Initialize database sync service state
             app.manage(Arc::new(Mutex::new(None::<DbSyncService>)) as DbSyncServiceState);
 
+            // Initialize google sync service state
+            app.manage(Arc::new(Mutex::new(None::<GoogleSyncService>)) as GoogleSyncServiceState);
             Ok(())
         })
         .build(tauri::generate_context!())?
@@ -391,6 +460,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                   // Start database sync service using a connection pool or other thread-safe approach
                   if let Err(e) = start_database_sync_service(Arc::clone(&app_handle_arc), login_success).await {
                       eprintln!("Failed to start database sync service: {}", e);
+                  }
+
+                  // Start google sync service using a connection pool or other thread-safe approach
+                  if let Err(e) = start_google_sync_service(Arc::clone(&app_handle_arc), login_success).await {
+                      eprintln!("Failed to start google sync service: {}", e);
                   }
               });
             }

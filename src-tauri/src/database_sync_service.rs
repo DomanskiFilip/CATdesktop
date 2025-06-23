@@ -84,23 +84,23 @@ impl DbSyncService {
                 interval.tick().await;
                 
                 // Check if the user is logged in
-                let user_id = match get_current_user_id(&app_handle_ref) {
-                    Ok(id) => id,
+                let user_logged_in = match get_current_user_id(&app_handle_ref) {
+                    Ok(_) => true,
                     Err(e) => {
                         println!("Failed to get user ID: {}", e);
-                        continue;
+                        false
                     }
                 };
                 
                 println!("Running periodic sync to DynamoDB...");
-                if let Err(e) = temp_service.sync_to_dynamodb(&app_handle_ref, true).await {
+                if let Err(e) = temp_service.sync_to_dynamodb(&app_handle_ref, user_logged_in).await {
                   eprintln!("Sync to DynamoDB failed: {}", e);
                 }
 
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
                 println!("Running periodic sync from DynamoDB...");
-                if let Err(e) = temp_service.sync_from_dynamodb(&app_handle_ref, true).await {
+                if let Err(e) = temp_service.sync_from_dynamodb(&app_handle_ref, user_logged_in).await {
                   eprintln!("Sync from DynamoDB failed: {}", e); 
                 }
 
@@ -110,112 +110,6 @@ impl DbSyncService {
             
             println!("DB sync background task completed");
         }));
-    }
-
-    // Helper method -> send events to DynamoDB //
-    async fn send_to_dynamodb(&self, events: &[CalendarEvent]) -> Result<(), String> {
-    // Prepare batch payload
-    let payload = json!({
-        "body": json!({
-          "events": events.iter().map(|event| json!({
-              "id": event.id,
-              "email": event.user_id,
-              "description": event.description,
-              "time": event.time.to_rfc3339(),
-              "alarm": event.alarm,
-              "deleted": event.deleted,
-          })).collect::<Vec<_>>()
-        }).to_string()
-    });
-
-    // Use lambda endpoint from config
-    let sync_url = format!("{}/sync-events", self.config.lambda_base_url);
-    
-    let response = self.client
-        .post(&sync_url)
-        .header("Content-Type", "application/json")
-        .header("x-api-key", &self.config.api_key)
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
-
-    let status = response.status();
-    let text = response.text().await.map_err(|e| e.to_string())?;
-    
-    if text.contains("\"errorType\":\"Sandbox.Timedout\"") {
-            println!("Server timeout, please try again.");
-            return Ok(());
-        }
-
-    // Parse the Lambda response to get status_code and body
-    if let Ok(lambda_response) = serde_json::from_str::<serde_json::Value>(&text) {
-        if let Some(status_code) = lambda_response.get("status_code").and_then(|v| v.as_u64()) {
-            // Check Lambda status code, not just HTTP status
-            if status_code != 200 {
-                if let Some(body) = lambda_response.get("body").and_then(|v| v.as_str()) {
-                    return Err(format!("Failed to sync events: {}", body));
-                } else {
-                    return Err(format!("Failed to sync events: status code {}", status_code));
-                }
-            }
-            
-            // Successfully synced events
-            if let Some(body) = lambda_response.get("body").and_then(|v| v.as_str()) {
-                if let Ok(body_json) = serde_json::from_str::<serde_json::Value>(body) {
-                    if let Some(msg) = body_json.get("message").and_then(|v| v.as_str()) {
-                        println!("{}", msg);
-                    }
-                }
-            }
-            return Ok(());
-        }
-    }
-    
-    // If we couldn't parse the Lambda response format, fall back to HTTP status check
-    if !status.is_success() {
-        return Err(format!("Failed to sync events: {}", text));
-    }
-    Ok(())
-}
-
-    // Helper method -> mark events synced //
-    fn mark_events_synced(&self, conn: &rusqlite::Connection, events: &[CalendarEvent]) -> Result<(), String> {
-        let mut synced = conn.prepare(
-            "UPDATE events SET synced = TRUE WHERE id = ?"
-        ).map_err(|e| e.to_string())?;
-        
-        for event in events {
-            synced.execute([&event.id])
-                .map_err(|e| format!("Failed to mark event {} as synced: {}", event.id, e))?;
-        }
-        
-        Ok(())
-    }
-
-    // Helper method -> merge remote events into local database //
-    async fn merge_remote_events(&self, app_handle: &AppHandle, remote_events: &[Value]) -> Result<(), String> {
-        let _conn = get_db_connection(app_handle)
-            .map_err(|e| format!("Database connection failed: {}", e))?;
-        
-        for event_data in remote_events {
-            // Create a new JSON object with the correct field names
-            let transformed_event = json!({
-                "id": event_data["id"],
-                "user_id": event_data["email"],  // Map email to user_id
-                "description": event_data["description"],
-                "time": event_data["time"],
-                "alarm": event_data["alarm"],
-                "deleted": event_data["deleted"],
-                "synced": true  // Mark as synced since it came from the server
-            });
-            
-            // Convert the transformed event to a string for save_event
-            let event_json = transformed_event.to_string();
-            save_event(app_handle, event_json)?;
-        }
-        
-        Ok(())
     }
 
     // Method to sync events to DynamoDB (upload changes) //
@@ -239,29 +133,16 @@ impl DbSyncService {
             let conn = get_db_connection(app_handle_arc)
                 .map_err(|e| format!("Database connection failed: {}", e))?;
             
+            let now = chrono::Utc::now().date_naive().and_hms_opt(0, 0, 0).unwrap();
             let mut unsynced = conn.prepare(
-                "SELECT id, user_id, description, time, alarm, synced, deleted FROM events 
-                  WHERE user_id = ? AND ((synced = 0) OR (deleted = 1 AND synced = 0))"
+                "SELECT id, user_id, description, time, alarm, synced, synced_google, deleted, recurrence FROM events 
+                WHERE user_id = ? AND ((synced = 0) OR (deleted = 1 AND synced = 0)) AND time >= ?"
             ).map_err(|e| format!("Failed to prepare statement: {}", e))?;
 
-            let events_result = unsynced.query_map([&user_id], |row| {
-                Ok(CalendarEvent {
-                    id: row.get(0)?,
-                    user_id: row.get(1)?,
-                    description: row.get(2)?,
-                    time: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
-                        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
-                            2,
-                            rusqlite::types::Type::Text,
-                            Box::new(e),
-                        ))?.with_timezone(&chrono::Utc),
-                    alarm: row.get(4)?,
-                    synced: row.get(5)?,
-                    deleted: row.get(6)?
-                })
-            }).map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| format!("Failed to collect events: {}", e))?;
+            let events_result = unsynced.query_map((&user_id, &now.to_string()), CalendarEvent::from_row)
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("Failed to collect events: {}", e))?;
 
             // Return collected events
             events_result
@@ -362,9 +243,127 @@ impl DbSyncService {
         }
         Ok(())
     }
+
+
+    // Helper method -> send events to DynamoDB //
+    async fn send_to_dynamodb(&self, events: &[CalendarEvent]) -> Result<(), String> {
+    // Prepare batch payload
+    let payload = json!({
+        "body": json!({
+          "events": events.iter().map(|event| json!({
+              "id": event.id,
+              "email": event.user_id,
+              "description": event.description,
+              "time": event.time.to_rfc3339(),
+              "alarm": event.alarm,
+              "synced_google": event.synced_google,
+              "deleted": event.deleted,
+              "recurrence": event.recurrence.clone().unwrap_or_else(|| "none".to_string()) 
+          })).collect::<Vec<_>>()
+        }).to_string()
+    });
+
+    // Use lambda endpoint from config
+    let sync_url = format!("{}/sync-events", self.config.lambda_base_url);
+    
+    let response = self.client
+        .post(&sync_url)
+        .header("Content-Type", "application/json")
+        .header("x-api-key", &self.config.api_key)
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    let status = response.status();
+    let text = response.text().await.map_err(|e| e.to_string())?;
+    
+    if text.contains("\"errorType\":\"Sandbox.Timedout\"") {
+            println!("Server timeout, please try again.");
+            return Ok(());
+        }
+
+    // Parse the Lambda response to get status_code and body
+    if let Ok(lambda_response) = serde_json::from_str::<serde_json::Value>(&text) {
+        if let Some(status_code) = lambda_response.get("status_code").and_then(|v| v.as_u64()) {
+            // Check Lambda status code, not just HTTP status
+            if status_code != 200 {
+                if let Some(body) = lambda_response.get("body").and_then(|v| v.as_str()) {
+                    return Err(format!("Failed to sync events: {}", body));
+                } else {
+                    return Err(format!("Failed to sync events: status code {}", status_code));
+                }
+            }
+            
+            // Successfully synced events
+            if let Some(body) = lambda_response.get("body").and_then(|v| v.as_str()) {
+                if let Ok(body_json) = serde_json::from_str::<serde_json::Value>(body) {
+                    if let Some(msg) = body_json.get("message").and_then(|v| v.as_str()) {
+                        println!("{}", msg);
+                    }
+                }
+            }
+            return Ok(());
+        }
+    }
+    
+    // If we couldn't parse the Lambda response format, fall back to HTTP status check
+    if !status.is_success() {
+        return Err(format!("Failed to sync events: {}", text));
+    }
+    Ok(())
+  }
+
+    // Helper method -> mark events synced //
+    fn mark_events_synced(&self, conn: &rusqlite::Connection, events: &[CalendarEvent]) -> Result<(), String> {
+        let mut synced = conn.prepare(
+            "UPDATE events SET synced = TRUE WHERE id = ?"
+        ).map_err(|e| e.to_string())?;
+        
+        for event in events {
+            synced.execute([&event.id])
+                .map_err(|e| format!("Failed to mark event {} as synced: {}", event.id, e))?;
+        }
+        
+        Ok(())
+    }
+
+    // Helper method -> merge remote events into local database //
+    async fn merge_remote_events(&self, app_handle: &AppHandle, remote_events: &[Value]) -> Result<(), String> {
+        let _conn = get_db_connection(app_handle)
+            .map_err(|e| format!("Database connection failed: {}", e))?;
+        
+        // Get today's date at midnight
+        let today = chrono::Utc::now().date_naive().and_hms_opt(0, 0, 0).unwrap();
+
+        for event_data in remote_events {
+            // Parse event time as chrono::DateTime
+            if let Some(time_str) = event_data["time"].as_str() {
+                if let Ok(event_time) = chrono::DateTime::parse_from_rfc3339(time_str) {
+                    if event_time.naive_utc() < today {
+                        continue; // Skip past events
+                    }
+                }
+            }
+            let event_json = json!({
+            "id": event_data["id"],
+            "user_id": event_data["email"],
+            "description": event_data["description"],
+            "time": event_data["time"],
+            "alarm": event_data["alarm"],
+            "deleted": event_data["deleted"],
+            "synced": true,  // Mark as synced since it came from the server
+            "synced_google": event_data["synced_google"],
+            "recurrence": event_data.get("recurrence").and_then(|v| v.as_str()).map(String::from)
+          });
+          let _ = save_event(app_handle, event_json.to_string());
+        }
+        
+        Ok(())
+    }
 }
 
-// background task service for syncing events //
+// config cloned for background task service for syncing events //
 impl Clone for AppConfig {
     fn clone(&self) -> Self {
         Self {

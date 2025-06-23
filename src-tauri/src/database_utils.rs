@@ -6,7 +6,7 @@ use std::fs;
 use chrono::{DateTime, Utc};
 use rusqlite::Error as SqliteError;
 use crate::user_utils::get_current_user_id;
-use crate::encription_key::{encrypt_user_data, decrypt_user_data};
+use crate::encryption_utils::{encrypt_user_data, decrypt_user_data};
 use base64::{ engine::general_purpose, Engine };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -17,7 +17,9 @@ pub struct CalendarEvent {
     pub time: DateTime<Utc>,
     pub alarm: bool,
     pub synced: bool,
+    pub synced_google: bool,
     pub deleted: bool,
+    pub recurrence: Option<String>,
 }
 
 impl CalendarEvent {
@@ -30,6 +32,32 @@ impl CalendarEvent {
             .map_err(|e| format!("JSON parse error: {}", e.to_string()))?;
         
         Ok(event)
+    }
+
+    pub fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        Ok(CalendarEvent {
+            id: row.get(0)?,
+            user_id: row.get(1)?,
+            description: row.get(2)?,
+            time: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
+                .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+                    3,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                ))?.with_timezone(&chrono::Utc),
+            alarm: row.get(4)?,
+            synced: row.get(5)?,
+            synced_google: row.get(6)?,
+            deleted: row.get(7)?,
+            recurrence: {
+                let val: Option<String> = row.get(8)?;
+                match val.as_deref() {
+                    Some("none") => None,
+                    Some("") => None,
+                    other => other.map(|s| s.to_string()),
+                }
+            },
+        })
     }
 }
 
@@ -74,7 +102,9 @@ pub fn init_db(app_handle: &AppHandle) -> Result<(), SqliteError> {
             time TEXT NOT NULL,
             alarm BOOLEAN DEFAULT FALSE,
             synced BOOLEAN DEFAULT FALSE,
-            deleted BOOLEAN DEFAULT FALSE
+            synced_google BOOLEAN DEFAULT FALSE,
+            deleted BOOLEAN DEFAULT FALSE,
+            recurrence TEXT DEFAULT NULL
         )"
     )?;
 
@@ -135,15 +165,21 @@ pub fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), Stri
         // If synced is explicitly provided in JSON, use that value
         json_value.get("synced").and_then(|v| v.as_bool()).unwrap_or(false)
     } else {
-        // If not provided, mark as unsynced if it's an existing event being edited
+        !is_existing_event
+    };
+
+    let synced_google = if json_value.get("synced_google").is_some() {
+        // If synced is explicitly provided in JSON, use that value
+        json_value.get("synced").and_then(|v| v.as_bool()).unwrap_or(false)
+    } else {
         !is_existing_event
     };
     
     let deleted = json_value.get("deleted").and_then(|v| v.as_bool()).unwrap_or(false);
 
     tx.execute(
-        "INSERT OR REPLACE INTO events (id, user_id, description, time, alarm, synced, deleted)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT OR REPLACE INTO events (id, user_id, description, time, alarm, synced, synced_google, deleted, recurrence)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         (
             &event.id,
             &event.user_id,
@@ -151,7 +187,9 @@ pub fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), Stri
             &event.time_to_string(),
             &event.alarm,
             synced,
-            deleted
+            synced_google,
+            deleted,
+            event.recurrence.as_deref(), // If recurrence is None, it will be stored as NULL in the database
         ),
     ).map_err(|e| format!("Execute error: {}", e.to_string()))?;
 
@@ -175,30 +213,15 @@ pub fn get_events(app_handle: &AppHandle) -> Result<Vec<String>, SqliteError> {
         Err(_) => return Ok(Vec::new()),  // Return empty list if no user is logged in
     };
   
-    let mut query = conn.prepare(
-        "SELECT id, user_id, description, time, alarm, synced, deleted 
-         FROM events 
-         WHERE deleted = FALSE
-         AND user_id = ?1
-         ORDER BY time ASC"
+        let mut query = conn.prepare(
+        "SELECT id, user_id, description, time, alarm, synced, synced_google, deleted, recurrence
+        FROM events 
+        WHERE deleted = FALSE
+        AND user_id = ?1
+        ORDER BY time ASC"
     )?;
 
-    let rows = query.query_map([&user_id], |row| {
-        Ok(CalendarEvent {
-            id: row.get(0)?,
-            user_id: row.get(1)?,
-            description: row.get(2)?,
-            time: DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
-                .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
-                    3,
-                    rusqlite::types::Type::Text,
-                    Box::new(e),
-                ))?.with_timezone(&Utc),
-            alarm: row.get(4)?,
-            synced: row.get(5)?,
-            deleted: row.get(6)?
-        })
-    })?;
+    let rows = query.query_map([&user_id], CalendarEvent::from_row)?;
 
     let mut events = Vec::new();
     for row_result in rows {

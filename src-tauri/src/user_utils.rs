@@ -1,4 +1,4 @@
-use crate::encription_key::get_encryption_key;
+use crate::encryption_utils::get_encryption_key;
 use tauri::{AppHandle, Manager};
 use std::path::PathBuf;
 use std::fs;
@@ -27,7 +27,7 @@ pub fn save_current_user_id(app_handle: &AppHandle, user_id: &str) -> Result<(),
 
     // Generate a random nonce
     let mut nonce = [0u8; 12];
-    rand::thread_rng().fill_bytes(&mut nonce);
+    rand::rng().fill_bytes(&mut nonce);
     let nonce_slice = Nonce::from_slice(&nonce);
 
     // Encrypt the user ID

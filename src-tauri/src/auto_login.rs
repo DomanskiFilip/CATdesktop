@@ -1,6 +1,7 @@
 use crate::token_utils::{read_tokens_from_file, save_tokens_to_file};
 use crate::api_utils::{AppConfig, get_device_info};
 use crate::user_utils::save_current_user_id;
+use crate::encryption_utils::load_user_encryption_key;
 use reqwest::Client;
 use serde::Deserialize;
 use tauri::AppHandle;
@@ -69,7 +70,7 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
                   save_current_user_id(app_handle, email)?;
 
                   // Load the user's encryption key for decryption
-                  match crate::encription_key::load_user_encryption_key(app_handle, email) {
+                  match load_user_encryption_key(app_handle, email) {
                       Ok(_) => println!("Successfully loaded user encryption key"),
                       Err(e) => eprintln!("Failed to load user encryption key: {}", e),
                   }

@@ -51,7 +51,7 @@ async function checkOAuthAndLoad() {
       authenticating.value = false
       clearInterval(interval)
       if (oauthResult) {
-        message.value = '<span>OAuth successful!</span><span>Loading data...</span>'
+        message.value = '<span>OAuth successful!</span>'
         const body = await invoke<string>('fetch_lambda_endpoint')
         if (!body) throw new Error('No data returned')
         const outer = JSON.parse(body)
@@ -87,9 +87,9 @@ async function checkOAuthAndLoad() {
 <style scoped>
 section {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
+  gap: 1rem;
 }
 button {
   margin-top: 1rem;
@@ -104,6 +104,7 @@ button {
   flex-direction: column;
   justify-content: center;
   align-items: center;
+  margin-top: 1rem;
 }
 .google-logo {
   width: 24px;

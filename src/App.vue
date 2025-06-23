@@ -1,5 +1,5 @@
 <template>
-  <div id="theme-background-element"></div> <!-- background visual element -->
+  <div id="theme-background-element" :class="{ hidden: activeSection === 'section2' }"></div> <!-- background visual element -->
   <section v-if="loggedIn" id="main-page">
     <section id="side-bar">
       <button @click="moreInfo(ismoreInfoVisible)">
@@ -34,11 +34,14 @@
       <section v-show="activeSection === 'section1'">
         <calendar />
       </section>
-      <section v-show="activeSection === 'section2'">AI Content</section>
+      <section v-show="activeSection === 'section2'">
+        <aiAssistant />
+      </section>
       <section v-show="activeSection === 'section3'">
         <h2>SETTINGS:</h2>
         <hr>
         <themes />
+        <GoogleOauth />
       </section>
     </section>
   </section>
@@ -75,6 +78,7 @@ import Login from './components/login.vue'
 import register from './components/register.vue'
 import themes from './components/themes.vue'
 import calendar from './components/calendar.vue'
+import aiAssistant from './components/aiAssistant.vue'
 
 const showLogin = ref(true)
 const loggedIn = ref(false)
@@ -160,6 +164,10 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+  .hidden {
+    display: none;
+  }
+
   #sync-page {
     display: flex;
     flex-direction: column;
@@ -293,7 +301,7 @@ onMounted(async () => {
     margin-left: 3.5rem;
     padding: 1rem;
     height: 100vh;
-    overflow-y: auto;
+    overflow-y: hidden;
     transition: transform 0.2s ease, margin-left 0.4s ease;
     overflow-x: hidden;
   }

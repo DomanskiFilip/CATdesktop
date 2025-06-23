@@ -1,9 +1,19 @@
-use serde::Deserialize;
 use std::time::Instant;
 use std::net::TcpListener;
 use std::io::Read;
 use urlencoding;
 use tauri::{AppHandle, Manager};
+use oauth2::basic::BasicTokenType;
+use oauth2::{
+    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge,
+    RedirectUrl, Scope, TokenResponse, TokenUrl, basic::BasicClient, EmptyExtraTokenFields, StandardTokenResponse,
+    ExtraTokenFields
+};
+use open;
+use std::io::Write;
+use std::fs;
+use crate::user_utils::get_current_user_id;
+use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
 struct Installed {
@@ -17,23 +27,17 @@ struct GoogleSecret {
     installed: Installed,
 }
 
-use oauth2::{
-    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge,
-    RedirectUrl, Scope, TokenResponse, TokenUrl, basic::BasicClient,
-};
-use open;
-use std::io::Write;
-use std::fs;
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GoogleTokenExtraFields {
+    pub id_token: Option<String>,
+}
 
 pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String, String> {
-    // Read and parse the client secret JSON
-    let secret_json = fs::read_to_string("src/client_secret_1_99017034100-i04dv1p35v7rmbvjffjro807b8vupeku.apps.googleusercontent.com.json")
-        .map_err(|e| e.to_string())?;
+    let client_id = ClientId::new("99017034100-stfl2943ef0lnp7c36upsqrstaub49ns.apps.googleusercontent.com".to_string());
+    let secret_json = fs::read_to_string("google_client.json").map_err(|e| e.to_string())?;
     let secret: GoogleSecret = serde_json::from_str(&secret_json).map_err(|e| e.to_string())?;
-
-    let client_id = ClientId::new(secret.installed.client_id);
     let client_secret = ClientSecret::new(secret.installed.client_secret);
-    let redirect_url = RedirectUrl::new(secret.installed.redirect_uris[0].clone()).unwrap();
+    let redirect_url = RedirectUrl::new("http://127.0.0.1:1420".to_string()).unwrap();
 
     let auth_url = AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string()).unwrap();
     let token_url = TokenUrl::new("https://oauth2.googleapis.com/token".to_string()).unwrap();
@@ -45,7 +49,10 @@ pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String,
 
     let (auth_url, _csrf_token) = client
         .authorize_url(CsrfToken::new_random)
-        .add_scope(Scope::new("openid email profile".to_string()))
+        .add_scope(Scope::new("openid".to_string()))
+        .add_scope(Scope::new("email".to_string()))
+        .add_scope(Scope::new("profile".to_string()))
+        .add_scope(Scope::new("https://www.googleapis.com/auth/calendar".to_string()))
         .set_pkce_challenge(pkce_challenge)
         .url();
 
@@ -96,7 +103,7 @@ pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String,
     }
     let code = urlencoding::decode(&code).map_err(|e| e.to_string())?.to_string();
     println!("Exchanging code for token...");
-    let token_result = client
+    let token_result: oauth2::StandardTokenResponse<oauth2::EmptyExtraTokenFields, BasicTokenType> = client
         .exchange_code(AuthorizationCode::new(code))
         .set_pkce_verifier(pkce_verifier)
         .request_async(oauth2::reqwest::async_http_client)
@@ -104,17 +111,25 @@ pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String,
         .map_err(|e| {
             println!("Token exchange error: {:?}", e);
             e.to_string()
-        })?;
+    })?;
 
-    let token = token_result.access_token().secret().to_string();
-println!("Token exchange complete, writing access_token.txt...");
+    let access_token = token_result.access_token().secret().to_string();
+    let refresh_token = token_result.refresh_token().map(|t| t.secret().to_string());
+    println!("Token exchange complete, writing access_token.txt...");
+    // Get the current user's email (user_id)
+    let user_id = get_current_user_id(app_handle)?;
 
-// Get a safe app data directory
-let token_path = app_handle.path().app_data_dir()
+    // Save all tokens in a user-specific file
+    let token_data = serde_json::json!({
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+    });
+    let token_path = app_handle.path().app_data_dir()
         .map_err(|e| format!("Failed to get app data directory: {}", e))?
-        .join("access_token.txt");
-fs::create_dir_all(token_path.parent().unwrap()).map_err(|e| e.to_string())?;
-fs::write(token_path, &token).map_err(|e| e.to_string())?;
-println!("data dir created and token written to access_token.txt");
-Ok(token)
+        .join(format!("google_tokens_{}.json", user_id));
+    fs::create_dir_all(token_path.parent().unwrap()).map_err(|e| e.to_string())?;
+    fs::write(token_path, token_data.to_string()).map_err(|e| e.to_string())?;
+    println!("Google OAuth tokens saved for user: {}", user_id);
+
+    Ok(access_token)
 }
