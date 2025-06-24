@@ -169,8 +169,8 @@ pub fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), Stri
     };
 
     let synced_google = if json_value.get("synced_google").is_some() {
-        // If synced is explicitly provided in JSON, use that value
-        json_value.get("synced").and_then(|v| v.as_bool()).unwrap_or(false)
+        // If synced_google is explicitly provided in JSON, use that value
+        json_value.get("synced_google").and_then(|v| v.as_bool()).unwrap_or(false)
     } else {
         !is_existing_event
     };

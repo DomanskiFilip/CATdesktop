@@ -7,7 +7,7 @@ use tokio::task::JoinHandle;
 use tokio::time::{self, Duration};
 use tauri::{ AppHandle, Manager };
 use reqwest::Client;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, Timelike};
 use serde_json::json;
 use serde_json::Value;
 use base64::Engine;
@@ -57,6 +57,9 @@ impl GoogleSyncService {
         let app_handle_ref = Arc::clone(&app_handle_arc);
 
         self.task_handle = Some(tokio::spawn(async move {
+            // Add a longer initial delay before first periodic sync
+            tokio::time::sleep(Duration::from_secs(20)).await; // Wait 1 minute after initial sync
+            
             let sync_interval = Duration::from_secs(300); // 5 minutes
             let mut interval = time::interval(sync_interval);
 
@@ -179,7 +182,55 @@ impl GoogleSyncService {
         // Add a default duration (e.g., 1 hour)
         let start_time = event.time;
         let end_time = event.time + chrono::Duration::hours(1);
+        
+        // Calculate the hour range for this event
+        let event_hour_start = start_time.with_minute(0).unwrap().with_second(0).unwrap();
+        let event_hour_end = start_time.with_minute(59).unwrap().with_second(59).unwrap();
+        
+        // First, fetch events from Google Calendar for this hour
+        let events_url = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
+        let events_response = tokio::time::timeout(
+            Duration::from_secs(15),
+            self.client
+                .get(events_url)
+                .bearer_auth(access_token.trim())
+                .query(&[
+                    ("timeMin", event_hour_start.to_rfc3339().as_str()),
+                    ("timeMax", event_hour_end.to_rfc3339().as_str()),
+                    ("singleEvents", "true")
+                ])
+                .send()
+        ).await.map_err(|e| format!("Request timed out: {}", e))?.map_err(|e| format!("Failed to get events for hour: {}", e))?;
+        
+        if events_response.status().is_success() {
+            let json: serde_json::Value = events_response.json().await.map_err(|e| e.to_string())?;
+            
+            // Delete any existing events in this hour
+            if let Some(items) = json.get("items").and_then(|v| v.as_array()) {
+                for item in items {
+                    if let Some(google_id) = item.get("id").and_then(|v| v.as_str()) {
+                        println!("Deleting existing Google event {} in the same hour", google_id);
+                        
+                        let delete_url = format!("https://www.googleapis.com/calendar/v3/calendars/primary/events/{}", google_id);
+                        let delete_resp = self.client
+                            .delete(&delete_url)
+                            .bearer_auth(access_token.trim())
+                            .send()
+                            .await;
+                            
+                        if let Err(e) = delete_resp {
+                            eprintln!("Failed to delete existing event: {}", e);
+                        } else if !delete_resp.unwrap().status().is_success() {
+                            eprintln!("Google API error when deleting event");
+                        } else {
+                            println!("Successfully deleted Google event in same hour");
+                        }
+                    }
+                }
+            }
+        }
 
+        // Now create the new event
         let body = json!({
             "summary": decrypted_description,
             "start": { "dateTime": start_time.to_rfc3339() },
@@ -187,17 +238,20 @@ impl GoogleSyncService {
         });
 
         let url = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
-        let resp = self.client
-            .post(url)
-            .bearer_auth(access_token.trim())
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| format!("Failed to send event to Google: {}", e))?;
+        let resp = tokio::time::timeout(
+            Duration::from_secs(15),
+            self.client
+                .post(url)
+                .bearer_auth(access_token.trim())
+                .json(&body)
+                .send()
+        ).await.map_err(|e| format!("Request timed out: {}", e))?.map_err(|e| format!("Failed to send event to Google: {}", e))?;
 
         if !resp.status().is_success() {
             eprintln!("Google API error: {}", resp.status());
             // Don't return early, try to send all events
+        } else {
+            println!("Successfully created new Google event");
         }
     }
 
@@ -237,58 +291,100 @@ impl GoogleSyncService {
 
         let url = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
 
-        let response = self.client
-            .get(url)
-            .bearer_auth(access_token.trim())
-            .send()
-            .await
-            .map_err(|e| format!("Request failed: {}", e))?;
+        // Get current time and time 1 year from now in RFC3339 format
+        let now = chrono::Utc::now();
+        let one_year_from_now = now + chrono::Duration::days(365);
+        let min_time = now.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+        let max_time = one_year_from_now.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+        // Build the request with query parameters
+        let response = tokio::time::timeout(
+            Duration::from_secs(15),
+            self.client
+                .get(url)
+                .bearer_auth(access_token.trim())
+                .query(&[
+                    ("timeMin", min_time.as_str()),
+                    ("timeMax", max_time.as_str()),
+                    ("maxResults", "100"),
+                    ("singleEvents", "true"),
+                    ("orderBy", "startTime")
+                ])
+                .send()
+        ).await.map_err(|e| format!("Request timed out: {}", e))?.map_err(|e| format!("Request failed: {}", e))?;
 
         if !response.status().is_success() {
             return Err(format!("Google API error: {}", response.status()));
         }
 
         let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-        if let Some(items) = json.get("items").and_then(|v| v.as_array()) {
-            let conn = get_db_connection(app_handle_arc)
-                .map_err(|e| format!("Database connection failed: {}", e))?;
-            for item in items {
-                if let (Some(google_id), Some(summary), Some(start)) = (
-                item.get("id").and_then(|v| v.as_str()),
-                item.get("summary").and_then(|v| v.as_str()),
-                item.get("start").and_then(|v| v.get("dateTime").or_else(|| v.get("date"))).and_then(|v| v.as_str()),
-            ) {
-                // Parse event time as chrono::DateTime
-                if let Ok(event_time) = chrono::DateTime::parse_from_rfc3339(start) {
-                    let today = chrono::Utc::now().date_naive().and_hms_opt(0, 0, 0).unwrap();
-                    if event_time.naive_utc() < today {
-                        continue; // Skip past events
-                    }
-                }
-                
-                // Check if this Google event already exists locally
-                let mut query = conn.prepare(
-                    "SELECT COUNT(*) FROM events WHERE id = ?1 AND user_id = ?2"
-                ).map_err(|e| format!("Failed to prepare check statement: {}", e))?;
-                let exists: i64 = query.query_row([google_id, &username], |row| row.get(0))
-                    .map_err(|e| format!("Failed to check for existing event: {}", e))?;
-                if exists > 0 {
-                    continue; // Skip if already exists
-                }
+          if let Some(items) = json.get("items").and_then(|v| v.as_array()) {
+              let conn = get_db_connection(app_handle_arc)
+                  .map_err(|e| format!("Database connection failed: {}", e))?;
+              for item in items {
+                  if let (Some(google_id), Some(summary), Some(start)) = (
+                  item.get("id").and_then(|v| v.as_str()),
+                  item.get("summary").and_then(|v| v.as_str()),
+                  item.get("start").and_then(|v| v.get("dateTime").or_else(|| v.get("date"))).and_then(|v| v.as_str()),
+              ) {
+                  // Parse event time as chrono::DateTime
+                  if let Ok(event_time) = chrono::DateTime::parse_from_rfc3339(start) {
+                      let today = chrono::Utc::now().date_naive().and_hms_opt(0, 0, 0).unwrap();
+                      if event_time.naive_utc() < today {
+                          continue; // Skip past events
+                      }
+                      
+                      // Check if there's any event at the same hour
+                      let event_hour_start = event_time.naive_utc().date()
+                          .and_hms_opt(event_time.hour(), 0, 0)
+                          .unwrap_or_else(|| event_time.naive_utc());
+                      let event_hour_end = event_time.naive_utc().date()
+                          .and_hms_opt(event_time.hour(), 59, 59)
+                          .unwrap_or_else(|| event_time.naive_utc());
+                          
+                      let mut same_hour_query = conn.prepare(
+                          "SELECT COUNT(*) FROM events 
+                          WHERE user_id = ?1 
+                          AND time >= ?2 
+                          AND time <= ?3 
+                          AND deleted = 0"
+                      ).map_err(|e| format!("Failed to prepare same hour check: {}", e))?;
+                      
+                      let same_hour_count: i64 = same_hour_query.query_row(
+                          (&username, &event_hour_start.to_string(), &event_hour_end.to_string()), 
+                          |row| row.get(0)
+                      ).map_err(|e| format!("Failed to check for same hour events: {}", e))?;
+                      
+                      if same_hour_count > 0 {
+                          println!("Skipping Google event at {} as there's already an event at the same hour", 
+                                  event_time.format("%Y-%m-%d %H:%M:%S"));
+                          continue; // Skip if there's already an event at the same hour
+                      }
+                  }
+                  
+                  // Check if this Google event already exists locally
+                  let mut query = conn.prepare(
+                      "SELECT COUNT(*) FROM events WHERE id = ?1 AND user_id = ?2"
+                  ).map_err(|e| format!("Failed to prepare check statement: {}", e))?;
+                  let exists: i64 = query.query_row([google_id, &username], |row| row.get(0))
+                      .map_err(|e| format!("Failed to check for existing event: {}", e))?;
+                  if exists > 0 {
+                      continue; // Skip if already exists
+                  }
 
-                let event_json = json!({
-                    "id": google_id,
-                    "user_id": username,
-                    "description": summary,
-                    "time": start,
-                    "alarm": false,
-                    "synced": false,
-                    "synced_google": true,
-                    "deleted": false,
-                    "recurrence": None::<String>
-                });
-                let _ = save_event(app_handle_arc, event_json.to_string());
-            }
+                  let event_json = json!({
+                      "id": google_id,
+                      "user_id": username,
+                      "description": summary,
+                      "time": start,
+                      "alarm": false,
+                      "synced": false,
+                      "synced_google": true,
+                      "deleted": false,
+                      "recurrence": None::<String>
+                  });
+                  let _ = save_event(app_handle_arc, event_json.to_string());
+              }
             }
         }
         let _ = app_handle_arc.emit("google_sync_complete", ());
