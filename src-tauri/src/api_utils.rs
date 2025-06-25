@@ -6,6 +6,8 @@ use serde_json::Value;
 pub struct AppConfig {
     pub api_key: String,
     pub lambda_base_url: String,
+    pub enable_database_sync: bool,
+    pub enable_google_sync: bool,
 }
 
 impl AppConfig {
@@ -16,9 +18,14 @@ impl AppConfig {
         let lambda_base_url = env::var("LAMBDA_BASE_URL")
             .unwrap_or_else(|_| "https://ywaixwivt3.execute-api.eu-west-2.amazonaws.com/prod".to_string());
         
+        let enable_database_sync = false;
+        let enable_google_sync = false;
+
         Ok(Self {
             api_key,
             lambda_base_url,
+            enable_database_sync,
+            enable_google_sync,
         })
     }
 }

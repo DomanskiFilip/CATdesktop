@@ -275,6 +275,13 @@ async fn start_notification_service(app_handle_arc: Arc<AppHandle>, user_logged_
 
 // Start database sync service //
 async fn start_database_sync_service(app_handle_arc: Arc<AppHandle>, user_logged_in: bool) -> Result<(), String> {
+    let config = crate::api_utils::AppConfig::new()?;
+    
+    if !config.enable_database_sync {
+        println!("Database sync service is disabled via configuration");
+        return Ok(());
+    }
+    
     let db_state = app_handle_arc.state::<DbSyncServiceState>();
     let mut service_guard = db_state.lock().await;
     
@@ -288,14 +295,21 @@ async fn start_database_sync_service(app_handle_arc: Arc<AppHandle>, user_logged
         Ok(mut service) => {
             service.start(Arc::clone(&app_handle_arc), user_logged_in).await;
             *service_guard = Some(service);
+            println!("Database sync service started successfully");
             Ok(())
         },
         Err(e) => Err(format!("Failed to create database sync service: {}", e))
     }
 }
 
-// Start google sync service //
 async fn start_google_sync_service(app_handle_arc: Arc<AppHandle>, user_logged_in: bool) -> Result<(), String> {
+    let config = crate::api_utils::AppConfig::new()?;
+    
+    if !config.enable_google_sync {
+        println!("Google sync service is disabled via configuration");
+        return Ok(());
+    }
+    
     let db_state = app_handle_arc.state::<GoogleSyncServiceState>();
     let mut service_guard = db_state.lock().await;
 
@@ -308,6 +322,7 @@ async fn start_google_sync_service(app_handle_arc: Arc<AppHandle>, user_logged_i
     let mut service = GoogleSyncService::new();
     service.start(Arc::clone(&app_handle_arc), user_logged_in).await;
     *service_guard = Some(service);
+    println!("Google sync service started successfully");
     Ok(())
 }
 
@@ -332,23 +347,30 @@ async fn schedule_event_notification( event_json: String, app_handle: AppHandle)
 // Trigger immediate sync command //
 #[tauri::command]
 async fn trigger_sync(app_handle: tauri::AppHandle) -> Result<(), String> {
+    let config = crate::api_utils::AppConfig::new()?;
     let app_handle_arc = Arc::new(app_handle);
     
-    // Trigger immediate sync to DynamoDB
-    let db_state = app_handle_arc.state::<DbSyncServiceState>();
-    let service_guard = db_state.lock().await;
+    // Check if user is logged in
+    let user_logged_in = match crate::user_utils::get_current_user_id(&app_handle_arc) {
+        Ok(_) => true,
+        Err(_) => false,
+    };
     
-    if let Some(service) = service_guard.as_ref() {
-        // Check if user is logged in
-        let user_logged_in = match crate::user_utils::get_current_user_id(&app_handle_arc) {
-            Ok(_) => true,
-            Err(_) => false,
-        };
+    if !user_logged_in {
+        return Err("User not logged in".to_string());
+    }
+    
+    // Trigger immediate sync to DynamoDB (if enabled)
+    if config.enable_database_sync {
+        let db_state = app_handle_arc.state::<DbSyncServiceState>();
+        let service_guard = db_state.lock().await;
         
-        if user_logged_in {
+        if let Some(service) = service_guard.as_ref() {
             service.sync_to_dynamodb(&app_handle_arc, true).await?;
             println!("Immediate sync to DynamoDB completed");
         }
+    } else {
+        println!("Database sync is disabled, skipping DynamoDB sync");
     }
     
     Ok(())

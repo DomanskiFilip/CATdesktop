@@ -369,6 +369,8 @@ impl Clone for AppConfig {
         Self {
             api_key: self.api_key.clone(),
             lambda_base_url: self.lambda_base_url.clone(),
+            enable_database_sync: self.enable_database_sync,
+            enable_google_sync: self.enable_google_sync,
         }
     }
 }
