@@ -296,6 +296,7 @@ impl GoogleSyncService {
         let one_year_from_now = now + chrono::Duration::days(365);
         let min_time = now.format("%Y-%m-%dT%H:%M:%SZ").to_string();
         let max_time = one_year_from_now.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+        println!("Sending request to Google Calendar API...");
 
         // Build the request with query parameters
         let response = tokio::time::timeout(
@@ -307,14 +308,34 @@ impl GoogleSyncService {
                     ("timeMin", min_time.as_str()),
                     ("timeMax", max_time.as_str()),
                     ("maxResults", "100"),
+                    ("showDeleted", "false"),
                     ("singleEvents", "true"),
-                    ("orderBy", "startTime")
+                    ("timeZone", "UTC"),
+                    ("orderBy", "startTime"),
                 ])
                 .send()
         ).await.map_err(|e| format!("Request timed out: {}", e))?.map_err(|e| format!("Request failed: {}", e))?;
 
+        // Improved error handling to display server messages
         if !response.status().is_success() {
-            return Err(format!("Google API error: {}", response.status()));
+            let status = response.status();
+            let error_body = response.text().await.unwrap_or_else(|_| "Could not read error response".to_string());
+
+            if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(&error_body) {
+                if let Some(error) = error_json.get("error") {
+                    let message = error.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown error");
+                    let reason = error.get("errors").and_then(|e| e.as_array())
+                        .and_then(|arr| arr.first())
+                        .and_then(|e| e.get("reason"))
+                        .and_then(|r| r.as_str())
+                        .unwrap_or("unknown");
+                        
+                    eprintln!("Google Calendar API error ({}): {}", reason, message);
+                    return Err(format!("Google Calendar API error: {} ({})", message, reason));
+                }
+            }
+            eprintln!("Google API error response: {}", error_body);
+            return Err(format!("Google API error: {} - {}", status, error_body));
         }
 
         let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
