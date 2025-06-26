@@ -56,6 +56,7 @@
 <script setup lang="ts">
 import { ref, onMounted, nextTick, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event';
 import { format } from 'date-fns'
 
 interface EventSuggestion {
@@ -114,7 +115,7 @@ const formatRecurrence = (recurrence: string) => {
   return recurrence;
 };
 
-// Scroll to bottom of chat
+// Scroll to bottom of chat //
 const scrollToBottom = async () => {
   await nextTick();
   if (chatContainer.value) {
@@ -122,7 +123,7 @@ const scrollToBottom = async () => {
   }
 };
 
-// Send message to AI
+// Send message to AI //
 const sendMessage = async () => {
   const message = userInput.value.trim();
   if (!message || isProcessing.value) return;
@@ -146,15 +147,35 @@ const sendMessage = async () => {
     // Add AI response to chat
     isTyping.value = false;
     
-    if (parsedResponse.extracted_events && parsedResponse.extracted_events.length > 0) {
+    // Check action_taken to determine what to do
+    const actionTaken = parsedResponse.action_taken || 'none';
+    
+    if (actionTaken === 'create_event' && 
+        parsedResponse.extracted_events && 
+        parsedResponse.extracted_events.length > 0) {
       // Add response with event suggestion
       chatHistory.value.push({
         content: parsedResponse.response_text,
         sender: 'assistant',
         eventSuggestion: parsedResponse.extracted_events[0]
       });
+    } else if (actionTaken === 'update_event' && 
+              parsedResponse.extracted_events && 
+              parsedResponse.extracted_events.length > 0) {
+      // Handle updating an event
+      chatHistory.value.push({
+        content: parsedResponse.response_text,
+        sender: 'assistant',
+        eventSuggestion: parsedResponse.extracted_events[0]
+      });
+    } else if (actionTaken === 'query_events') {
+      // Just show the response text for queries
+      chatHistory.value.push({
+        content: parsedResponse.response_text,
+        sender: 'assistant'
+      });
     } else {
-      // Add regular response
+      // For 'none' or any other action, just show response text
       chatHistory.value.push({
         content: parsedResponse.response_text,
         sender: 'assistant'
@@ -255,7 +276,7 @@ const rejectSuggestion = async (messageIndex: number) => {
 // Scroll to bottom on mount
 onMounted(() => {
   scrollToBottom();
-});
+    });
 
 // Scroll to bottom when chat history changes
 watch(chatHistory, () => {

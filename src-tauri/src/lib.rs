@@ -206,9 +206,15 @@ async fn setup_auto_launch() -> Result<(), String> {
 // ai assistant comands //
 #[tauri::command]
 async fn process_ai_message(app_handle: AppHandle, query: String) -> Result<String, String> {
-    // Call your AI processing logic here (e.g., SageMaker, OpenAI, etc.)
-    match crate::ai_assistant::process_message(&app_handle, query).await {
-        Ok(response) => Ok(response),
+    // Call the AI processing logic
+    match crate::ai_assistant::process_user_query(&app_handle, query).await {
+        Ok(response) => {
+            // Ensure we're returning valid, clean JSON
+            match serde_json::to_string(&response) {
+                Ok(json_string) => Ok(json_string),
+                Err(e) => Err(format!("Failed to serialize response: {}", e)),
+            }
+        },
         Err(e) => Err(format!("Failed to process AI message: {}", e)),
     }
 }
