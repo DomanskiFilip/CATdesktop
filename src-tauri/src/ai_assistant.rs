@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc, Duration};
 use tauri::AppHandle;
 use tauri::Emitter;
 use uuid::Uuid;
+use rand::Rng;
 use crate::database_utils::{CalendarEvent, get_db_connection};
 use crate::user_utils::get_current_user_id;
 use crate::api_utils::AppConfig;
@@ -63,19 +64,51 @@ impl AIAssistantService {
         // log user query
         println!("📝 User Query: {}", query);
 
+        // Check if we have a canned response for this query
+        if let Some(response) = self.get_canned_response(&query) {
+            println!("🤖 Using canned response");
+            return Ok(response);
+        }
+
         // Create prompt for the LLM
         let prompt = self.create_prompt(&query, app_handle).await?;
         
         // Call Lambda endpoint and get parsed LLM response
-        let llm_response = self.invoke_lambda_endpoint(prompt, app_handle).await?;
+        let mut llm_response = self.invoke_lambda_endpoint(prompt, app_handle).await?;
+
+        // Log the raw LLM response for debugging
+        println!("🔍 Raw LLM Response: {}", llm_response.response_text);
 
         // Handle actions based on `action_taken`
         match llm_response.action_taken.as_deref() {
             Some("create_event") => {
                 if let Some(ref events) = llm_response.extracted_events {
+                    let mut valid_events = false;
+                    
                     for event in events {
-                        self.save_extracted_event(event.clone(), app_handle).await?;
+                        // Validate event fields before proceeding
+                        if event.description.is_empty() {
+                            println!("⚠️ Skipping event with empty description");
+                            continue;
+                        }
+                        
+                        // Try to save the event, but handle any errors more gracefully
+                        match self.save_extracted_event(event.clone(), app_handle).await {
+                            Ok(_) => {
+                                println!("✅ Successfully saved event: {}", event.description);
+                                valid_events = true;
+                            },
+                            Err(e) => println!("❌ Failed to save event: {} - Error: {}", event.description, e),
+                        }
                     }
+                    
+                    // If all events were invalid, update the response text
+                    if !valid_events && llm_response.extracted_events.as_ref().unwrap().iter().all(|e| e.description.is_empty()) {
+                        llm_response.response_text = "I need more details to create an event. Please provide a description.".to_string();
+                        llm_response.action_taken = Some("none".to_string());
+                    }
+                } else {
+                    println!("⚠️ create_event action specified but no events provided");
                 }
             }
             Some("update_event") => {
@@ -97,6 +130,80 @@ impl AIAssistantService {
         Ok(llm_response)
     }
 
+        // Method to get canned responses for common queries //
+        fn get_canned_response(&self, query: &str) -> Option<LLMResponse> {
+          // Convert query to lowercase for case-insensitive matching
+          let lowercase_query = query.to_lowercase();
+          let normalized_query = lowercase_query.trim();
+          
+          // Create a random number generator instance
+          let mut rng = rand::thread_rng();
+
+          // Define patterns for common greetings and questions
+          match normalized_query {
+              q if (q == "hi" || q == "hello" || q == "hey" || q == "hi there" || q == "hi cat") => {
+                  // Return one of 3 random greetings
+                  let greetings = [
+                      "Hi there! I'm CAT, your calendar assistant. How can I help with your schedule today?",
+                      "Hello! I'm here to help manage your calendar. Need to schedule something?",
+                      "Hey! I'm your calendar assistant. What can I do for you today?"
+                  ];
+                  
+                  let index = rng.gen_range(0..greetings.len());
+                  let greeting = greetings[index];
+                        
+                  Some(LLMResponse {
+                      response_text: greeting.to_string(),
+                      extracted_events: None,
+                      conversation_id: None,
+                      action_taken: Some("none".to_string())
+                  })
+              },
+              "how are you" | "how are you?" | "how are you doing" | "how are you doing?" => {
+                  // Return one of 3 random responses for "how are you"
+                  let responses = [
+                      "I'm functioning well and ready to help organize your calendar! What can I do for you?",
+                      "I'm good, thanks for asking! Would you like to check your schedule or create a new event?",
+                      "All systems operational! I'm here to assist with your calendar needs. What's on your mind?"
+                  ];
+                  
+                  let index = rng.gen_range(0..responses.len());
+                  let response = responses[index];
+                  
+                  Some(LLMResponse {
+                      response_text: response.to_string(),
+                      extracted_events: None,
+                      conversation_id: None,
+                      action_taken: Some("none".to_string())
+                  })
+              },
+              "what can you do" | "what can you do?" | "help" | "what are your features" => {
+                  Some(LLMResponse {
+                      response_text: "I can help you manage your calendar by creating, updating, and finding events. Just ask me things like 'Schedule a meeting tomorrow at 2pm', 'When's my next appointment?', or 'Move my dentist appointment to Friday'.".to_string(),
+                      extracted_events: None,
+                      conversation_id: None,
+                      action_taken: Some("none".to_string())
+                  })
+              },
+              "thanks" | "thank you" | "thanks!" | "thank you!" => {
+                  Some(LLMResponse {
+                      response_text: "You're welcome! Let me know if you need any other help with your calendar.".to_string(),
+                      extracted_events: None,
+                      conversation_id: None,
+                      action_taken: Some("none".to_string())
+                  })
+              },
+              "bye" | "goodbye" | "see you" | "bye bye" => {
+                  Some(LLMResponse {
+                      response_text: "Goodbye! I'm here whenever you need help managing your calendar.".to_string(),
+                      extracted_events: None,
+                      conversation_id: None,
+                      action_taken: Some("none".to_string())
+                  })
+              },
+              _ => None, // No canned response found
+          }
+      }
       
       // Method to create a prompt for the LLM based on user query and recent events //
       async fn create_prompt(&self, query: &str, app_handle: &AppHandle) -> Result<String, String> {
@@ -120,7 +227,10 @@ impl AIAssistantService {
           
           // Create a comprehensive prompt with instructions
           let prompt = format!(
-          "You are CAT (Calendar Assistant), an AI assistant built into a desktop calendar application.\n\n\
+          "<system>
+          You are a JSON-only response generator. Avoid any helper text. Always return ONLY the requested JSON.
+          
+          You are CAT (Calendar Assistant), an AI assistant built into a desktop calendar application.\n\n\
           
           CRITICAL FORMATTING INSTRUCTION:\n\
           - You must ONLY return a single JSON object\n\
@@ -133,6 +243,7 @@ impl AIAssistantService {
           - Users can create, update, delete, and query calendar events\n\
           - Each event has: description, date/time, alarm setting, and optional recurrence\n\
           - You have access to the user's current events and can modify their calendar\n\n\
+          - You can include polite and helpful responses, but they must be included within 'response_text':'(here your polite and helpful responses)'\n\
           
           YOUR CAPABILITIES:\n\
           - Create new calendar events from natural language\n\
@@ -180,7 +291,8 @@ impl AIAssistantService {
           - Do not include any additional instructions or guidelines in the JSON\n\
           - DO not repeat yourself or the instructions\n\
           - ONLY return the raw JSON object - your ENTIRE response must be a parseable JSON\n\
-          YOUR RESPONSE IS USED FOR THE ACTUAL APP SO INCLUDE JUST ONE JSON OBJECT BASED ON RESPONSE FORMAT AS YOUR ENTIRE RESPONSE",
+          YOUR RESPONSE IS USED FOR THE ACTUAL APP SO INCLUDE JUST ONE JSON OBJECT BASED ON RESPONSE FORMAT AS YOUR ENTIRE RESPONSE
+          </system>",
           Utc::now().format("%Y-%m-%d %H:%M:%S"),
           events_context,
           query
@@ -203,9 +315,9 @@ impl AIAssistantService {
         let inner_body = serde_json::json!({
             "inputs": prompt,
             "parameters": {
-                "max_new_tokens": 1000,
-                "temperature": 0.3,
-                "top_p": 0.9,
+                "max_new_tokens": 150,
+                "temperature": 0.05,
+                "top_p": 0.85,
                 "return_full_text": false
             }
         });
@@ -329,69 +441,187 @@ pub async fn process_user_query(app_handle: &AppHandle, query: String) -> Result
 fn post_process_json(json_str: &str) -> String {
     println!("🔍 Original LLM response: {}", json_str);
 
-    // First, try to extract just the JSON object, ignoring any additional text
-    if let Some(json_start) = json_str.find('{') {
-        if let Some(json_end) = json_str.rfind('}') {
-            if json_end > json_start {
-                // Extract just the JSON object and nothing more
-                let json_object = &json_str[json_start..=json_end];
+    // Handle code blocks with json or backticks - check for multiple code blocks
+    let code_block_pattern = regex::Regex::new(r"```(?:json)?\s*([\s\S]*?)```").unwrap();
+    
+    // Process code blocks if they exist
+    for captures in code_block_pattern.captures_iter(json_str) {
+        if let Some(code_content) = captures.get(1) {
+            let inner_content = code_content.as_str().trim();
+            
+            // Handle escaped characters and convert single quotes properly
+            let fixed_json = fix_json_formatting(inner_content);
+            
+            // Check if it's valid JSON
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&fixed_json) {
+                if parsed["response_text"].is_string() {
+                    println!("🔍 Valid JSON extracted from code block");
+                    return fixed_json;
+                }
+            }
+        }
+    }
+
+    // Try to find standalone JSON objects in the response
+    let json_pattern = regex::Regex::new(r"\{[^{]*'response_text'[^}]*\}").unwrap();
+    
+    for json_match in json_pattern.find_iter(json_str) {
+        let potential_json = json_match.as_str();
+        
+        // Fix escaped characters and convert single quotes properly
+        let fixed_json = fix_json_formatting(potential_json);
+        
+        // Check if it's valid JSON after conversion
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&fixed_json) {
+            if parsed["response_text"].is_string() {
+                println!("🔍 Valid JSON extracted from response: {}", fixed_json);
+                return fixed_json;
+            }
+        }
+    }
+
+    // If direct detection fails, try a more comprehensive approach
+    // Find the first opening brace that looks like it could be the start of a JSON object
+    for (i, c) in json_str.chars().enumerate() {
+        if c == '{' {
+            // Try to extract balanced JSON
+            let mut depth = 1;
+            let mut end_pos = i;
+            
+            for (j, next_char) in json_str[i+1..].chars().enumerate() {
+                if next_char == '{' {
+                    depth += 1;
+                } else if next_char == '}' {
+                    depth -= 1;
+                    if depth == 0 {
+                        end_pos = i + j + 1;
+                        break;
+                    }
+                }
+            }
+            
+            if depth == 0 {
+                let json_candidate = &json_str[i..=end_pos];
                 
-                // Remove leading dots or spaces that might appear before JSON
-                let clean_json = json_object.trim_start_matches(|c| c == '.' || c == ' ' || c == '\t');
+                // Fix escaped characters and convert single quotes properly
+                let fixed_json = fix_json_formatting(json_candidate);
                 
-                // Verify that this is a valid JSON before returning
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(clean_json) {
-                    // If we have valid JSON with expected fields, return it directly
-                    if parsed["response_text"].is_string() && parsed["action_taken"].is_string() {
-                        println!("🔍 Valid JSON found and extracted");
-                        return clean_json.to_string();
+                // Try to parse
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&fixed_json) {
+                    if parsed["response_text"].is_string() {
+                        println!("🔍 Valid JSON extracted using balanced braces");
+                        return fixed_json;
                     }
                 }
             }
         }
     }
+
+    // If all else fails, extract the values directly and construct a new JSON
+    let mut response_text = String::from("I'm your calendar assistant. How can I help you?");
+    let mut action_taken = String::from("none");
     
-    // If direct extraction failed, use a stricter regex to find the first valid JSON
-    // This regex looks for JSON that specifically contains our key fields
-    let json_pattern = regex::Regex::new(
-        r#"\{(?:[^{}]|"[^"]*"|(?:\{(?:[^{}]|"[^"]*")*\}))*"response_text"(?:[^{}]|"[^"]*"|(?:\{(?:[^{}]|"[^"]*")*\}))*"action_taken"(?:[^{}]|"[^"]*"|(?:\{(?:[^{}]|"[^"]*")*\}))*\}"#
-    ).unwrap();
-    
-    // Try to find the first complete JSON object with our expected fields
-    if let Some(captures) = json_pattern.find(json_str) {
-        let json_content = captures.as_str().to_string();
-        // If we have a match, clean it up and return it
-        let clean_json = json_content.trim_start_matches(|c| c == '.' || c == ' ' || c == '\t');
-        if let Ok(_) = serde_json::from_str::<serde_json::Value>(&clean_json) {
-            println!("🔍 Valid JSON extracted via regex");
-            return clean_json.to_string();
+    // Try to extract response_text using a more comprehensive approach
+    let response_pattern = regex::Regex::new(r"'response_text':\s*'((?:[^'\\]|\\.)*?)'").unwrap();
+    if let Some(caps) = response_pattern.captures(json_str) {
+        if let Some(text_match) = caps.get(1) {
+            let text = text_match.as_str();
+            // Replace escaped apostrophes with regular ones for the final output
+            response_text = text.replace("\\'", "'");
         }
     }
     
-    // If regex extraction failed, fall back to the existing field extraction logic
-    let response_text_regex = regex::Regex::new(r#""response_text":\s*"([^"]*)"#).unwrap();
-    let action_taken_regex = regex::Regex::new(r#""action_taken":\s*"([^"]*)"#).unwrap();
+    // Extract action_taken
+    let action_pattern = regex::Regex::new(r"'action_taken':\s*'([^']*)'").unwrap();
+    if let Some(caps) = action_pattern.captures(json_str) {
+        if let Some(action_match) = caps.get(1) {
+            action_taken = action_match.as_str().to_string();
+        }
+    }
     
-    let response_text = match response_text_regex.captures(json_str)
-        .and_then(|cap| cap.get(1))
-        .map(|m| m.as_str()) {
-            Some(text) => text,
-            None => "No response text found",
-        };
-        
-    let action_taken = match action_taken_regex.captures(json_str)
-        .and_then(|cap| cap.get(1))
-        .map(|m| m.as_str()) {
-            Some(action) => action,
-            None => "none",
-        };
-    
-    // Construct a valid JSON manually
+    // Construct a valid JSON manually with proper escaping
+    let escaped_response = response_text.replace("\"", "\\\"");
     let constructed_json = format!(
         r#"{{"response_text":"{}","extracted_events":[],"action_taken":"{}"}}"#, 
-        response_text, action_taken
+        escaped_response, action_taken
     );
     
     println!("🔍 Constructed JSON fallback: {}", constructed_json);
     constructed_json
+}
+
+// Helper function to fix JSON formatting issues
+fn fix_json_formatting(json_text: &str) -> String {
+    let mut result = json_text.to_string();
+    
+    // First handle escaped characters that need to be preserved
+    let mut temp = String::new();
+    let mut i = 0;
+    let chars: Vec<char> = result.chars().collect();
+    
+    while i < chars.len() {
+        if i + 1 < chars.len() && chars[i] == '\\' && chars[i + 1] == '\'' {
+            // Replace escaped single quote with a temporary placeholder
+            temp.push_str("__ESCAPED_QUOTE__");
+            i += 2; // Skip the backslash and quote
+        } else {
+            temp.push(chars[i]);
+            i += 1;
+        }
+    }
+    
+    // Now do the regular replacements
+    result = temp
+        .replace("{'", "{\"")
+        .replace("':", "\":")
+        .replace("': ", "\": ")
+        .replace(", '", ", \"")
+        .replace("','", "\",\"")
+        .replace("'}", "\"}")
+        .replace("']", "\"]")
+        .replace("['", "[\"")
+        // Handle more complex nested cases
+        .replace("',{", "\",{")
+        .replace("},'", "},\"")
+        .replace("':", "\":")
+        .replace(": '", ": \"")
+        .replace("',", "\",")
+        .replace(",'", ",\"");
+    
+    // Finally, restore the escaped quotes properly as regular quotes in the final JSON
+    result = result.replace("__ESCAPED_QUOTE__", "'");
+    
+    // Filter out non-printable characters and control characters that might corrupt JSON
+    result = result.chars()
+        .filter(|&c| c >= ' ' || c == '\n' || c == '\t') // Keep only printable chars and some whitespace
+        .collect();
+    
+    // Check if the JSON is properly balanced
+    let mut brace_count = 0;
+    let mut bracket_count = 0;
+    
+    for c in result.chars() {
+        if c == '{' {
+            brace_count += 1;
+        } else if c == '}' {
+            brace_count -= 1;
+        } else if c == '[' {
+            bracket_count += 1;
+        } else if c == ']' {
+            bracket_count -= 1;
+        }
+    }
+    
+    // Add missing closing braces/brackets if needed
+    while brace_count > 0 {
+        result.push('}');
+        brace_count -= 1;
+    }
+    
+    while bracket_count > 0 {
+        result.push(']');
+        bracket_count -= 1;
+    }
+    
+    result
 }
