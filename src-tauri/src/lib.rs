@@ -23,6 +23,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use auto_launch::AutoLaunchBuilder;
 use std::env;
+use serde::{Serialize, Deserialize};
 use crate::notification_service::NotificationService;
 use crate::database_sync_service::DbSyncService;
 use crate::google_sync_service::GoogleSyncService;
@@ -30,6 +31,13 @@ use crate::google_sync_service::GoogleSyncService;
 pub type NotificationServiceState = Arc<Mutex<Option<NotificationService>>>;
 pub type DbSyncServiceState = Arc<Mutex<Option<DbSyncService>>>;
 pub type GoogleSyncServiceState = Arc<Mutex<Option<GoogleSyncService>>>;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConversationMessage {
+    pub role: String,
+    pub content: String,
+    pub timestamp: String,
+}
 
 // Check login status command
 #[tauri::command]
@@ -205,9 +213,23 @@ async fn setup_auto_launch() -> Result<(), String> {
 
 // ai assistant comands //
 #[tauri::command]
-async fn process_ai_message(app_handle: AppHandle, query: String) -> Result<String, String> {
-    // Call the AI processing logic
-    match crate::ai_assistant::process_user_query(&app_handle, query).await {
+async fn process_ai_message(app_handle: AppHandle, query: String, conversation_history: String) -> Result<String, String> {
+    println!("Received conversation_history: {}", conversation_history); 
+      let parsed_history: Option<Vec<ConversationMessage>> = if conversation_history.is_empty() {
+        None
+    } else {
+        match serde_json::from_str(&conversation_history) {
+            Ok(history) => Some(history),
+            Err(e) => {
+                println!("Failed to parse conversation_history: {} | Raw: {}", e, conversation_history);
+                None
+            }
+        }
+    };
+
+    println!("Received conversation history: {:?}", parsed_history);  
+  // Call the AI processing logic
+    match crate::ai_assistant::process_user_query(&app_handle, query, parsed_history).await {
         Ok(response) => {
             // Ensure we're returning valid, clean JSON
             match serde_json::to_string(&response) {

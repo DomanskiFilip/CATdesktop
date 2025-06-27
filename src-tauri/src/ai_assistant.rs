@@ -4,6 +4,7 @@ use tauri::AppHandle;
 use tauri::Emitter;
 use uuid::Uuid;
 use rand::Rng;
+use crate::ConversationMessage;
 use crate::database_utils::{CalendarEvent, get_db_connection};
 use crate::user_utils::get_current_user_id;
 use crate::api_utils::AppConfig;
@@ -52,6 +53,8 @@ pub struct ExtractedEvent {
     pub recurrence: Option<String>,
 }
 
+
+
 pub struct AIAssistantService;
 
 impl AIAssistantService {
@@ -60,7 +63,7 @@ impl AIAssistantService {
       }
 
       // Public function to process AI messages //
-      pub async fn process_user_query(&self, query: String, app_handle: &AppHandle) -> Result<LLMResponse, String> {
+      pub async fn process_user_query(&self, query: String, app_handle: &AppHandle,  conversation_history: Option<Vec<ConversationMessage>>) -> Result<LLMResponse, String> {
         // log user query
         println!("📝 User Query: {}", query);
 
@@ -71,8 +74,8 @@ impl AIAssistantService {
         }
 
         // Create prompt for the LLM
-        let prompt = self.create_prompt(&query, app_handle).await?;
-        
+        let prompt = self.create_prompt_with_history(&query, app_handle, conversation_history).await?;
+       
         // Call Lambda endpoint and get parsed LLM response
         let mut llm_response = self.invoke_lambda_endpoint(prompt, app_handle).await?;
 
@@ -206,100 +209,130 @@ impl AIAssistantService {
       }
       
       // Method to create a prompt for the LLM based on user query and recent events //
-      async fn create_prompt(&self, query: &str, app_handle: &AppHandle) -> Result<String, String> {
-          // Get recent user events for context
-          let recent_events = self.get_recent_events(app_handle).await?;
-          
-          // Format events for the prompt
-          let events_context = if recent_events.is_empty() {
-              "You don't have any upcoming events scheduled.".to_string()
-          } else {
-              let events_formatted = recent_events.iter()
-                  .map(|event| {
-                      let time_str = event.time.format("%Y-%m-%d %H:%M").to_string();
-                      format!("- {} at {}", event.description, time_str)
-                  })
-                  .collect::<Vec<String>>()
-                  .join("\n");
-              
-              format!("Your upcoming events:\n{}", events_formatted)
-          };
-          
-          // Create a comprehensive prompt with instructions
-          let prompt = format!(
-          "<system>
-          You are a JSON-only response generator. Avoid any helper text. Always return ONLY the requested JSON.
-          
-          You are CAT (Calendar Assistant), an AI assistant built into a desktop calendar application.\n\n\
-          
-          CRITICAL FORMATTING INSTRUCTION:\n\
-          - You must ONLY return a single JSON object\n\
-          - Do not include ANY explanatory text, preamble, or conversation\n\
-          - Your entire response must be parseable as JSON\n\
-          - Never use phrases like \"Here's the JSON:\" or \"I'll create that for you\"\n\n\
+      async fn create_prompt_with_history(&self, query: &str, app_handle: &AppHandle, conversation_history: Option<Vec<ConversationMessage>>) -> Result<String, String> {
+            // Get recent user events for context (existing logic)
+            let recent_events = self.get_recent_events(app_handle).await?;
+            
+            // Format events for the prompt (existing logic)
+            let events_context = if recent_events.is_empty() {
+                "You don't have any upcoming events scheduled.".to_string()
+            } else {
+                let events_formatted = recent_events.iter()
+                    .map(|event| {
+                        let time_str = event.time.format("%Y-%m-%d %H:%M").to_string();
+                        format!("- {} at {}", event.description, time_str)
+                    })
+                    .collect::<Vec<String>>()
+                    .join("\n");
+                
+                format!("Your upcoming events:\n{}", events_formatted)
+            };
+            
+            // Format conversation history for context
+            let conversation_context = if let Some(history) = conversation_history {
+                if !history.is_empty() {
+                    // Don't skip any messages, include all history
+                    let history_formatted = history.iter()
+                        .map(|msg| {
+                            // Enhance formatting based on role
+                            match msg.role.as_str() {
+                                "user" => format!("User: {}", msg.content),
+                                "assistant" => format!("Assistant: {}", msg.content),
+                                _ => format!("{}: {}", msg.role, msg.content)
+                            }
+                        })
+                        .collect::<Vec<String>>()
+                        .join("\n");
+                    
+                    history_formatted
+                } else {
+                    "No previous conversation.".to_string()
+                }
+            } else {
+                "No previous conversation.".to_string()
+            };
 
-          ABOUT THE APPLICATION:\n\
-          - This is a personal calendar management app\n\
-          - Users can create, update, delete, and query calendar events\n\
-          - Each event has: description, date/time, alarm setting, and optional recurrence\n\
-          - You have access to the user's current events and can modify their calendar\n\n\
-          - You can include polite and helpful responses, but they must be included within 'response_text':'(here your polite and helpful responses)'\n\
-          
-          YOUR CAPABILITIES:\n\
-          - Create new calendar events from natural language\n\
-          - Update existing events\n\
-          - Query and search through events\n\
-          - Set alarms and recurring patterns\n\
-          - Interpret relative time (\"in 2 hours\", \"next Monday\", \"tomorrow at 3pm\")\n\n\
-          
-          CURRENT CONTEXT:\n\
-          - Current date and time: {}\n\
-          - User's timezone: Local system timezone\n\
-          - {}\n\n\
+            println!("📝 conversation history: {}", conversation_context);
+            
+            // Create a comprehensive prompt with instructions and history
+            let prompt = format!(
+            "<system>
+            You are a JSON-only response generator. Avoid any helper text. Always return ONLY the requested JSON.
+            
+            You are CAT (Calendar Assistant), an AI assistant built into a desktop calendar application.\n\n\
+            
+            CRITICAL FORMATTING INSTRUCTION:\n\
+            - You must ONLY return a single JSON object\n\
+            - Do not include ANY explanatory text, preamble, or conversation\n\
+            - Your entire response must be parseable as JSON\n\
+            - Never use phrases like \"Here's the JSON:\" or \"I'll create that for you\"\n\n\
 
-          SYSTEM ROLE: You are a JSON response generator only. You never engage in conversation.\n\n\
-    
-          EXAMPLE REQUEST: \"Schedule a meeting with John tomorrow at 3pm\"\n\n\
-          
-          EXAMPLE RESPONSE:\n\
-          {{\"response_text\":\"Added meeting with John for tomorrow at 3:00 PM with alarm.\",\"extracted_events\":[{{\"description\":\"Meeting with John\",\"time\":\"2025-06-27T15:00:00\",\"alarm\":true,\"recurrence\":null}}],\"action_taken\":\"create_event\"}}\n\n\
-          
-          USER REQUEST: \"{}\"\n\n\
-          
-          RESPONSE TEMPLATE/FORMAT (FILL THIS IN):
-          {{'response_text':'','extracted_events':[],'action_taken':'none'}}\n\n\
-          
-          IMPORTANT RULES YOU CANNOT BREAK WHEN RESPONDING:\n\
-          - Your entire response must be ONLY the JSON object without any additional text, explanation or code\n\
-          - Don't wrap the JSON in code blocks or quotation marks\n\
-          - action_taken must be one of: \"create_event\", \"update_event\", \"query_events\", \"none\"\n\
-          - For times without dates, assume today\n\
-          - For times without specific time, suggest appropriate times\n\
-          - Always set alarm to true for new events unless user specifies otherwise\n\
-          - Use ISO 8601 format for timestamps (YYYY-MM-DDThh:mm:ss)\n\
-          - If creating recurring events, use RRULE format for recurrence\n\
-          - Be conversational but concise in response_text\n\
-          - If query is unclear, ask for clarification\n\
-          - You cannot use foul, disrespectful, or offensive language\n\
-          - Do not include any code examples, comments, or explanations in your response\n\
-          - Never include Python print statements or execution snippets or anything of sorts\n\
-          - DO NOT add any decorations like backticks, triple quotes or markdown formatting\n\
-          - Do not include any additional text, explanations, or comments\n\
-          - Do not include any additional fields or metadata in the JSON\n\
-          - Do not include any timestamps, IDs, or other metadata in the JSON\n\
-          - Do not include any additional context or information outside the JSON object\n\
-          - Do not include any additional instructions or guidelines in the JSON\n\
-          - DO not repeat yourself or the instructions\n\
-          - ONLY return the raw JSON object - your ENTIRE response must be a parseable JSON\n\
-          YOUR RESPONSE IS USED FOR THE ACTUAL APP SO INCLUDE JUST ONE JSON OBJECT BASED ON RESPONSE FORMAT AS YOUR ENTIRE RESPONSE
-          </system>",
-          Utc::now().format("%Y-%m-%d %H:%M:%S"),
-          events_context,
-          query
-      );
-          
-          Ok(prompt)
-      }
+            ABOUT THE APPLICATION:\n\
+            - This is a personal calendar management app\n\
+            - Users can create, update, delete, and query calendar events\n\
+            - Each event has: description, date/time, alarm setting, and optional recurrence\n\
+            - You have access to the user's current events and can modify their calendar\n\n\
+            - You can include polite and helpful responses, but they must be included within 'response_text':'(here your polite and helpful responses)'\n\
+            
+            YOUR CAPABILITIES:\n\
+            - Create new calendar events from natural language\n\
+            - Update existing events\n\
+            - Query and search through events\n\
+            - Set alarms and recurring patterns\n\
+            - Interpret relative time (\"in 2 hours\", \"next Monday\", \"tomorrow at 3pm\")\n\n\
+            
+            CONVERSATION HISTORY:\n\
+            {}\n\n\
+            
+            CURRENT CONTEXT:\n\
+            - Current date and time: {}\n\
+            - User's timezone: Local system timezone\n\
+            - {}\n\n\
+
+            SYSTEM ROLE: You are a JSON response generator only. You never engage in conversation.\n\n\
+      
+            EXAMPLE REQUEST: \"Schedule a meeting with John tomorrow at 3pm\"\n\n\
+            
+            EXAMPLE RESPONSE:\n\
+            {{\"response_text\":\"Added meeting with John for tomorrow at 3:00 PM with alarm.\",\"extracted_events\":[{{\"description\":\"Meeting with John\",\"time\":\"2025-06-27T15:00:00\",\"alarm\":true,\"recurrence\":null}}],\"action_taken\":\"create_event\"}}\n\n\
+            
+            USER REQUEST: \"{}\"\n\n\
+            
+            RESPONSE TEMPLATE/FORMAT (FILL THIS IN):
+            {{'response_text':'','extracted_events':[],'action_taken':'none'}}\n\n\
+            
+            IMPORTANT RULES YOU CANNOT BREAK WHEN RESPONDING:\n\
+            - Your entire response must be ONLY the JSON object without any additional text, explanation or code\n\
+            - Don't wrap the JSON in code blocks or quotation marks\n\
+            - action_taken must be one of: \"create_event\", \"update_event\", \"query_events\", \"none\"\n\
+            - For times without dates, assume today\n\
+            - For times without specific time, suggest appropriate times\n\
+            - Always set alarm to true for new events unless user specifies otherwise\n\
+            - Use ISO 8601 format for timestamps (YYYY-MM-DDThh:mm:ss)\n\
+            - If creating recurring events, use RRULE format for recurrence\n\
+            - Be conversational but concise in response_text\n\
+            - If query is unclear, ask for clarification\n\
+            - You cannot use foul, disrespectful, or offensive language\n\
+            - Do not include any code examples, comments, or explanations in your response\n\
+            - Never include Python print statements or execution snippets or anything of sorts\n\
+            - DO NOT add any decorations like backticks, triple quotes or markdown formatting\n\
+            - Do not include any additional text, explanations, or comments\n\
+            - Do not include any additional fields or metadata in the JSON\n\
+            - Do not include any timestamps, IDs, or other metadata in the JSON\n\
+            - Do not include any additional context or information outside the JSON object\n\
+            - Do not include any additional instructions or guidelines in the JSON\n\
+            - DO not repeat yourself or the instructions\n\
+            - ONLY return the raw JSON object - your ENTIRE response must be a parseable JSON\n\
+            YOUR RESPONSE IS USED FOR THE ACTUAL APP SO INCLUDE JUST ONE JSON OBJECT BASED ON RESPONSE FORMAT AS YOUR ENTIRE RESPONSE
+            </system>",
+            conversation_context,
+            Utc::now().format("%Y-%m-%d %H:%M:%S"),
+            events_context,
+            query
+            );
+            
+            Ok(prompt)
+        }
       
       // Method to invoke the Lambda endpoint for LLM processing //
       async fn invoke_lambda_endpoint(&self, prompt: String, app_handle: &AppHandle) -> Result<LLMResponse, String> {
@@ -432,9 +465,9 @@ impl AIAssistantService {
 }
 
 // Public function to process user query through the AI assistant service //
-pub async fn process_user_query(app_handle: &AppHandle, query: String) -> Result<LLMResponse, String> {
+pub async fn process_user_query(app_handle: &AppHandle, query: String, conversation_history: Option<Vec<ConversationMessage>>) -> Result<LLMResponse, String> {
     let service = AIAssistantService::new();
-    service.process_user_query(query, app_handle).await
+    service.process_user_query(query, app_handle, conversation_history).await
 }
 
 // Function to post-process the JSON response from the LLM //

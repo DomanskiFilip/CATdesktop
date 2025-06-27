@@ -1,5 +1,17 @@
 <template>
   <section class="ai-assistant">
+    <!-- Chat clear button -->
+    <div class="chat-header">
+      <h2>Calendar Assistant</h2>
+      <button @click="clearChat" class="clear-btn" title="Clear conversation">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16">
+          <path fill="none" d="M0 0h24v24H0z"/>
+          <path d="M17 6h5v2h-2v13a1 1 0 01-1 1H5a1 1 0 01-1-1V8H2V6h5V3a1 1 0 011-1h8a1 1 0 011 1v3zm1 2H6v12h12V8zm-9 3h2v6H9v-6zm4 0h2v6h-2v-6zM9 4v2h6V4H9z" fill="currentColor"/>
+        </svg>
+        Clear Chat
+      </button>
+    </div>
+
     <section class="chat-container" ref="chatContainer">
       <div v-for="(message, index) in chatHistory" :key="index" 
            :class="['message', message.sender === 'user' ? 'user-message' : 'assistant-message']">
@@ -56,7 +68,6 @@
 <script setup lang="ts">
 import { ref, onMounted, nextTick, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event';
 import { format } from 'date-fns'
 
 interface EventSuggestion {
@@ -115,6 +126,14 @@ const formatRecurrence = (recurrence: string) => {
   return recurrence;
 };
 
+const clearChat = () => {
+  // Reset chat history to just the welcome message
+  chatHistory.value = [{
+    content: "Hello! I'm your Calendar AssistanT, You can call me CAT. How can I help you manage your schedule today?",
+    sender: 'assistant'
+  }];
+};
+
 // Scroll to bottom of chat //
 const scrollToBottom = async () => {
   await nextTick();
@@ -140,14 +159,27 @@ const sendMessage = async () => {
   await scrollToBottom();
   
   try {
-    // Process through our SageMaker service
-    const response = await invoke<string>('process_ai_message', { query: message });
+    // Convert chat history to a format suitable for the backend
+    const conversation_history = chatHistory.value.map(msg => ({
+      role: msg.sender,
+      content: msg.content,
+      timestamp: new Date().toISOString(),
+    }));
+
+    console.log('Sending conversationHistory to AI:', conversation_history);
+    
+    // Process through our service with conversation history
+    const response = await invoke<string>('process_ai_message', { 
+      query: message,
+      conversationHistory: JSON.stringify(conversation_history)
+    });
+    
     const parsedResponse = JSON.parse(response);
     
     // Add AI response to chat
     isTyping.value = false;
     
-    // Check action_taken to determine what to do
+    // Rest of your code remains the same
     const actionTaken = parsedResponse.action_taken || 'none';
     
     if (actionTaken === 'create_event' && 
@@ -449,5 +481,42 @@ watch(chatHistory, () => {
     opacity: 1;
     transform: scale(1.2);
   }
+}
+
+.chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  background-color: var(--color-theme);
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+  color: var(--color-dark);
+}
+
+.chat-header h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.clear-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0.25rem 0.5rem;
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  background-color: rgba(255, 255, 255, 0.2);
+  color: var(--color-dark);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.clear-btn:hover {
+  background-color: rgba(255, 255, 255, 0.3);
+}
+
+.clear-btn:active {
+  transform: scale(0.9);
 }
 </style>
