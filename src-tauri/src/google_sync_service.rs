@@ -1,13 +1,13 @@
 use crate::user_utils::get_current_user_id;
 use crate::database_utils::{ CalendarEvent, get_db_connection, save_event };
-use crate::encryption_utils::{ encrypt_user_data, decrypt_user_data };
+use crate::encryption_utils::decrypt_user_data;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::task::JoinHandle;
 use tokio::time::{self, Duration};
 use tauri::{ AppHandle, Manager };
 use reqwest::Client;
-use chrono::{DateTime, Utc, Timelike};
+use chrono::Timelike;
 use serde_json::json;
 use serde_json::Value;
 use base64::Engine;
@@ -63,7 +63,7 @@ impl GoogleSyncService {
             let sync_interval = Duration::from_secs(300); // 5 minutes
             let mut interval = time::interval(sync_interval);
 
-            let mut temp_service = GoogleSyncService {
+            let temp_service = GoogleSyncService {
                 client,
                 running: Arc::new(AtomicBool::new(true)),
                 task_handle: None,

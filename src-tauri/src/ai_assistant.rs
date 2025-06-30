@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc, Duration};
 use tauri::AppHandle;
-use tauri::Emitter;
 use uuid::Uuid;
 use rand::Rng;
 use crate::ConversationMessage;
@@ -139,7 +138,7 @@ impl AIAssistantService {
           let normalized_query = lowercase_query.trim();
           
           // Create a random number generator instance
-          let mut rng = rand::thread_rng();
+          let mut rng = rand::rng(); // Update deprecated `thread_rng` to `rng`
 
           // Define patterns for common greetings and questions
           match normalized_query {
@@ -151,7 +150,7 @@ impl AIAssistantService {
                       "Hey! I'm your calendar assistant. What can I do for you today?"
                   ];
                   
-                  let index = rng.gen_range(0..greetings.len());
+                  let index = rng.random_range(0..greetings.len()); // Update deprecated `gen_range` to `random_range`
                   let greeting = greetings[index];
                         
                   Some(LLMResponse {
@@ -169,7 +168,7 @@ impl AIAssistantService {
                       "All systems operational! I'm here to assist with your calendar needs. What's on your mind?"
                   ];
                   
-                  let index = rng.gen_range(0..responses.len());
+                  let index = rng.random_range(0..responses.len()); // Update deprecated `gen_range` to `random_range`
                   let response = responses[index];
                   
                   Some(LLMResponse {
@@ -420,7 +419,7 @@ impl AIAssistantService {
           match save_event(app_handle, serde_json::to_string(&calendar_event).unwrap()) {
                     Ok(_) => {
                         println!("✅ Successfully saved event: {}", event.description);
-                        let valid_events = true;
+                        let _valid_events = true; // Prefix unused variable with `_`
                     }
                     Err(e) => println!("❌ Failed to save event: {} - Error: {}", event.description, e),
                 }

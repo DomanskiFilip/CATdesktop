@@ -6,8 +6,7 @@ use tauri::{AppHandle, Manager};
 use oauth2::basic::BasicTokenType;
 use oauth2::{
     AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge,
-    RedirectUrl, Scope, TokenResponse, TokenUrl, basic::BasicClient, EmptyExtraTokenFields, StandardTokenResponse,
-    ExtraTokenFields
+    RedirectUrl, Scope, TokenResponse, TokenUrl, basic::BasicClient
 };
 use open;
 use std::io::Write;

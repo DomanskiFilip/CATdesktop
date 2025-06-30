@@ -17,7 +17,7 @@ struct LambdaResponse {
 #[derive(Deserialize)]
 struct Body {
     access_token: Option<String>,
-    message: Option<String>,
+    _message: Option<String>, // Prefix unused field with `_`
 }
 
 // Function to handle auto-login using AWS Lambda //

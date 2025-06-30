@@ -2,7 +2,7 @@ use crate::database_utils:: { CalendarEvent, get_db_connection };
 use crate::user_utils::get_current_user_id;
 use notify_rust::Notification;
 use tauri::{AppHandle, Manager};
-use chrono::{Duration, DateTime, Utc};
+use chrono::{Duration, Utc};
 use std::collections::HashMap;
 use tokio::time::{sleep, Duration as TokioDuration};
 use tokio::task::JoinHandle;
@@ -10,7 +10,6 @@ use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
 use rrule::{RRuleSet, Tz};
 use std::str::FromStr;
-use futures::FutureExt;
 
 pub struct NotificationService {
   scheduled_tasks: HashMap<String, JoinHandle<()>>,
@@ -224,7 +223,7 @@ impl NotificationService {
           };
     
             if let Some(service) = service_guard.as_mut() {
-                for (index, event) in events.iter().enumerate() {
+                for (_index, event) in events.iter().enumerate() {
                     if let Err(e) = service.schedule_event_notifications(&event).await {
                         eprintln!("Failed to schedule notification for event {}: {}", event.id, e);
                     }
@@ -264,12 +263,12 @@ impl NotificationService {
         let dt_start = event.time.with_timezone(&tz);
 
         // Create a new RRuleSet with the start time
-        let mut rruleset = RRuleSet::new(dt_start);
+        let rruleset = RRuleSet::new(dt_start);
 
         // Validate the rrule and add it to the set
         match rrule.validate(dt_start) {
             Ok(validated_rrule) => {
-                rruleset.clone().rrule(validated_rrule);
+                let _ = rruleset.clone().rrule(validated_rrule);
             },
             Err(e) => return Err(Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other, format!("Invalid RRule: {:?}", e))))

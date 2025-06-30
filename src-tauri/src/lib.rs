@@ -270,7 +270,7 @@ async fn get_events_for_ai(app_handle: AppHandle) -> Result<Vec<String>, String>
 async fn start_auto_login(app_handle_arc: Arc<AppHandle>) -> Result<bool, String> {
     let login_success = match crate::auto_login::auto_login_lambda(&app_handle_arc).await {
         Ok(result) => result,
-        Err(e) => false,
+        Err(_e) => false, // Prefix unused variable with `_`
     };
     
     // Emit login status to frontend
@@ -409,7 +409,7 @@ fn create_system_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .icon(app.default_window_icon().unwrap().clone())
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_menu_event(move |app, event| {
+        .on_menu_event(move |_app, event| { // Prefix unused variable with `_`
             match event.id().as_ref() {
                 "quit" => {
                     std::process::exit(0);
