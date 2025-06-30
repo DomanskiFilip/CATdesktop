@@ -12,7 +12,7 @@ struct LambdaResponse {
 
 #[derive(Deserialize)]
 struct Body {
-    _status: String, // Prefix unused field with `_`
+    _status: String,
     message: String,
 }
 
@@ -38,7 +38,7 @@ pub async fn register_user_lambda(email: String, password: String) -> Result<Str
         .send()
         .await
         .map_err(|e| e.to_string())?;
-    let _status = response.status(); // Prefix unused variable with `_`
+    let _status = response.status();
     let text = response.text().await.map_err(|e| e.to_string())?;
 
     // Parse Lambda response

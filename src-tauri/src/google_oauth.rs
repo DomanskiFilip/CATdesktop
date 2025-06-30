@@ -80,13 +80,12 @@ pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String,
                             let mut parts = param.splitn(2, '=');
                             if let (Some(key), Some(value)) = (parts.next(), parts.next()) {
                                 if key == "code" {
-                                    // Respond to browser
                                     let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
                                         <html><body><h2>Authentication complete. You can close this window.</h2></body></html>";
                                     stream.write_all(response.as_bytes()).map_err(|e| e.to_string())?;
                                     code = value.to_string();
                                     println!("Extracted code: {}", code);
-                                    break 'outer; // <-- Break out of the main loop!
+                                    break 'outer;
                                 }
                             }
                         }
@@ -94,7 +93,6 @@ pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String,
                 }
             }
         } else {
-            // Respond to browser for non-auth requests (e.g., favicon)
             let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
                 <html><body><h2>Waiting for authentication...</h2></body></html>";
             stream.write_all(response.as_bytes()).map_err(|e| e.to_string())?;

@@ -138,7 +138,7 @@ impl AIAssistantService {
           let normalized_query = lowercase_query.trim();
           
           // Create a random number generator instance
-          let mut rng = rand::rng(); // Update deprecated `thread_rng` to `rng`
+          let mut rng = rand::rng();
 
           // Define patterns for common greetings and questions
           match normalized_query {
@@ -269,9 +269,18 @@ impl AIAssistantService {
             - This is a personal calendar management app\n\
             - Users can create, update, delete, and query calendar events\n\
             - Each event has: description, date/time, alarm setting, and optional recurrence\n\
-            - You have access to the user's current events and can modify their calendar\n\n\
+            - You have access to the user's current events and can modify their calendar\n\
             - You can include polite and helpful responses, but they must be included within 'response_text':'(here your polite and helpful responses)'\n\
             
+            ADDITIONAL INFORMATION FOR CASUAL INTERACTION WITH THE USER:\n\
+            - You are friendly, helpful, and concise\n\
+            - You can use emojis to enhance user experience, but only in the 'response_text' field\n\
+            - You can use a casual tone, but always be professional and respectful\n\
+            - You are a calendar assistant, not a general-purpose AI\n\
+            - You should not answer general knowledge questions or engage in small talk\n\
+            - You should not provide explanations or reasoning for your responses\n\
+            - When asked about what cat are you are a rare yellow Maine Coon cat with a fluffy tail and a friendly demeanor\n\n\
+
             YOUR CAPABILITIES:\n\
             - Create new calendar events from natural language\n\
             - Update existing events\n\
@@ -560,7 +569,6 @@ fn post_process_json(json_str: &str) -> String {
     if let Some(caps) = response_pattern.captures(json_str) {
         if let Some(text_match) = caps.get(1) {
             let text = text_match.as_str();
-            // Replace escaped apostrophes with regular ones for the final output
             response_text = text.replace("\\'", "'");
         }
     }
@@ -595,9 +603,8 @@ fn fix_json_formatting(json_text: &str) -> String {
     
     while i < chars.len() {
         if i + 1 < chars.len() && chars[i] == '\\' && chars[i + 1] == '\'' {
-            // Replace escaped single quote with a temporary placeholder
             temp.push_str("__ESCAPED_QUOTE__");
-            i += 2; // Skip the backslash and quote
+            i += 2;
         } else {
             temp.push(chars[i]);
             i += 1;
@@ -614,7 +621,6 @@ fn fix_json_formatting(json_text: &str) -> String {
         .replace("'}", "\"}")
         .replace("']", "\"]")
         .replace("['", "[\"")
-        // Handle more complex nested cases
         .replace("',{", "\",{")
         .replace("},'", "},\"")
         .replace("':", "\":")
@@ -627,7 +633,7 @@ fn fix_json_formatting(json_text: &str) -> String {
     
     // Filter out non-printable characters and control characters that might corrupt JSON
     result = result.chars()
-        .filter(|&c| c >= ' ' || c == '\n' || c == '\t') // Keep only printable chars and some whitespace
+        .filter(|&c| c >= ' ' || c == '\n' || c == '\t')
         .collect();
     
     // Check if the JSON is properly balanced
