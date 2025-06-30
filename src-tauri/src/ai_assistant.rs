@@ -5,12 +5,11 @@ use tauri::Emitter;
 use uuid::Uuid;
 use rand::Rng;
 use crate::ConversationMessage;
-use crate::database_utils::{CalendarEvent, get_db_connection};
+use crate::database_utils::{CalendarEvent, get_db_connection, save_event};
 use crate::user_utils::get_current_user_id;
 use crate::api_utils::AppConfig;
 use crate::trigger_sync;
-use crate::schedule_notification;
-use crate::save_event;
+use crate::schedule_event_notification;
 
 #[derive(Deserialize)]
 struct LambdaResponse {
@@ -408,26 +407,29 @@ impl AIAssistantService {
           let calendar_event = CalendarEvent {
               id: Uuid::new_v4().to_string(),
               user_id,
-              description: event.description,
+              description: event.description.clone(),
               time: event.time.unwrap_or_else(|| Utc::now() + Duration::hours(1)),
               alarm: event.alarm,
               synced: false,
               synced_google: false,
               deleted: false,
-              recurrence: event.recurrence,
+              recurrence: event.recurrence.clone(),
           };
           
           // Save the event to database
-          save_event(
-              app_handle.clone(), 
-              serde_json::to_string(&calendar_event).map_err(|e| e.to_string())?
-          ).await?;
+          match save_event(app_handle, serde_json::to_string(&calendar_event).unwrap()) {
+                    Ok(_) => {
+                        println!("✅ Successfully saved event: {}", event.description);
+                        let valid_events = true;
+                    }
+                    Err(e) => println!("❌ Failed to save event: {} - Error: {}", event.description, e),
+                }
           
           // Schedule notifications if alarm is enabled
           if calendar_event.alarm {
               let event_json = serde_json::to_string(&calendar_event)
                   .map_err(|e| format!("Failed to serialize event: {}", e))?;
-              crate::schedule_notification(event_json, app_handle.clone()).await?;
+              schedule_event_notification(event_json, app_handle.clone()).await?;
           }
           
           // Trigger sync to DynamoDB and Google Calendar

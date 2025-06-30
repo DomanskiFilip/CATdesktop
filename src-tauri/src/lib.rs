@@ -262,11 +262,6 @@ async fn trigger_immediate_sync(app_handle: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn schedule_notification(event_json: String, app_handle: AppHandle) -> Result<String, String> {
-    schedule_event_notification(event_json, app_handle).await
-}
-
-#[tauri::command]
 async fn get_events_for_ai(app_handle: AppHandle) -> Result<Vec<String>, String> {
     get_events(app_handle).await
 }
@@ -464,7 +459,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             reject_event_suggestion,
             trigger_immediate_sync,
             get_events_for_ai,
-            schedule_notification
         ])
         .setup(|app| {
           // Request notification permissions on macOS
