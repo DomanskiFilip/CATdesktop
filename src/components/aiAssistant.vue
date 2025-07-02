@@ -58,7 +58,7 @@
       <button @click="sendMessage" :disabled="isProcessing || !userInput.trim()">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
           <path fill="none" d="M0 0h24v24H0z"/>
-          <path d="M3 13h6v-2H3V1.846a.5.5 0 0 1 .741-.438l18.462 10.154a.5.5 0 0 1 0 .876L3.741 22.592A.5.5 0 0 1 3 22.154V13z" fill="currentColor"/>
+          <path d="M3 13h6v-2H3V1.846a.5.5 0 0 1 .741-.438l18.462 10.154a.5.5 0 0 1 0 .876L3.741 22.592A.5.5 0 0 1 3 22.154V13z" fill="var(--color-dark)"/>
         </svg>
       </button>
     </section>
@@ -69,6 +69,7 @@
 import { ref, onMounted, nextTick, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { format } from 'date-fns'
+import { emit as tauriEmit } from '@tauri-apps/api/event'
 
 interface EventSuggestion {
   description: string;
@@ -173,6 +174,8 @@ const sendMessage = async () => {
       query: message,
       conversationHistory: JSON.stringify(conversation_history)
     });
+
+    console.log('Raw response from backend:', response);
     
     const parsedResponse = JSON.parse(response);
     
@@ -244,6 +247,7 @@ const acceptSuggestion = async (messageIndex: number) => {
       time: eventDate.toISOString(),
       alarm: message.eventSuggestion.alarm,
       synced: false,
+      synced_google: false,
       deleted: false,
       recurrence: message.eventSuggestion.recurrence
     };
@@ -256,6 +260,9 @@ const acceptSuggestion = async (messageIndex: number) => {
     // Mark as accepted
     message.eventAccepted = true;
     
+    // Emit a global event to notify other components that an event was saved
+    await tauriEmit('event-saved');
+
     // Trigger sync
     try {
       await invoke('trigger_sync');
@@ -337,7 +344,6 @@ watch(chatHistory, () => {
   padding: 1rem;
   background-color: rgba(0, 0, 0, 0.05);
   border-radius: 8px;
-  overflow: hidden;
 }
 
 .message {
@@ -423,6 +429,7 @@ watch(chatHistory, () => {
 .suggestion-status.accepted {
   background-color: rgba(0, 255, 0, 0.2);
   color: green;
+
 }
 
 .suggestion-status.rejected {
@@ -432,11 +439,15 @@ watch(chatHistory, () => {
 
 .accept-btn {
   background-color: rgba(0, 255, 0, 0.2);
+  border:none;
+  cursor: pointer;
   color: green;
 }
 
 .reject-btn {
   background-color: rgba(255, 0, 0, 0.2);
+  border:none;
+  cursor: pointer;
   color: darkred;
 }
 

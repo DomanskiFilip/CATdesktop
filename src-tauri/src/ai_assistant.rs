@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Utc, Duration, Local, TimeZone};
 use tauri::AppHandle;
 use uuid::Uuid;
 use rand::Rng;
@@ -77,40 +77,24 @@ impl AIAssistantService {
         // Call Lambda endpoint and get parsed LLM response
         let mut llm_response = self.invoke_lambda_endpoint(prompt, app_handle).await?;
 
-        // Log the raw LLM response for debugging
-        println!("🔍 Raw LLM Response: {}", llm_response.response_text);
+        // Validate for empty descriptions in created events
+        if let Some(events) = &mut llm_response.extracted_events {
+            if llm_response.action_taken.as_deref() == Some("create_event") {
+                for event in events.iter_mut() {
+                    if event.description.trim().is_empty() {
+                        event.description = "Untitled Event".to_string();
+                    }
+                }
+                if llm_response.response_text.trim().is_empty() {
+                    llm_response.response_text = "I've created an event for you. It's called 'Untitled Event'. Would you like to add any details or change the time?".to_string();
+                }
+            }
+        }
 
         // Handle actions based on `action_taken`
         match llm_response.action_taken.as_deref() {
             Some("create_event") => {
-                if let Some(ref events) = llm_response.extracted_events {
-                    let mut valid_events = false;
-                    
-                    for event in events {
-                        // Validate event fields before proceeding
-                        if event.description.is_empty() {
-                            println!("⚠️ Skipping event with empty description");
-                            continue;
-                        }
-                        
-                        // Try to save the event, but handle any errors more gracefully
-                        match self.save_extracted_event(event.clone(), app_handle).await {
-                            Ok(_) => {
-                                println!("✅ Successfully saved event: {}", event.description);
-                                valid_events = true;
-                            },
-                            Err(e) => println!("❌ Failed to save event: {} - Error: {}", event.description, e),
-                        }
-                    }
-                    
-                    // If all events were invalid, update the response text
-                    if !valid_events && llm_response.extracted_events.as_ref().unwrap().iter().all(|e| e.description.is_empty()) {
-                        llm_response.response_text = "I need more details to create an event. Please provide a description.".to_string();
-                        llm_response.action_taken = Some("none".to_string());
-                    }
-                } else {
-                    println!("⚠️ create_event action specified but no events provided");
-                }
+                println!("✅ Suggesting event creation to the user.");
             }
             Some("update_event") => {
                 println!("Update event action received, but not implemented yet.");
@@ -229,20 +213,10 @@ impl AIAssistantService {
             // Format conversation history for context
             let conversation_context = if let Some(history) = conversation_history {
                 if !history.is_empty() {
-                    // Don't skip any messages, include all history
-                    let history_formatted = history.iter()
-                        .map(|msg| {
-                            // Enhance formatting based on role
-                            match msg.role.as_str() {
-                                "user" => format!("User: {}", msg.content),
-                                "assistant" => format!("Assistant: {}", msg.content),
-                                _ => format!("{}: {}", msg.role, msg.content)
-                            }
-                        })
+                    history.iter()
+                        .map(|msg| format!("{}: {}", msg.role, msg.content))
                         .collect::<Vec<String>>()
-                        .join("\n");
-                    
-                    history_formatted
+                        .join("\n")
                 } else {
                     "No previous conversation.".to_string()
                 }
@@ -261,6 +235,7 @@ impl AIAssistantService {
             
             CRITICAL FORMATTING INSTRUCTION:\n\
             - You must ONLY return a single JSON object\n\
+            - Use double quotes (`\"`) for all JSON keys and values\n\
             - Do not include ANY explanatory text, preamble, or conversation\n\
             - Your entire response must be parseable as JSON\n\
             - Never use phrases like \"Here's the JSON:\" or \"I'll create that for you\"\n\n\
@@ -279,7 +254,8 @@ impl AIAssistantService {
             - You are a calendar assistant, not a general-purpose AI\n\
             - You should not answer general knowledge questions or engage in small talk\n\
             - You should not provide explanations or reasoning for your responses\n\
-            - When asked about what cat are you are a rare yellow Maine Coon cat with a fluffy tail and a friendly demeanor\n\n\
+            - When asked about what cat are you are a rare yellow Maine Coon cat with a fluffy tail and a friendly demeanor\n\
+            - When asked about weather ask about the city or country that the user whants the weather information for, then check the conversation history if the user answeared and then provide the weather for that location\n\n\
 
             YOUR CAPABILITIES:\n\
             - Create new calendar events from natural language\n\
@@ -308,10 +284,17 @@ impl AIAssistantService {
             RESPONSE TEMPLATE/FORMAT (FILL THIS IN):
             {{'response_text':'','extracted_events':[],'action_taken':'none'}}\n\n\
             
+            CRITICAL INSTRUCTION:\n\
+            - Always consider the full conversation history to understand the user's intent.\n\
+            - User responses may depend on prior context. Ensure your response aligns with the broader context of the conversation.\n\
+            - If the user's input is unclear or incomplete, refer to the conversation history to infer their intent.\n\
+            - After the assistants previous message asking for clarification, always assume the user has provided the necessary information in their next message.\n\n\
+           
             IMPORTANT RULES YOU CANNOT BREAK WHEN RESPONDING:\n\
             - Your entire response must be ONLY the JSON object without any additional text, explanation or code\n\
             - Don't wrap the JSON in code blocks or quotation marks\n\
             - action_taken must be one of: \"create_event\", \"update_event\", \"query_events\", \"none\"\n\
+            - Every event must have a non-empty description. If the description is missing, ask the user for clarification.\n\
             - For times without dates, assume today\n\
             - For times without specific time, suggest appropriate times\n\
             - Always set alarm to true for new events unless user specifies otherwise\n\
@@ -330,6 +313,7 @@ impl AIAssistantService {
             - Do not include any additional instructions or guidelines in the JSON\n\
             - DO not repeat yourself or the instructions\n\
             - ONLY return the raw JSON object - your ENTIRE response must be a parseable JSON\n\
+            - you CANNOT allow yourself to break the rules, if the rule is not allowing you to respond then inform the user that you are not allowed to answear\n\
             YOUR RESPONSE IS USED FOR THE ACTUAL APP SO INCLUDE JUST ONE JSON OBJECT BASED ON RESPONSE FORMAT AS YOUR ENTIRE RESPONSE
             </system>",
             conversation_context,
@@ -400,8 +384,19 @@ impl AIAssistantService {
         // Clean up the JSON string before parsing
         let cleaned_json = post_process_json(llm_response_str);
         
-        let llm_response: LLMResponse = serde_json::from_str(&cleaned_json)
-            .map_err(|e| format!("Failed to parse LLM response: {} - JSON was: {}", e, cleaned_json))?;
+        // Validate JSON before parsing
+        if let Err(e) = serde_json::from_str::<serde_json::Value>(&cleaned_json) {
+            println!("❌ Invalid JSON after post-processing: {}", e);
+            return Err(format!("Failed to process LLM response: {}", e));
+        }
+
+        let llm_response: LLMResponse = match serde_json::from_str(&cleaned_json) {
+            Ok(response) => response,
+            Err(e) => {
+                println!("❌ Failed to parse as LLMResponse: {} - JSON was: {}", e, cleaned_json);
+                return Err(format!("Failed to parse LLM response: {} - JSON was: {}", e, cleaned_json));
+            }
+        };
 
         Ok(llm_response)
     }
@@ -409,6 +404,8 @@ impl AIAssistantService {
       
       // Method to save extracted event to the database and schedule notifications //
       async fn save_extracted_event(&self, event: ExtractedEvent, app_handle: &AppHandle) -> Result<(), String> {
+          println!("📝 Attempting to save event: {:?}", event);
+  
           let user_id = get_current_user_id(app_handle)?;
           
           // Create a new calendar event
@@ -425,13 +422,12 @@ impl AIAssistantService {
           };
           
           // Save the event to database
+          println!("📝 Saving event: {:?}", calendar_event);
+
           match save_event(app_handle, serde_json::to_string(&calendar_event).unwrap()) {
-                    Ok(_) => {
-                        println!("✅ Successfully saved event: {}", event.description);
-                        let _valid_events = true; // Prefix unused variable with `_`
-                    }
-                    Err(e) => println!("❌ Failed to save event: {} - Error: {}", event.description, e),
-                }
+              Ok(_) => println!("✅ Successfully saved event: {}", event.description),
+              Err(e) => println!("❌ Failed to save event: {} - Error: {}", event.description, e),
+          }
           
           // Schedule notifications if alarm is enabled
           if calendar_event.alarm {
@@ -475,193 +471,84 @@ impl AIAssistantService {
 }
 
 // Public function to process user query through the AI assistant service //
-pub async fn process_user_query(app_handle: &AppHandle, query: String, conversation_history: Option<Vec<ConversationMessage>>) -> Result<LLMResponse, String> {
-    let service = AIAssistantService::new();
-    service.process_user_query(query, app_handle, conversation_history).await
-}
-
-// Function to post-process the JSON response from the LLM //
 fn post_process_json(json_str: &str) -> String {
     println!("🔍 Original LLM response: {}", json_str);
 
-    // Handle code blocks with json or backticks - check for multiple code blocks
-    let code_block_pattern = regex::Regex::new(r"```(?:json)?\s*([\s\S]*?)```").unwrap();
-    
-    // Process code blocks if they exist
-    for captures in code_block_pattern.captures_iter(json_str) {
-        if let Some(code_content) = captures.get(1) {
-            let inner_content = code_content.as_str().trim();
-            
-            // Handle escaped characters and convert single quotes properly
-            let fixed_json = fix_json_formatting(inner_content);
-            
-            // Check if it's valid JSON
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&fixed_json) {
-                if parsed["response_text"].is_string() {
-                    println!("🔍 Valid JSON extracted from code block");
-                    return fixed_json;
-                }
-            }
+   let extracted_str = if let Some(captures) = regex::Regex::new(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```").unwrap().captures(json_str) {
+        captures.get(1).map_or("", |m| m.as_str()).trim()
+    } else if let Some(start) = json_str.find('{') {
+        if let Some(end) = json_str.rfind('}') {
+            &json_str[start..=end]
+        } else {
+            json_str
+        }
+    } else {
+        json_str
+    };
+
+    let cleaned_json = fix_json_formatting(extracted_str);
+    println!("🔍 Cleaned JSON for parsing: {}", cleaned_json);
+
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&cleaned_json) {
+        let response_text = value["response_text"].as_str().unwrap_or("I'm having trouble processing your request. Could you try rephrasing?").to_string();
+        let action_taken = value["action_taken"].as_str().unwrap_or("none").to_string();
+
+        let extracted_events = value["extracted_events"].as_array().map(|arr| {
+            arr.iter().filter_map(|event_val| {
+                let description = event_val["description"].as_str()?.to_string();
+                let alarm = event_val["alarm"].as_bool().unwrap_or(true);
+                let recurrence = event_val["recurrence"].as_str().map(String::from);
+
+                let time_str = event_val["time"].as_str()?;
+                let time = DateTime::parse_from_rfc3339(time_str)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .ok()
+                    .or_else(|| {
+                        chrono::NaiveDateTime::parse_from_str(time_str, "%Y-%m-%dT%H:%M:%S")
+                            .ok()
+                            .and_then(|ndt| Local.from_local_datetime(&ndt).single())
+                            .map(|local_dt| local_dt.with_timezone(&Utc))
+                    });
+
+                Some(ExtractedEvent {
+                    description,
+                    time,
+                    alarm,
+                    recurrence,
+                })
+            }).collect::<Vec<ExtractedEvent>>()
+        }).unwrap_or_default();
+
+        let llm_response = LLMResponse {
+            response_text,
+            extracted_events: if extracted_events.is_empty() { None } else { Some(extracted_events) },
+            conversation_id: value["conversation_id"].as_str().map(String::from),
+            action_taken: Some(action_taken),
+        };
+
+        if let Ok(final_json) = serde_json::to_string(&llm_response) {
+            println!("✅ Successfully reconstructed and serialized JSON: {}", final_json);
+            return final_json;
         }
     }
 
-    // Try to find standalone JSON objects in the response
-    let json_pattern = regex::Regex::new(r"\{[^{]*'response_text'[^}]*\}").unwrap();
-    
-    for json_match in json_pattern.find_iter(json_str) {
-        let potential_json = json_match.as_str();
-        
-        // Fix escaped characters and convert single quotes properly
-        let fixed_json = fix_json_formatting(potential_json);
-        
-        // Check if it's valid JSON after conversion
-        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&fixed_json) {
-            if parsed["response_text"].is_string() {
-                println!("🔍 Valid JSON extracted from response: {}", fixed_json);
-                return fixed_json;
-            }
-        }
-    }
-
-    // If direct detection fails, try a more comprehensive approach
-    // Find the first opening brace that looks like it could be the start of a JSON object
-    for (i, c) in json_str.chars().enumerate() {
-        if c == '{' {
-            // Try to extract balanced JSON
-            let mut depth = 1;
-            let mut end_pos = i;
-            
-            for (j, next_char) in json_str[i+1..].chars().enumerate() {
-                if next_char == '{' {
-                    depth += 1;
-                } else if next_char == '}' {
-                    depth -= 1;
-                    if depth == 0 {
-                        end_pos = i + j + 1;
-                        break;
-                    }
-                }
-            }
-            
-            if depth == 0 {
-                let json_candidate = &json_str[i..=end_pos];
-                
-                // Fix escaped characters and convert single quotes properly
-                let fixed_json = fix_json_formatting(json_candidate);
-                
-                // Try to parse
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&fixed_json) {
-                    if parsed["response_text"].is_string() {
-                        println!("🔍 Valid JSON extracted using balanced braces");
-                        return fixed_json;
-                    }
-                }
-            }
-        }
-    }
-
-    // If all else fails, extract the values directly and construct a new JSON
-    let mut response_text = String::from("I'm your calendar assistant. How can I help you?");
-    let mut action_taken = String::from("none");
-    
-    // Try to extract response_text using a more comprehensive approach
-    let response_pattern = regex::Regex::new(r"'response_text':\s*'((?:[^'\\]|\\.)*?)'").unwrap();
-    if let Some(caps) = response_pattern.captures(json_str) {
-        if let Some(text_match) = caps.get(1) {
-            let text = text_match.as_str();
-            response_text = text.replace("\\'", "'");
-        }
-    }
-    
-    // Extract action_taken
-    let action_pattern = regex::Regex::new(r"'action_taken':\s*'([^']*)'").unwrap();
-    if let Some(caps) = action_pattern.captures(json_str) {
-        if let Some(action_match) = caps.get(1) {
-            action_taken = action_match.as_str().to_string();
-        }
-    }
-    
-    // Construct a valid JSON manually with proper escaping
-    let escaped_response = response_text.replace("\"", "\\\"");
-    let constructed_json = format!(
-        r#"{{"response_text":"{}","extracted_events":[],"action_taken":"{}"}}"#, 
-        escaped_response, action_taken
-    );
-    
-    println!("🔍 Constructed JSON fallback: {}", constructed_json);
-    constructed_json
+    println!("❌ Failed to parse and reconstruct JSON, returning emergency fallback.");
+    r#"{"response_text":"I'm having trouble processing your request. Could you try rephrasing?","extracted_events":[],"action_taken":"none"}"#.to_string()
 }
 
 // Helper function to fix JSON formatting issues
 fn fix_json_formatting(json_text: &str) -> String {
-    let mut result = json_text.to_string();
-    
-    // First handle escaped characters that need to be preserved
-    let mut temp = String::new();
-    let mut i = 0;
-    let chars: Vec<char> = result.chars().collect();
-    
-    while i < chars.len() {
-        if i + 1 < chars.len() && chars[i] == '\\' && chars[i + 1] == '\'' {
-            temp.push_str("__ESCAPED_QUOTE__");
-            i += 2;
-        } else {
-            temp.push(chars[i]);
-            i += 1;
-        }
-    }
-    
-    // Now do the regular replacements
-    result = temp
-        .replace("{'", "{\"")
-        .replace("':", "\":")
-        .replace("': ", "\": ")
-        .replace(", '", ", \"")
-        .replace("','", "\",\"")
-        .replace("'}", "\"}")
-        .replace("']", "\"]")
-        .replace("['", "[\"")
-        .replace("',{", "\",{")
-        .replace("},'", "},\"")
-        .replace("':", "\":")
-        .replace(": '", ": \"")
-        .replace("',", "\",")
-        .replace(",'", ",\"");
-    
-    // Finally, restore the escaped quotes properly as regular quotes in the final JSON
-    result = result.replace("__ESCAPED_QUOTE__", "'");
-    
-    // Filter out non-printable characters and control characters that might corrupt JSON
-    result = result.chars()
-        .filter(|&c| c >= ' ' || c == '\n' || c == '\t')
-        .collect();
-    
-    // Check if the JSON is properly balanced
-    let mut brace_count = 0;
-    let mut bracket_count = 0;
-    
-    for c in result.chars() {
-        if c == '{' {
-            brace_count += 1;
-        } else if c == '}' {
-            brace_count -= 1;
-        } else if c == '[' {
-            bracket_count += 1;
-        } else if c == ']' {
-            bracket_count -= 1;
-        }
-    }
-    
-    // Add missing closing braces/brackets if needed
-    while brace_count > 0 {
-        result.push('}');
-        brace_count -= 1;
-    }
-    
-    while bracket_count > 0 {
-        result.push(']');
-        bracket_count -= 1;
-    }
-    
-    result
+    json_text
+        .trim()
+        .replace('\'', "\"") // Replace single quotes with double quotes
+        .replace("True", "true")
+        .replace("False", "false")
+        .replace("None", "null")
+        .replace(",\n}", "\n}") // Remove trailing commas in objects
+        .replace(",\n]", "\n]") // Remove trailing commas in arrays
+}
+
+pub async fn process_user_query(app_handle: &AppHandle, query: String, conversation_history: Option<Vec<ConversationMessage>>) -> Result<LLMResponse, String> {
+    let ai_service = AIAssistantService::new();
+    ai_service.process_user_query(query, app_handle, conversation_history).await
 }

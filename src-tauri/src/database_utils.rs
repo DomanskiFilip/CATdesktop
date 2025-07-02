@@ -113,6 +113,7 @@ pub fn init_db(app_handle: &AppHandle) -> Result<(), SqliteError> {
 
 // Function to save events //
 pub fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), String> {
+  println!("📝 Saving event JSON: {}", event_json);
     let mut event = CalendarEvent::from_json(&event_json)?;
 
     // Get current user ID and assign to event
@@ -177,6 +178,8 @@ pub fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), Stri
     
     let deleted = json_value.get("deleted").and_then(|v| v.as_bool()).unwrap_or(false);
 
+    println!("📝 Parsed event: {:?}", event);
+
     tx.execute(
         "INSERT OR REPLACE INTO events (id, user_id, description, time, alarm, synced, synced_google, deleted, recurrence)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
@@ -194,6 +197,7 @@ pub fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), Stri
     ).map_err(|e| format!("Execute error: {}", e.to_string()))?;
 
     tx.commit().map_err(|e| format!("Commit error: {}", e.to_string()))?;
+    println!("✅ Event saved successfully");
     Ok(())
 }
 

@@ -451,6 +451,9 @@ onMounted(async () => {
     listen('google_sync_complete', async () => {
     await loadEvents()
     })
+    listen('event-saved', async (event) => {
+      await loadEvents()
+    })
     // Refresh events every minute
     setInterval(refreshEvents, refreshInterval)
     setInterval(async () => {
