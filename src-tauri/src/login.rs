@@ -46,7 +46,7 @@ pub async fn login_user_lambda(app_handle: &AppHandle, email: String, password: 
         .map_err(|e| e.to_string())?;
     let _status = response.status();
     let text = response.text().await.map_err(|e| e.to_string())?;
-    
+
     // Check for Sandbox.Timedout error in the raw response
     if text.contains("\"errorType\":\"Sandbox.Timedout\"") {
         let frontend_response = serde_json::json!({
@@ -54,6 +54,18 @@ pub async fn login_user_lambda(app_handle: &AppHandle, email: String, password: 
             "message": "Server timeout, please try again.",
         });
         return Err(frontend_response.to_string());
+    }
+
+    // try to parse as a direct error message
+    if let Ok(error_obj) = serde_json::from_str::<serde_json::Value>(&text) {
+        // If we have a direct error message format like {"message":"Forbidden"}
+        if let Some(error_msg) = error_obj.get("message").and_then(|m| m.as_str()) {
+            let frontend_response = serde_json::json!({
+                "status": "error",
+                "message": error_msg,
+            });
+            return Err(frontend_response.to_string());
+        }
     }
 
     // Parse Lambda response
