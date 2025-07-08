@@ -14,6 +14,7 @@ mod google_sync_service;
 mod encryption_utils;
 mod auto_login;
 mod ai_assistant;
+mod prompt;
 
 
 use tauri::{AppHandle, Manager, Emitter};
