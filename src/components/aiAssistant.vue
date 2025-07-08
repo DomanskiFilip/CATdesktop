@@ -13,31 +13,17 @@
     </div>
 
     <section class="chat-container" ref="chatContainer">
-      <div v-for="(message, index) in chatHistory" :key="index" 
-           :class="['message', message.sender === 'user' ? 'user-message' : 'assistant-message']">
-        <div v-if="message.sender === 'assistant' && message.eventSuggestion" class="event-suggestion">
-          <h4>Event Suggestion:</h4>
-          <div class="event-details">
-            <p><strong>Description:</strong> {{ message.eventSuggestion.description }}</p>
-            <p v-if="message.eventSuggestion.time">
-              <strong>Time:</strong> {{ formatDate(message.eventSuggestion.time) }}
-            </p>
-            <p v-if="message.eventSuggestion.recurrence">
-              <strong>Recurrence:</strong> {{ formatRecurrence(message.eventSuggestion.recurrence) }}
-            </p>
-            <p><strong>Set Alarm:</strong> {{ message.eventSuggestion.alarm ? 'Yes' : 'No' }}</p>
-          </div>
-          <div class="suggestion-actions" v-if="!message.eventAccepted && !message.eventRejected">
-            <button @click="acceptSuggestion(index)" class="accept-btn">Accept</button>
-            <button @click="rejectSuggestion(index)" class="reject-btn">Reject</button>
-          </div>
-          <div v-else-if="message.eventAccepted" class="suggestion-status accepted">
-            Event added to calendar
-          </div>
-          <div v-else class="suggestion-status rejected">
-            Event rejected
-          </div>
-        </div>
+      <div v-for="(message, index) in chatHistory" :key="index" :class="['message', message.sender === 'user' ? 'user-message' : 'assistant-message']">
+        <EventSuggestion
+          v-if="message.sender === 'assistant' && message.eventSuggestion"
+          :eventSuggestion="message.eventSuggestion"
+          :eventAccepted="message.eventAccepted"
+          :eventRejected="message.eventRejected"
+          :isUpdate="message.isUpdate"
+          :isMoved="message.isMoved"
+          @accept="acceptSuggestion(index)"
+          @reject="rejectSuggestion(index)"
+        />
         <div class="message-content">{{ message.content }}</div>
       </div>
       <div v-if="isTyping" class="typing-indicator">
@@ -62,14 +48,25 @@
         </svg>
       </button>
     </section>
+
+    <!-- Conflict Resolution Dialog -->
+    <ConflictMessage
+      :isVisible="showConflictDialog"
+      :existingEvent="conflictData.existingEvent"
+      :newSuggestion="conflictData.newSuggestion"
+      :conflictType="conflictData.conflictType"
+      @update="handleConflictUpdate"
+      @cancel="handleConflictCancel"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, nextTick, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { format } from 'date-fns'
 import { emit as tauriEmit } from '@tauri-apps/api/event'
+import EventSuggestion from './EventSuggestion.vue'
+import ConflictMessage from './ConflictMessage.vue'
 
 interface EventSuggestion {
   description: string;
@@ -84,6 +81,8 @@ interface ChatMessage {
   eventSuggestion?: EventSuggestion;
   eventAccepted?: boolean;
   eventRejected?: boolean;
+  isUpdate?: boolean;
+  isMoved?: boolean;
 }
 
 const chatHistory = ref<ChatMessage[]>([
@@ -97,35 +96,19 @@ const isProcessing = ref(false);
 const isTyping = ref(false);
 const chatContainer = ref<HTMLElement | null>(null);
 
-// Format date for display
-const formatDate = (dateString: string) => {
-  try {
-    const date = new Date(dateString);
-    return format(date, 'EEEE, MMMM d, yyyy \'at\' h:mm a');
-  } catch (e) {
-    return dateString;
-  }
-};
-
-// Format recurrence rule for human reading
-const formatRecurrence = (recurrence: string) => {
-  if (!recurrence) return '';
-  
-  if (recurrence.includes('FREQ=DAILY')) {
-    const count = recurrence.match(/COUNT=(\d+)/);
-    return count ? `Daily (${count[1]} times)` : 'Daily';
-  } else if (recurrence.includes('FREQ=WEEKLY')) {
-    const count = recurrence.match(/COUNT=(\d+)/);
-    return count ? `Weekly (${count[1]} times)` : 'Weekly';
-  } else if (recurrence.includes('FREQ=MONTHLY')) {
-    const count = recurrence.match(/COUNT=(\d+)/);
-    return count ? `Monthly (${count[1]} times)` : 'Monthly';
-  } else if (recurrence.includes('FREQ=YEARLY')) {
-    const count = recurrence.match(/COUNT=(\d+)/);
-    return count ? `Yearly (${count[1]} times)` : 'Yearly';
-  }
-  return recurrence;
-};
+// Conflict dialog state
+const showConflictDialog = ref(false);
+const conflictData = ref<{
+  existingEvent: any;
+  newSuggestion: EventSuggestion | null;
+  conflictType: string;
+  messageIndex: number;
+}>({
+  existingEvent: null,
+  newSuggestion: null,
+  conflictType: '',
+  messageIndex: -1
+});
 
 const clearChat = () => {
   // Reset chat history to just the welcome message
@@ -145,77 +128,73 @@ const scrollToBottom = async () => {
 
 // Send message to AI //
 const sendMessage = async () => {
-  const message = userInput.value.trim();
-  if (!message || isProcessing.value) return;
+  if (!userInput.value.trim() || isProcessing.value) return;
   
-  // Add user message to chat
+  const message = userInput.value.trim();
+  userInput.value = '';
+  
   chatHistory.value.push({
     content: message,
     sender: 'user'
   });
-  userInput.value = '';
+  
   isProcessing.value = true;
   isTyping.value = true;
   
   await scrollToBottom();
   
   try {
-    // Convert chat history to a format suitable for the backend
-    const conversation_history = chatHistory.value.map(msg => ({
-      role: msg.sender,
-      content: msg.content,
-      timestamp: new Date().toISOString(),
-    }));
-
-    console.log('Sending conversationHistory to AI:', conversation_history);
-    
-    // Process through our service with conversation history
     const response = await invoke<string>('process_ai_message', { 
       query: message,
-      conversationHistory: JSON.stringify(conversation_history)
+      conversationHistory: JSON.stringify(chatHistory.value.slice(0, -1))
     });
-
-    console.log('Raw response from backend:', response);
     
-    const parsedResponse = JSON.parse(response);
-    
-    // Add AI response to chat
     isTyping.value = false;
     
-    // Rest of your code remains the same
-    const actionTaken = parsedResponse.action_taken || 'none';
+    const aiResponse = JSON.parse(response);
     
-    if (actionTaken === 'create_event' && 
-        parsedResponse.extracted_events && 
-        parsedResponse.extracted_events.length > 0) {
-      // Add response with event suggestion
-      chatHistory.value.push({
-        content: parsedResponse.response_text,
-        sender: 'assistant',
-        eventSuggestion: parsedResponse.extracted_events[0]
-      });
-    } else if (actionTaken === 'update_event' && 
-              parsedResponse.extracted_events && 
-              parsedResponse.extracted_events.length > 0) {
-      // Handle updating an event
-      chatHistory.value.push({
-        content: parsedResponse.response_text,
-        sender: 'assistant',
-        eventSuggestion: parsedResponse.extracted_events[0]
-      });
-    } else if (actionTaken === 'query_events') {
-      // Just show the response text for queries
-      chatHistory.value.push({
-        content: parsedResponse.response_text,
-        sender: 'assistant'
-      });
+    // If there are extracted events, check for conflicts immediately
+    if (aiResponse.extracted_events && aiResponse.extracted_events.length > 0) {
+      const eventSuggestion = aiResponse.extracted_events[0];
+      const isUpdate = aiResponse.action_taken === 'update_event';
+      const isMove = aiResponse.action_taken === 'move_event';
+      
+      // Check for conflicts before showing the suggestion
+      const conflictResult = await handleEventConflict(eventSuggestion);
+      
+      if (conflictResult.hasConflict && conflictResult.conflictingEvent && !isUpdate && !isMove) {
+        // Show conflict dialog directly instead of event suggestion
+        conflictData.value = {
+          existingEvent: conflictResult.conflictingEvent,
+          newSuggestion: eventSuggestion,
+          conflictType: conflictResult.conflictType || 'unknown',
+          messageIndex: chatHistory.value.length
+        };
+        
+        chatHistory.value.push({
+          content: aiResponse.response_text,
+          sender: 'assistant'
+        });
+        
+        showConflictDialog.value = true;
+      } else {
+        // No conflict or it's an update/move, show normal event suggestion
+        chatHistory.value.push({
+          content: aiResponse.response_text,
+          sender: 'assistant',
+          eventSuggestion: eventSuggestion,
+          isUpdate: isUpdate,
+          isMoved: isMove
+        });
+      }
     } else {
-      // For 'none' or any other action, just show response text
+      // No events, just show the response
       chatHistory.value.push({
-        content: parsedResponse.response_text,
+        content: aiResponse.response_text,
         sender: 'assistant'
       });
     }
+    
   } catch (error) {
     isTyping.value = false;
     console.error('Error processing message:', error);
@@ -229,67 +208,130 @@ const sendMessage = async () => {
   }
 };
 
-// Accept event suggestion
+// Check for conflicts and handle event creation/updates
+const handleEventConflict = async (eventSuggestion: EventSuggestion) => {
+  try {
+    // Get all events to check for conflicts
+    const eventsJson = await invoke<string[]>('get_events_for_ai');
+    const events = eventsJson.map(eventStr => JSON.parse(eventStr));
+    
+    const suggestedTime = eventSuggestion.time ? new Date(eventSuggestion.time) : null;
+    const suggestedDescription = eventSuggestion.description.toLowerCase().trim();
+    
+    // Check for conflicts
+    let conflictingEvent = null;
+    let conflictType = '';
+    
+    if (suggestedTime) {
+      // Check for time conflict (same hour)
+      conflictingEvent = events.find(event => {
+        const eventTime = new Date(event.time);
+        return eventTime.getHours() === suggestedTime.getHours() &&
+               eventTime.getDate() === suggestedTime.getDate() &&
+               eventTime.getMonth() === suggestedTime.getMonth() &&
+               eventTime.getFullYear() === suggestedTime.getFullYear();
+      });
+      
+      if (conflictingEvent) {
+        conflictType = 'time';
+      }
+    }
+    
+    // Check for description match if no time conflict found
+    if (!conflictingEvent) {
+      conflictingEvent = events.find(event => 
+        event.description.toLowerCase().trim() === suggestedDescription
+      );
+      
+      if (conflictingEvent) {
+        conflictType = 'description';
+      }
+    }
+    
+    if (conflictingEvent) {
+      return { hasConflict: true, conflictingEvent, conflictType };
+    }
+    
+    return { hasConflict: false };
+    
+  } catch (error) {
+    console.error('Error checking for conflicts:', error);
+    return { hasConflict: false };
+  }
+};
+
+// Handle conflict resolution
+const handleConflictUpdate = async () => {
+  const { existingEvent, newSuggestion, conflictType, messageIndex } = conflictData.value;
+  
+  if (!newSuggestion) {
+    console.error('No suggestion data available for update');
+    showConflictDialog.value = false;
+    return;
+  }
+  
+  try {
+    await updateConflictingEvent(existingEvent, newSuggestion, conflictType);
+    
+    // Add success message
+    chatHistory.value.push({
+      content: `Great! I've updated "${newSuggestion.description}" in your calendar.`,
+      sender: 'assistant'
+    });
+    
+    // Emit event to refresh calendar
+    await tauriEmit('event-saved');
+    
+  } catch (error) {
+    console.error('Error updating conflicting event:', error);
+    chatHistory.value.push({
+      content: "I'm sorry, I couldn't update this event.",
+      sender: 'assistant'
+    });
+  }
+  
+  showConflictDialog.value = false;
+  await scrollToBottom();
+};
+
+const handleConflictCancel = async () => {
+  const { messageIndex } = conflictData.value;
+  
+  const message = chatHistory.value[messageIndex];
+  if (message) {
+    message.eventRejected = true;
+  }
+  
+  chatHistory.value.push({
+    content: "No problem. The existing event remains unchanged. Is there anything else you'd like me to help you with?",
+    sender: 'assistant'
+  });
+  
+  showConflictDialog.value = false;
+  await scrollToBottom();
+};
+
+// Modified acceptSuggestion function
 const acceptSuggestion = async (messageIndex: number) => {
   const message = chatHistory.value[messageIndex];
   if (!message || !message.eventSuggestion) return;
   
   try {
-    // Create a calendar event object
-    const eventDate = message.eventSuggestion.time ? 
-      new Date(message.eventSuggestion.time) : 
-      new Date(Date.now() + 60 * 60 * 1000); // Default to 1 hour from now
+    if (message.isUpdate || message.isMoved) {
+      await updateExistingEvent(message.eventSuggestion);
+    } else {
+      await createNewEvent(message.eventSuggestion);
+    }
     
-    const calendarEvent = {
-      id: crypto.randomUUID(),
-      user_id: "",
-      description: message.eventSuggestion.description,
-      time: eventDate.toISOString(),
-      alarm: message.eventSuggestion.alarm,
-      synced: false,
-      synced_google: false,
-      deleted: false,
-      recurrence: message.eventSuggestion.recurrence
-    };
-    
-    // Save the event
-    await invoke('save_event', { 
-      event: JSON.stringify(calendarEvent)
-    });
-    
-    // Mark as accepted
     message.eventAccepted = true;
     
-    // Emit a global event to notify other components that an event was saved
+    // Emit event to refresh calendar
     await tauriEmit('event-saved');
-
-    // Trigger sync
-    try {
-      await invoke('trigger_sync');
-    } catch (syncError) {
-      console.warn('Failed to trigger sync:', syncError);
-    }
     
-    // Schedule notification if alarm is on
-    if (calendarEvent.alarm) {
-      try {
-        await invoke('schedule_event_notification', { 
-          event_json: JSON.stringify(calendarEvent) 
-        });
-      } catch (notificationError) {
-        console.warn('Failed to schedule notification:', notificationError);
-      }
-    }
-    
-    // Add confirmation message
-    chatHistory.value.push({
-      content: `Great! I've added "${message.eventSuggestion.description}" to your calendar.`,
-      sender: 'assistant'
-    });
   } catch (error) {
-    console.error('Error saving event:', error);
+    console.error('Error processing event suggestion:', error);
     chatHistory.value.push({
-      content: "I'm sorry, I couldn't save this event to your calendar.",
+      content: "I'm sorry, I couldn't process this event suggestion.",
       sender: 'assistant'
     });
   }
@@ -297,7 +339,217 @@ const acceptSuggestion = async (messageIndex: number) => {
   await scrollToBottom();
 };
 
-// Reject event suggestion
+// Function to update conflicting event
+const updateConflictingEvent = async (existingEvent: any, newSuggestion: EventSuggestion | null, conflictType: string) => {
+  if (!newSuggestion) {
+    throw new Error('No suggestion data provided');
+  }
+  
+  try {
+    let updatedEvent;
+    
+    if (conflictType === 'time') {
+      // Time matches, update description and other properties
+      updatedEvent = {
+        ...existingEvent,
+        description: newSuggestion.description,
+        alarm: newSuggestion.alarm !== undefined ? newSuggestion.alarm : existingEvent.alarm,
+        recurrence: newSuggestion.recurrence || existingEvent.recurrence,
+        synced: false,
+        synced_google: false
+      };
+    } else if (conflictType === 'description') {
+      // Description matches, update time and other properties
+      updatedEvent = {
+        ...existingEvent,
+        time: newSuggestion.time || existingEvent.time,
+        alarm: newSuggestion.alarm !== undefined ? newSuggestion.alarm : existingEvent.alarm,
+        recurrence: newSuggestion.recurrence || existingEvent.recurrence,
+        synced: false,
+        synced_google: false
+      };
+    }
+    
+    // Save the updated event
+    await invoke('save_event', { 
+      event: JSON.stringify(updatedEvent)
+    });
+    
+    // Handle notifications
+    if (updatedEvent.alarm) {
+      try {
+        await invoke('schedule_event_notification', { 
+          event_json: JSON.stringify(updatedEvent) 
+        });
+      } catch (notificationError) {
+        console.warn('Failed to schedule notification:', notificationError);
+      }
+    }
+    
+    try {
+      await invoke('trigger_sync');
+    } catch (syncError) {
+      console.warn('Failed to trigger sync:', syncError);
+    }
+    
+  } catch (error) {
+    console.error('Error updating conflicting event:', error);
+    throw error;
+  }
+};
+
+// Function to create a new event //
+const createNewEvent = async (eventSuggestion: EventSuggestion) => {
+  const eventDate = eventSuggestion.time ? 
+    new Date(eventSuggestion.time) : 
+    new Date(Date.now() + 60 * 60 * 1000);
+  
+  const calendarEvent = {
+    id: crypto.randomUUID(),
+    user_id: "",
+    description: eventSuggestion.description,
+    time: eventDate.toISOString(),
+    alarm: eventSuggestion.alarm,
+    synced: false,
+    synced_google: false,
+    deleted: false,
+    recurrence: eventSuggestion.recurrence
+  };
+  
+  await invoke('save_event', { 
+    event: JSON.stringify(calendarEvent)
+  });
+  
+  if (calendarEvent.alarm) {
+    try {
+      await invoke('schedule_event_notification', { 
+        event_json: JSON.stringify(calendarEvent) 
+      });
+    } catch (notificationError) {
+      console.warn('Failed to schedule notification:', notificationError);
+    }
+  }
+  
+  try {
+    await invoke('trigger_sync');
+  } catch (syncError) {
+    console.warn('Failed to trigger sync:', syncError);
+  }
+  
+  chatHistory.value.push({
+    content: `Great! I've added "${eventSuggestion.description}" to your calendar.`,
+    sender: 'assistant'
+  });
+};
+
+// Function to update an existing event //
+const updateExistingEvent = async (eventSuggestion: EventSuggestion, isMoved: boolean = false) => {
+  try {
+    // Get all events to find the one to update
+    const eventsJson = await invoke<string[]>('get_events_for_ai');
+    const events = eventsJson.map(eventStr => JSON.parse(eventStr));
+    
+    const matchingEvent = findMatchingEvent(events, eventSuggestion);
+    
+    if (!matchingEvent) {
+      throw new Error("Could not find the event to update");
+    }
+    
+    // Handle updating the event differently based on whether it's a move or regular update
+    const updatedEvent = {
+      ...matchingEvent,
+      description: eventSuggestion.description,
+      time: eventSuggestion.time || matchingEvent.time,
+      alarm: eventSuggestion.alarm !== undefined ? eventSuggestion.alarm : matchingEvent.alarm,
+      recurrence: eventSuggestion.recurrence || matchingEvent.recurrence,
+      synced: false,
+      synced_google: false
+    };
+    
+    // Save the updated event
+    await invoke('save_event', { 
+      event: JSON.stringify(updatedEvent)
+    });
+    
+    // Handle notifications
+    if (updatedEvent.alarm) {
+      try {
+        await invoke('schedule_event_notification', { 
+          event_json: JSON.stringify(updatedEvent) 
+        });
+      } catch (notificationError) {
+        console.warn('Failed to schedule notification:', notificationError);
+      }
+    }
+    
+    try {
+      await invoke('trigger_sync');
+    } catch (syncError) {
+      console.warn('Failed to trigger sync:', syncError);
+    }
+    
+    // Customize the success message based on operation type
+    let messageText;
+    if (isMoved) {
+      messageText = `Great! I've moved "${updatedEvent.description}" to ${new Date(updatedEvent.time).toLocaleString()}.`;
+    } else {
+      // For regular updates, check if time actually changed
+      messageText = eventSuggestion.time && eventSuggestion.time !== matchingEvent.time
+        ? `Great! I've updated "${updatedEvent.description}" with a new time: ${new Date(updatedEvent.time).toLocaleString()}.`
+        : `Great! I've updated "${updatedEvent.description}" in your calendar.`;
+    }
+    
+    chatHistory.value.push({
+      content: messageText,
+      sender: 'assistant'
+    });
+    
+  } catch (error) {
+    console.error('Error updating event:', error);
+    throw error;
+  }
+};
+
+// Helper function to find matching event //
+const findMatchingEvent = (events: any[], eventSuggestion: EventSuggestion, originalDescription?: string) => {
+  const description = eventSuggestion.description.toLowerCase();
+  
+  // If we have original description (for updates), search by that first
+  if (originalDescription) {
+    const match = events.find(e => 
+      e.description.toLowerCase() === originalDescription.toLowerCase()
+    );
+    if (match) return match;
+  }
+  
+  // First try exact description match
+  let match = events.find(e => 
+    e.description.toLowerCase() === description
+  );
+  
+  if (match) return match;
+  
+  // Try time match if provided
+  if (eventSuggestion.time) {
+    const updateTime = new Date(eventSuggestion.time);
+    match = events.find(e => {
+      const eventTime = new Date(e.time);
+      return Math.abs(eventTime.getTime() - updateTime.getTime()) < 30 * 60 * 1000; // 30 minutes
+    });
+  }
+  
+  if (match) return match;
+  
+  // Try partial description match as last resort
+  match = events.find(e => {
+    const eventDesc = e.description.toLowerCase();
+    return eventDesc.includes(description) || description.includes(eventDesc);
+  });
+  
+  return match;
+};
+
+// Reject event suggestion //
 const rejectSuggestion = async (messageIndex: number) => {
   const message = chatHistory.value[messageIndex];
   if (!message) return;

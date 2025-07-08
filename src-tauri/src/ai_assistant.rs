@@ -3,8 +3,10 @@ use chrono::{DateTime, Utc, Duration, Local, TimeZone};
 use tauri::AppHandle;
 use uuid::Uuid;
 use rand::Rng;
+use base64::Engine;
+use regex::Regex;
 use crate::ConversationMessage;
-use crate::database_utils::{CalendarEvent, get_db_connection, save_event};
+use crate::database_utils::{CalendarEvent, get_db_connection, save_event, get_events};
 use crate::user_utils::get_current_user_id;
 use crate::api_utils::AppConfig;
 use crate::trigger_sync;
@@ -76,41 +78,6 @@ impl AIAssistantService {
        
         // Call Lambda endpoint and get parsed LLM response
         let mut llm_response = self.invoke_lambda_endpoint(prompt, app_handle).await?;
-
-        // Validate for empty descriptions in created events
-        if let Some(events) = &mut llm_response.extracted_events {
-            if llm_response.action_taken.as_deref() == Some("create_event") {
-                for event in events.iter_mut() {
-                    if event.description.trim().is_empty() {
-                        event.description = "Untitled Event".to_string();
-                    }
-                }
-                if llm_response.response_text.trim().is_empty() {
-                    llm_response.response_text = "I've created an event for you. It's called 'Untitled Event'. Would you like to add any details or change the time?".to_string();
-                }
-            }
-        }
-
-        // Handle actions based on `action_taken`
-        match llm_response.action_taken.as_deref() {
-            Some("create_event") => {
-                println!("✅ Suggesting event creation to the user.");
-            }
-            Some("update_event") => {
-                println!("Update event action received, but not implemented yet.");
-                // Handle event update logic here
-            }
-            Some("query_events") => {
-                println!("Query event action received, but not implemented yet.");
-                // Handle event query logic here
-            }
-            Some("none") | None => {
-                println!("No action taken.");
-            }
-            _ => {
-                println!("Unknown action: {:?}", llm_response.action_taken);
-            }
-        }
 
         Ok(llm_response)
     }
@@ -260,6 +227,7 @@ impl AIAssistantService {
             YOUR CAPABILITIES:\n\
             - Create new calendar events from natural language\n\
             - Update existing events\n\
+            - Move existing events to diferent hour\n\
             - Query and search through events\n\
             - Set alarms and recurring patterns\n\
             - Interpret relative time (\"in 2 hours\", \"next Monday\", \"tomorrow at 3pm\")\n\n\
@@ -293,7 +261,7 @@ impl AIAssistantService {
             IMPORTANT RULES YOU CANNOT BREAK WHEN RESPONDING:\n\
             - Your entire response must be ONLY the JSON object without any additional text, explanation or code\n\
             - Don't wrap the JSON in code blocks or quotation marks\n\
-            - action_taken must be one of: \"create_event\", \"update_event\", \"query_events\", \"none\"\n\
+            - action_taken must be one of: \"create_event\", \"update_event\", \"move_event\", \"query_events\", \"none\"\n\
             - Every event must have a non-empty description. If the description is missing, ask the user for clarification.\n\
             - For times without dates, assume today\n\
             - For times without specific time, suggest appropriate times\n\
@@ -401,47 +369,6 @@ impl AIAssistantService {
         Ok(llm_response)
     }
 
-      
-      // Method to save extracted event to the database and schedule notifications //
-      async fn save_extracted_event(&self, event: ExtractedEvent, app_handle: &AppHandle) -> Result<(), String> {
-          println!("📝 Attempting to save event: {:?}", event);
-  
-          let user_id = get_current_user_id(app_handle)?;
-          
-          // Create a new calendar event
-          let calendar_event = CalendarEvent {
-              id: Uuid::new_v4().to_string(),
-              user_id,
-              description: event.description.clone(),
-              time: event.time.unwrap_or_else(|| Utc::now() + Duration::hours(1)),
-              alarm: event.alarm,
-              synced: false,
-              synced_google: false,
-              deleted: false,
-              recurrence: event.recurrence.clone(),
-          };
-          
-          // Save the event to database
-          println!("📝 Saving event: {:?}", calendar_event);
-
-          match save_event(app_handle, serde_json::to_string(&calendar_event).unwrap()) {
-              Ok(_) => println!("✅ Successfully saved event: {}", event.description),
-              Err(e) => println!("❌ Failed to save event: {} - Error: {}", event.description, e),
-          }
-          
-          // Schedule notifications if alarm is enabled
-          if calendar_event.alarm {
-              let event_json = serde_json::to_string(&calendar_event)
-                  .map_err(|e| format!("Failed to serialize event: {}", e))?;
-              schedule_event_notification(event_json, app_handle.clone()).await?;
-          }
-          
-          // Trigger sync to DynamoDB and Google Calendar
-          trigger_sync(app_handle.clone()).await?;
-          
-          Ok(())
-      }
-      
     // Helper method to get recent events for the user //
     async fn get_recent_events(&self, app_handle: &AppHandle) -> Result<Vec<CalendarEvent>, String> {
           let user_id = get_current_user_id(app_handle)?;
@@ -449,14 +376,14 @@ impl AIAssistantService {
               .map_err(|e| e.to_string())?;
           
           let now = Utc::now();
-          let next_week = now + Duration::days(7);
+          let next_week = now + Duration::days(30);
           
           let mut query = conn.prepare(
               "SELECT id, user_id, description, time, alarm, synced, synced_google, deleted, recurrence 
               FROM events 
               WHERE user_id = ? AND deleted = FALSE AND time >= ? AND time <= ?
               ORDER BY time ASC
-              LIMIT 5"
+              LIMIT 20"
           ).map_err(|e| e.to_string())?;
           
           let events = query.query_map(
@@ -474,14 +401,27 @@ impl AIAssistantService {
 fn post_process_json(json_str: &str) -> String {
     println!("🔍 Original LLM response: {}", json_str);
 
-   let extracted_str = if let Some(captures) = regex::Regex::new(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```").unwrap().captures(json_str) {
+    // Find the FIRST complete JSON object in the response
+    let extracted_str = if let Some(captures) = Regex::new(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```").unwrap().captures(json_str) {
         captures.get(1).map_or("", |m| m.as_str()).trim()
     } else if let Some(start) = json_str.find('{') {
-        if let Some(end) = json_str.rfind('}') {
-            &json_str[start..=end]
-        } else {
-            json_str
+        // Find the matching closing brace for the FIRST JSON object
+        let mut brace_count = 0;
+        let mut end_pos = start;
+        for (i, ch) in json_str[start..].char_indices() {
+            match ch {
+                '{' => brace_count += 1,
+                '}' => {
+                    brace_count -= 1;
+                    if brace_count == 0 {
+                        end_pos = start + i;
+                        break; // Stop at the first complete JSON object
+                    }
+                },
+                _ => {}
+            }
         }
+        &json_str[start..=end_pos]
     } else {
         json_str
     };
@@ -489,26 +429,36 @@ fn post_process_json(json_str: &str) -> String {
     let cleaned_json = fix_json_formatting(extracted_str);
     println!("🔍 Cleaned JSON for parsing: {}", cleaned_json);
 
+    // Try to parse and validate the JSON
     if let Ok(value) = serde_json::from_str::<serde_json::Value>(&cleaned_json) {
         let response_text = value["response_text"].as_str().unwrap_or("I'm having trouble processing your request. Could you try rephrasing?").to_string();
         let action_taken = value["action_taken"].as_str().unwrap_or("none").to_string();
 
         let extracted_events = value["extracted_events"].as_array().map(|arr| {
             arr.iter().filter_map(|event_val| {
-                let description = event_val["description"].as_str()?.to_string();
+                let mut description = event_val["description"].as_str().unwrap_or("").to_string();
+                
+                // Handle empty descriptions for create_event actions
+                if description.trim().is_empty() && action_taken == "create_event" {
+                    description = "Event".to_string(); // Generic description
+                }
+                
                 let alarm = event_val["alarm"].as_bool().unwrap_or(true);
                 let recurrence = event_val["recurrence"].as_str().map(String::from);
 
-                let time_str = event_val["time"].as_str()?;
-                let time = DateTime::parse_from_rfc3339(time_str)
-                    .map(|dt| dt.with_timezone(&Utc))
-                    .ok()
-                    .or_else(|| {
-                        chrono::NaiveDateTime::parse_from_str(time_str, "%Y-%m-%dT%H:%M:%S")
-                            .ok()
-                            .and_then(|ndt| Local.from_local_datetime(&ndt).single())
-                            .map(|local_dt| local_dt.with_timezone(&Utc))
-                    });
+                let time = if let Some(time_str) = event_val["time"].as_str() {
+                    DateTime::parse_from_rfc3339(time_str)
+                        .map(|dt| dt.with_timezone(&Utc))
+                        .ok()
+                        .or_else(|| {
+                            chrono::NaiveDateTime::parse_from_str(time_str, "%Y-%m-%dT%H:%M:%S")
+                                .ok()
+                                .and_then(|ndt| Local.from_local_datetime(&ndt).single())
+                                .map(|local_dt| local_dt.with_timezone(&Utc))
+                        })
+                } else {
+                    None
+                };
 
                 Some(ExtractedEvent {
                     description,
@@ -536,16 +486,15 @@ fn post_process_json(json_str: &str) -> String {
     r#"{"response_text":"I'm having trouble processing your request. Could you try rephrasing?","extracted_events":[],"action_taken":"none"}"#.to_string()
 }
 
-// Helper function to fix JSON formatting issues
+// Helper function to fix JSON formatting issues //
 fn fix_json_formatting(json_text: &str) -> String {
-    json_text
-        .trim()
-        .replace('\'', "\"") // Replace single quotes with double quotes
+    json_text.trim()
         .replace("True", "true")
-        .replace("False", "false")
+        .replace("False", "false") 
         .replace("None", "null")
-        .replace(",\n}", "\n}") // Remove trailing commas in objects
-        .replace(",\n]", "\n]") // Remove trailing commas in arrays
+        .replace(",\n}", "\n}")
+        .replace(",\n]", "\n]")
+        .to_string()
 }
 
 pub async fn process_user_query(app_handle: &AppHandle, query: String, conversation_history: Option<Vec<ConversationMessage>>) -> Result<LLMResponse, String> {

@@ -2,7 +2,7 @@ use crate::database_utils:: { CalendarEvent, get_db_connection };
 use crate::user_utils::get_current_user_id;
 use notify_rust::Notification;
 use tauri::{AppHandle, Manager};
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Local, Duration};
 use std::collections::HashMap;
 use tokio::time::{sleep, Duration as TokioDuration};
 use tokio::task::JoinHandle;
@@ -91,7 +91,7 @@ impl NotificationService {
 
       // Calculate delays
       let event_time = event.time;
-      let now = chrono::Utc::now();
+      let now = chrono::Local::now();
       let warning_delay = (event_time - Duration::minutes(15)) - now;
       let event_delay = event_time - now;
       
@@ -188,7 +188,7 @@ impl NotificationService {
                 let conn = get_db_connection(&app_handle_ref1)
                     .map_err(|e| e.to_string())?;
                 
-                let now = Utc::now();
+                let now = chrono::Local::now();
                 let next_24_hours = now + Duration::hours(24);
                 
                 let mut query = conn.prepare(
@@ -258,8 +258,8 @@ impl NotificationService {
                 format!("Failed to parse RRule: {}", e))))
         };
 
-        // Setup the RRULE with the event start time
-        let tz = Tz::UTC;
+        // Setup the RRULE with the event start time - use Local timezone
+        let tz = Tz::LOCAL;
         let dt_start = event.time.with_timezone(&tz);
 
         // Create a new RRuleSet with the start time
@@ -276,7 +276,7 @@ impl NotificationService {
 
         // Calculate occurrences (limit to 5)
         let occurrences = rruleset.all(5);
-        let now = chrono::Utc::now();
+        let now = chrono::Local::now();
 
         // Filter out past occurrences
         let future_occurrences: Vec<_> = occurrences.dates
@@ -301,7 +301,7 @@ impl NotificationService {
                 id: instance_id,
                 user_id: event.user_id.clone(),
                 description: event.description.clone(),
-                time: occurrence_time.with_timezone(&Utc),
+                time: occurrence_time.with_timezone(&Local),
                 alarm: event.alarm,
                 synced: event.synced,
                 synced_google: event.synced_google,

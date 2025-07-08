@@ -3,18 +3,19 @@ use serde::{Serialize, Deserialize};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 use std::fs;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, TimeZone};
 use rusqlite::Error as SqliteError;
+use base64::{ engine::general_purpose, Engine };
 use crate::user_utils::get_current_user_id;
 use crate::encryption_utils::{encrypt_user_data, decrypt_user_data};
-use base64::{ engine::general_purpose, Engine };
+
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CalendarEvent {
     pub id: String,
     pub user_id: String, 
     pub description: String,
-    pub time: DateTime<Utc>,
+    pub time: DateTime<Local>,
     pub alarm: bool,
     pub synced: bool,
     pub synced_google: bool,
@@ -28,23 +29,54 @@ impl CalendarEvent {
     }
 
     pub fn from_json(json_str: &str) -> Result<Self, String> {
-        let event: CalendarEvent = serde_json::from_str(json_str)
+        // First parse as a generic JSON value to handle potential UTC timestamps
+        let mut json_value: serde_json::Value = serde_json::from_str(json_str)
+            .map_err(|e| format!("JSON parse error: {}", e.to_string()))?;
+        
+        // Convert UTC timestamp to local timezone if needed
+        if let Some(time_str) = json_value.get("time").and_then(|v| v.as_str()) {
+            // Parse the timestamp (could be UTC or local)
+            let parsed_time = if time_str.ends_with('Z') || time_str.contains('+') || time_str.rfind('-').map_or(false, |i| i > 10) {
+                // It's already a timezone-aware timestamp, convert to local
+                chrono::DateTime::parse_from_rfc3339(time_str)
+                    .map_err(|e| format!("Time parse error: {}", e))?
+                    .with_timezone(&Local)
+            } else {
+                // For naive timestamps like "2025-07-08T17:00:00", treat them as already being in local time
+                let naive_dt = chrono::NaiveDateTime::parse_from_str(time_str, "%Y-%m-%dT%H:%M:%S%.f")
+                    .or_else(|_| chrono::NaiveDateTime::parse_from_str(time_str, "%Y-%m-%dT%H:%M:%S"))
+                    .map_err(|e| format!("Naive time parse error: {}", e))?;
+                
+                // Assume the naive datetime is already in local timezone
+                Local.from_local_datetime(&naive_dt)
+                    .single()
+                    .ok_or("Ambiguous local time")?
+            };
+            
+            // Update the JSON value with local timezone
+            json_value["time"] = serde_json::Value::String(parsed_time.to_rfc3339());
+        }
+        
+        let event: CalendarEvent = serde_json::from_value(json_value)
             .map_err(|e| format!("JSON parse error: {}", e.to_string()))?;
         
         Ok(event)
     }
 
     pub fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        let time_str: String = row.get(3)?;
+        let time = chrono::DateTime::parse_from_rfc3339(&time_str)
+            .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+                3,
+                rusqlite::types::Type::Text,
+                Box::new(e),
+            ))?.with_timezone(&Local);
+            
         Ok(CalendarEvent {
             id: row.get(0)?,
             user_id: row.get(1)?,
             description: row.get(2)?,
-            time: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
-                .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
-                    3,
-                    rusqlite::types::Type::Text,
-                    Box::new(e),
-                ))?.with_timezone(&chrono::Utc),
+            time,
             alarm: row.get(4)?,
             synced: row.get(5)?,
             synced_google: row.get(6)?,
@@ -296,7 +328,7 @@ pub fn delete_event(app_handle: &AppHandle, id: String) -> Result<(), SqliteErro
 // Function to clean old events //
 pub fn clean_old_events(app_handle: &AppHandle) -> Result<(), SqliteError> {
     let conn = get_db_connection(app_handle)?;
-    let now = chrono::Utc::now();
+    let now = chrono::Local::now();
     
     // Get current user ID
     let user_id = match get_current_user_id(app_handle) {
