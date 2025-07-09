@@ -7,7 +7,7 @@
           <path d="M120-240v-80h720v80H120Zm0-200v-80h720v80H120Zm0-200v-80h720v80H120Z"/>
         </svg>
       </button>
-      <button @click="changeSection('section1')" :class="{ active: activeSection === 'section1' }">
+      <button @click="async () => { changeSection('section1'); emit('event-saved'); }" :class="{ active: activeSection === 'section1' }">
         <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)">
           <path d="M200-80q-33 0-56.5-23.5T120-160v-560q0-33 23.5-56.5T200-800h40v-80h80v80h320v-80h80v80h40q33 0 56.5 23.5T840-720v560q0 33-23.5 56.5T760-80H200Zm0-80h560v-400H200v400Zm0-480h560v-80H200v80Zm0 0v-80 80Zm80 240v-80h400v80H280Zm0 160v-80h280v80H280Z"/>
         </svg>
@@ -72,7 +72,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
+import { listen, emit } from '@tauri-apps/api/event'
 import GoogleOauth from './components/googleOauth.vue'
 import Login from './components/login.vue'
 import register from './components/register.vue'
