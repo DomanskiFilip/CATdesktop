@@ -35,7 +35,7 @@ pub type GoogleSyncServiceState = Arc<Mutex<Option<GoogleSyncService>>>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationMessage {
-    pub role: String,
+    pub sender: String,
     pub content: String,
     pub timestamp: String,
 }
@@ -267,6 +267,28 @@ async fn get_events_for_ai(app_handle: AppHandle) -> Result<Vec<String>, String>
     get_events(app_handle).await
 }
 
+#[tauri::command]
+async fn delete_all_events(app_handle: tauri::AppHandle) -> Result<usize, String> {
+    let conn = match database_utils::get_db_connection(&app_handle) {
+        Ok(conn) => conn,
+        Err(e) => return Err(e.to_string()),
+    };
+    
+    // Get current user ID
+    let user_id = match user_utils::get_current_user_id(&app_handle) {
+        Ok(id) => id,
+        Err(e) => return Err(e.to_string()),
+    };
+    
+    // Mark all events as deleted
+    let result = conn.execute(
+        "UPDATE events SET deleted = TRUE WHERE user_id = ?",
+        [&user_id]
+    ).map_err(|e| e.to_string())?;
+    
+    Ok(result as usize)
+}
+
 // Start auto-login process //
 async fn start_auto_login(app_handle_arc: Arc<AppHandle>) -> Result<bool, String> {
     let login_success = match crate::auto_login::auto_login_lambda(&app_handle_arc).await {
@@ -460,6 +482,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             reject_event_suggestion,
             trigger_immediate_sync,
             get_events_for_ai,
+            delete_all_events,
         ])
         .setup(|app| {
           // Request notification permissions on macOS

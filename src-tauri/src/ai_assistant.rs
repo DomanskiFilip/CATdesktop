@@ -85,7 +85,6 @@ impl AIAssistantService {
 
         // Method to get canned responses for common queries //
         fn get_canned_response(&self, query: &str) -> Option<LLMResponse> {
-          // Convert query to lowercase for case-insensitive matching
           let lowercase_query = query.to_lowercase();
           let normalized_query = lowercase_query.trim();
           
@@ -102,7 +101,7 @@ impl AIAssistantService {
                       "Hey! I'm your calendar assistant. What can I do for you today?"
                   ];
                   
-                  let index = rng.gen_range(0..greetings.len()); // Update deprecated `gen_range` to `random_range`
+                  let index = rng.gen_range(0..greetings.len());
                   let greeting = greetings[index];
                         
                   Some(LLMResponse {
@@ -120,7 +119,7 @@ impl AIAssistantService {
                       "All systems operational! I'm here to assist with your calendar needs. What's on your mind?"
                   ];
                   
-                  let index = rng.random_range(0..responses.len()); // Update deprecated `gen_range` to `random_range`
+                  let index = rng.random_range(0..responses.len());
                   let response = responses[index];
                   
                   Some(LLMResponse {
@@ -170,7 +169,7 @@ impl AIAssistantService {
                 let events_formatted = recent_events.iter()
                     .map(|event| {
                         let time_str = event.time.format("%Y-%m-%d %H:%M").to_string();
-                        format!("- {} at {}", event.description, time_str)
+                        format!("- description: {} ; time: {}", event.description, time_str)
                     })
                     .collect::<Vec<String>>()
                     .join("\n");
@@ -182,7 +181,7 @@ impl AIAssistantService {
             let conversation_context = if let Some(history) = conversation_history {
                 if !history.is_empty() {
                     history.iter()
-                        .map(|msg| format!("{}: {}", msg.role, msg.content))
+                        .map(|msg| format!("{}: {}", msg.sender, msg.content))
                         .collect::<Vec<String>>()
                         .join("\n")
                 } else {
@@ -191,9 +190,9 @@ impl AIAssistantService {
             } else {
                 "No previous conversation.".to_string()
             };
-
-            println!("📝 conversation history: {}", conversation_context);
             
+            println!("events_context: {}", &events_context);
+
             let prompt = get_calendar_assistant_prompt(&conversation_context, &events_context, query);
             
             Ok(prompt)
@@ -277,35 +276,52 @@ impl AIAssistantService {
 
     // Helper method to get recent events for the user //
     async fn get_recent_events(&self, app_handle: &AppHandle) -> Result<Vec<CalendarEvent>, String> {
-          let user_id = get_current_user_id(app_handle)?;
-          let conn = get_db_connection(app_handle)
-              .map_err(|e| e.to_string())?;
-          
-          let now = Utc::now();
-          let next_week = now + Duration::days(30);
-          
-          let mut query = conn.prepare(
-              "SELECT id, user_id, description, time, alarm, synced, synced_google, deleted, recurrence 
-              FROM events 
-              WHERE user_id = ? AND deleted = FALSE AND time >= ? AND time <= ?
-              ORDER BY time ASC
-              LIMIT 20"
-          ).map_err(|e| e.to_string())?;
-          
-          let events = query.query_map(
-              [&user_id, &now.to_rfc3339(), &next_week.to_rfc3339()],
-              CalendarEvent::from_row
-          ).map_err(|e| e.to_string())?
-          .collect::<Result<Vec<_>, _>>()
-          .map_err(|e| e.to_string())?;
-          
-          Ok(events)
-      }
+        // Use the existing get_events function which handles decryption
+        let events_json = get_events(app_handle)
+            .map_err(|e| format!("Failed to get events: {}", e))?;
+        
+        // Parse the JSON strings back to CalendarEvent structs
+        let events: Result<Vec<CalendarEvent>, _> = events_json
+            .into_iter()
+            .map(|json_str| {
+                serde_json::from_str(&json_str)
+                    .map_err(|e| format!("Failed to parse event JSON: {}", e))
+            })
+            .collect();
+        
+        let mut events = events?;
+        
+        // Filter for recent/upcoming events (within the last 24 hours to next 30 days)
+        let now = chrono::Local::now();
+        let recent_cutoff = now - chrono::Duration::hours(24);
+        let future_cutoff = now + chrono::Duration::days(30);
+        
+        events.retain(|event| {
+            !event.deleted && 
+            event.time >= recent_cutoff && 
+            event.time <= future_cutoff
+        });
+        
+        // Sort by time
+        events.sort_by(|a, b| a.time.cmp(&b.time));
+        
+        // Limit to reasonable number for AI context
+        events.truncate(20);
+        
+        Ok(events)
+    }
 }
 
 // Public function to process user query through the AI assistant service //
 fn post_process_json(json_str: &str) -> String {
     println!("🔍 Original LLM response: {}", json_str);
+
+    // Check if the response is just repeated backticks or empty
+    let trimmed = json_str.trim();
+    if trimmed.is_empty() || trimmed.chars().all(|c| c == '`' || c.is_whitespace()) {
+        println!("❌ Response contains only backticks or whitespace, returning fallback");
+        return r#"{"response_text":"I'm having trouble processing your request. Could you try rephrasing?","extracted_events":null,"action_taken":"none"}"#.to_string();
+    }
 
     // Find the FIRST complete JSON object in the response
     let extracted_str = if let Some(captures) = Regex::new(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```").unwrap().captures(json_str) {
@@ -329,10 +345,25 @@ fn post_process_json(json_str: &str) -> String {
         }
         &json_str[start..=end_pos]
     } else {
-        json_str
+        // No JSON found, return fallback
+        println!("❌ No JSON object found in response");
+        return r#"{"response_text":"I'm having trouble processing your request. Could you try rephrasing?","extracted_events":null,"action_taken":"none"}"#.to_string();
     };
 
-    let cleaned_json = fix_json_formatting(extracted_str);
+    // Check if extracted string is empty or just whitespace
+    if extracted_str.trim().is_empty() {
+        println!("❌ Extracted JSON string is empty");
+        return r#"{"response_text":"I'm having trouble processing your request. Could you try rephrasing?","extracted_events":null,"action_taken":"none"}"#.to_string();
+    }
+
+    let mut cleaned_json = fix_json_formatting(extracted_str);
+    cleaned_json = fix_response_text_quotes(&cleaned_json);
+
+    // Remove any trailing quotes or extra characters after the closing brace
+    if let Some(last_brace) = cleaned_json.rfind('}') {
+        cleaned_json = cleaned_json[..=last_brace].to_string();
+    }
+
     println!("🔍 Cleaned JSON for parsing: {}", cleaned_json);
 
     // Try to parse and validate the JSON
@@ -344,27 +375,40 @@ fn post_process_json(json_str: &str) -> String {
             arr.iter().filter_map(|event_val| {
                 let mut description = event_val["description"].as_str().unwrap_or("").to_string();
                 
-                // Handle empty descriptions for create_event actions
-                if description.trim().is_empty() && action_taken == "create_event" {
-                    description = "Event".to_string(); // Generic description
+                // Handle empty descriptions for ALL actions that need event details
+                if description.trim().is_empty() {
+                    match action_taken.as_str() {
+                        "create_event" => description = "Event".to_string(),
+                        _ => description = "Event".to_string(),
+                    }
                 }
                 
                 let alarm = event_val["alarm"].as_bool().unwrap_or(true);
                 let recurrence = event_val["recurrence"].as_str().map(String::from);
 
                 let time = if let Some(time_str) = event_val["time"].as_str() {
+                    // Try RFC3339 first (with timezone)
                     DateTime::parse_from_rfc3339(time_str)
-                        .map(|dt| dt.with_timezone(&Utc))
+                        .map(|dt| dt.with_timezone(&Local).with_timezone(&Utc))
                         .ok()
                         .or_else(|| {
+                            // If that fails, try parsing as naive datetime and assume local timezone
                             chrono::NaiveDateTime::parse_from_str(time_str, "%Y-%m-%dT%H:%M:%S")
                                 .ok()
-                                .and_then(|ndt| Local.from_local_datetime(&ndt).single())
-                                .map(|local_dt| local_dt.with_timezone(&Utc))
+                                .and_then(|naive| {
+                                    Local.from_local_datetime(&naive)
+                                        .single()
+                                        .map(|local_dt| local_dt.into())
+                                })
                         })
                 } else {
                     None
                 };
+
+                // Don't include events with empty descriptions after all processing
+                if description.trim().is_empty() {
+                    return None;
+                }
 
                 Some(ExtractedEvent {
                     description,
@@ -385,22 +429,102 @@ fn post_process_json(json_str: &str) -> String {
         if let Ok(final_json) = serde_json::to_string(&llm_response) {
             println!("✅ Successfully reconstructed and serialized JSON: {}", final_json);
             return final_json;
+        } else {
+            println!("❌ Failed to serialize reconstructed JSON");
         }
+    } else {
+        println!("❌ Failed to parse cleaned JSON as serde_json::Value");
     }
 
     println!("❌ Failed to parse and reconstruct JSON, returning emergency fallback.");
-    r#"{"response_text":"I'm having trouble processing your request. Could you try rephrasing?","extracted_events":[],"action_taken":"none"}"#.to_string()
+    r#"{"response_text":"I'm having trouble processing your request. Could you try rephrasing?","extracted_events":null,"action_taken":"none"}"#.to_string()
+}
+
+// Helper function to fix quote issues in response_text //
+fn fix_response_text_quotes(json: &str) -> String {
+    // First, handle single quotes that might be surrounding the entire response_text value
+    let single_quote_regex = Regex::new(r#"("response_text"\s*:\s*)'([^']*)'"#).unwrap();
+    let json = single_quote_regex.replace_all(json, r#"$1"$2""#).to_string();
+    
+    // Use regex to find the response_text field and its content
+    let response_text_regex = Regex::new(r#""response_text"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"("?)"#).unwrap();
+    
+    response_text_regex.replace_all(&json, |caps: &regex::Captures| {
+        let content = &caps[1];
+        // Check if there's an extra quote at the end
+        let extra_quote = &caps[2];
+        
+        // Fix common quote issues in the content
+        let mut fixed_content = content
+            .replace("I\"ve", "I've")
+            .replace("I\"ll", "I'll") 
+            .replace("I\"m", "I'm")
+            .replace("don\"t", "don't")
+            .replace("can\"t", "can't")
+            .replace("won\"t", "won't")
+            .replace("\\'", "'");
+            
+        // Handle quoted words inside response text - escape internal quotes
+        // Split on quotes and handle each part
+        let parts: Vec<&str> = fixed_content.split('"').collect();
+        if parts.len() > 1 {
+            // If we have quotes, escape them properly
+            let mut escaped_parts = Vec::new();
+            for (i, part) in parts.iter().enumerate() {
+                if i == 0 || i == parts.len() - 1 {
+                    // First and last parts don't need escaping
+                    escaped_parts.push(part.to_string());
+                } else {
+                    // Middle parts need to be escaped
+                    escaped_parts.push(format!("\\\"{}\\\"", part));
+                }
+            }
+            fixed_content = escaped_parts.join("");
+        }
+        
+        // If there was an extra quote, don't add it back
+        if extra_quote.is_empty() {
+            format!("\"response_text\": \"{}\"", fixed_content)
+        } else {
+            // Include the extra quote in the output
+            format!("\"response_text\": \"{}{}\"", fixed_content, extra_quote)
+        }
+    }).to_string()
 }
 
 // Helper function to fix JSON formatting issues //
 fn fix_json_formatting(json_text: &str) -> String {
-    json_text.trim()
-        .replace("True", "true")
-        .replace("False", "false") 
-        .replace("None", "null")
-        .replace(",\n}", "\n}")
-        .replace(",\n]", "\n]")
-        .to_string()
+    let mut json = json_text.trim().to_string();
+
+    if json.trim_start().starts_with('{') && json.trim_end().ends_with('}') {
+        // Fix boolean and null values
+        json = json
+            .replace("True", "true")
+            .replace("False", "false") 
+            .replace("None", "null")
+            .replace(",\n}", "\n}")
+            .replace(",\n]", "\n]");
+        
+        // Fix quotes in property names
+        let property_regex = Regex::new(r"'([^']+)'(\s*:)").unwrap();
+        json = property_regex.replace_all(&json, "\"$1\"$2").to_string();
+        
+        // Fix quotes in string values
+        let value_regex = Regex::new(r":\s*'([^']*(?:\\'[^']*)*)'").unwrap();
+        json = value_regex.replace_all(&json, |caps: &regex::Captures| {
+            format!(": \"{}\"", &caps[1].replace("\\'", "'"))
+        }).to_string();
+        
+        // Handle any trailing quotes in response_text
+        let trailing_quote_regex = Regex::new(r#""([^"\\]*(?:\\.[^"\\]*)*)""([,\n\r]|$)"#).unwrap();
+        json = trailing_quote_regex.replace_all(&json, "\"$1\"$2").to_string();
+        
+        // Handle remaining single quotes in property names
+        let remaining_props_regex = Regex::new(r"'([^']*(?:\\'[^']*)*)':?\s*").unwrap();
+        json = remaining_props_regex.replace_all(&json, "\"$1\": ").to_string();
+    }
+    
+    json
 }
 
 pub async fn process_user_query(app_handle: &AppHandle, query: String, conversation_history: Option<Vec<ConversationMessage>>) -> Result<LLMResponse, String> {

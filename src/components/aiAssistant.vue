@@ -14,8 +14,17 @@
 
     <section class="chat-container" ref="chatContainer">
       <div v-for="(message, index) in chatHistory" :key="index" :class="['message', message.sender === 'user' ? 'user-message' : 'assistant-message']">
+        <div class="message-timestamp">{{ formatTimestamp(message.timestamp) }}</div>
+        <DeleteSuggestion
+          v-if="message.sender === 'assistant' && message.eventSuggestion && message.isDelete"
+          :eventSuggestion="message.eventSuggestion"
+          :eventAccepted="message.eventAccepted"
+          :eventRejected="message.eventRejected"
+          @accept="acceptSuggestion(index)"
+          @reject="rejectSuggestion(index)"
+        />
         <EventSuggestion
-          v-if="message.sender === 'assistant' && message.eventSuggestion"
+          v-else-if="message.sender === 'assistant' && message.eventSuggestion"
           :eventSuggestion="message.eventSuggestion"
           :eventAccepted="message.eventAccepted"
           :eventRejected="message.eventRejected"
@@ -65,8 +74,10 @@
 import { ref, onMounted, nextTick, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { emit as tauriEmit } from '@tauri-apps/api/event'
-import EventSuggestion from './EventSuggestion.vue'
-import ConflictMessage from './ConflictMessage.vue'
+import EventSuggestion from './eventSuggestion.vue'
+import DeleteSuggestion from './deleteSuggestion.vue'
+import ConflictMessage from './conflictMessage.vue'
+import { tr } from 'date-fns/locale'
 
 interface EventSuggestion {
   description: string;
@@ -78,17 +89,21 @@ interface EventSuggestion {
 interface ChatMessage {
   content: string;
   sender: 'user' | 'assistant';
+  timestamp: string;
   eventSuggestion?: EventSuggestion;
   eventAccepted?: boolean;
   eventRejected?: boolean;
   isUpdate?: boolean;
   isMoved?: boolean;
+  isDelete?: boolean;
+  multipleOptions?: any[];
 }
 
 const chatHistory = ref<ChatMessage[]>([
   {
     content: "Hello! I'm your Calendar AssistanT, You can call me CAT. How can I help you manage your schedule today?",
-    sender: 'assistant'
+    sender: 'assistant',
+    timestamp: new Date().toISOString()
   }
 ]);
 const userInput = ref('');
@@ -114,7 +129,8 @@ const clearChat = () => {
   // Reset chat history to just the welcome message
   chatHistory.value = [{
     content: "Hello! I'm your Calendar AssistanT, You can call me CAT. How can I help you manage your schedule today?",
-    sender: 'assistant'
+    sender: 'assistant',
+    timestamp: new Date().toISOString()
   }];
 };
 
@@ -123,6 +139,73 @@ const scrollToBottom = async () => {
   await nextTick();
   if (chatContainer.value) {
     chatContainer.value.scrollTop = chatContainer.value.scrollHeight;
+  }
+};
+
+// Format timestamp for display //
+const formatTimestamp = (timestamp: string) => {
+  const date = new Date(timestamp);
+  return date.toLocaleTimeString([], { 
+    hour: '2-digit', 
+    minute: '2-digit',
+    hour12: true 
+  });
+};
+
+const processQuery = async (message: string, isRetry = false) => {
+  try {
+    let retryCount = 0;
+    const maxRetries = 1;
+
+    const attemptQuery = async (msg: string, retry = false): Promise<any> => {
+      const promptText = retry 
+        ? `Please format your response correctly as a JSON object with response_text, extracted_events, and action_taken fields. Original query: ${msg}` 
+        : msg;
+        
+      const response = await invoke<string>('process_ai_message', { 
+        query: promptText,
+        conversationHistory: JSON.stringify(chatHistory.value.slice(0, -1))
+      });
+      
+      try {
+        const aiResponse = JSON.parse(response);
+        
+        // Validate response format
+        if (!aiResponse.response_text || 
+            (aiResponse.action_taken !== 'none' && !aiResponse.extracted_events)) {
+          if (retryCount < maxRetries) {
+            retryCount++;
+            console.log("Invalid AI response format, retrying...");
+            return await attemptQuery(msg, true);
+          }
+          // If we've exhausted retries, try to fix the response here
+          return {
+            response_text: aiResponse.response_text || "I'm sorry, I couldn't process that correctly.",
+            action_taken: aiResponse.action_taken || "none",
+            extracted_events: aiResponse.extracted_events || []
+          };
+        }
+        
+        return aiResponse;
+      } catch (parseError) {
+        if (retryCount < maxRetries) {
+          retryCount++;
+          console.log("Failed to parse AI response, retrying...");
+          return await attemptQuery(msg, true);
+        }
+        throw parseError;
+      }
+    };
+    
+    return await attemptQuery(message, isRetry);
+  } catch (error) {
+    console.error("Error in processQuery:", error);
+    // Return a fallback response that won't break the app
+    return {
+      response_text: "I'm sorry, I encountered an error processing your request.",
+      action_taken: "none",
+      extracted_events: []
+    };
   }
 };
 
@@ -135,7 +218,8 @@ const sendMessage = async () => {
   
   chatHistory.value.push({
     content: message,
-    sender: 'user'
+    sender: 'user',
+    timestamp: new Date().toISOString()
   });
   
   isProcessing.value = true;
@@ -144,63 +228,80 @@ const sendMessage = async () => {
   await scrollToBottom();
   
   try {
-    const response = await invoke<string>('process_ai_message', { 
-      query: message,
-      conversationHistory: JSON.stringify(chatHistory.value.slice(0, -1))
-    });
-    
+    const aiResponse = await processQuery(message);
     isTyping.value = false;
     
-    const aiResponse = JSON.parse(response);
-    
-    // If there are extracted events, check for conflicts immediately
+    // Process by action type
     if (aiResponse.extracted_events && aiResponse.extracted_events.length > 0) {
-      const eventSuggestion = aiResponse.extracted_events[0];
-      const isUpdate = aiResponse.action_taken === 'update_event';
-      const isMove = aiResponse.action_taken === 'move_event';
+  const event = aiResponse.extracted_events[0];
+  
+  switch (aiResponse.action_taken) {
+    case 'create_event':
+    // Use EventSuggestion component for creation events
+    chatHistory.value.push({
+      content: aiResponse.response_text,
+      sender: 'assistant',
+      timestamp: new Date().toISOString(),
+      eventSuggestion: event
+    });
+    break;
+    
+    case 'delete_event':
+      // Use DeleteSuggestion component for deletion events
+      chatHistory.value.push({
+        content: aiResponse.response_text,
+        sender: 'assistant',
+        timestamp: new Date().toISOString(),
+        eventSuggestion: event,
+        isDelete: true 
+      });
+      break;
       
-      // Check for conflicts before showing the suggestion
-      const conflictResult = await handleEventConflict(eventSuggestion);
+    case 'move_event':
+      // Use EventSuggestion with isMoved flag for move operations
+      chatHistory.value.push({
+        content: aiResponse.response_text,
+        sender: 'assistant',
+        timestamp: new Date().toISOString(),
+        eventSuggestion: event,
+        isMoved: true
+      });
+      break;
       
-      if (conflictResult.hasConflict && conflictResult.conflictingEvent && !isUpdate && !isMove) {
-        // Show conflict dialog directly instead of event suggestion
-        conflictData.value = {
-          existingEvent: conflictResult.conflictingEvent,
-          newSuggestion: eventSuggestion,
-          conflictType: conflictResult.conflictType || 'unknown',
-          messageIndex: chatHistory.value.length
-        };
-        
-        chatHistory.value.push({
-          content: aiResponse.response_text,
-          sender: 'assistant'
-        });
-        
-        showConflictDialog.value = true;
-      } else {
-        // No conflict or it's an update/move, show normal event suggestion
-        chatHistory.value.push({
-          content: aiResponse.response_text,
-          sender: 'assistant',
-          eventSuggestion: eventSuggestion,
-          isUpdate: isUpdate,
-          isMoved: isMove
-        });
+    case 'update_event':
+      // Use EventSuggestion with isUpdate flag for updates
+      chatHistory.value.push({
+        content: aiResponse.response_text,
+        sender: 'assistant',
+        timestamp: new Date().toISOString(),
+        eventSuggestion: event,
+        isUpdate: true 
+      });
+      break;
+          
+        default:
+          // Just display the response for other action types
+          chatHistory.value.push({
+            content: aiResponse.response_text,
+            sender: 'assistant',
+            timestamp: new Date().toISOString()
+          });
       }
     } else {
       // No events, just show the response
       chatHistory.value.push({
         content: aiResponse.response_text,
-        sender: 'assistant'
+        sender: 'assistant',
+        timestamp: new Date().toISOString()
       });
     }
-    
   } catch (error) {
     isTyping.value = false;
     console.error('Error processing message:', error);
     chatHistory.value.push({
-      content: "I'm sorry, I encountered an error processing your request. Please try again.",
-      sender: 'assistant'
+      content: "I'm sorry, I encountered an error processing your request. Please try again with more specific details.",
+      sender: 'assistant',
+      timestamp: new Date().toISOString()
     });
   } finally {
     isProcessing.value = false;
@@ -260,7 +361,7 @@ const handleEventConflict = async (eventSuggestion: EventSuggestion) => {
   }
 };
 
-// Handle conflict resolution
+// Handle conflict resolution //
 const handleConflictUpdate = async () => {
   const { existingEvent, newSuggestion, conflictType, messageIndex } = conflictData.value;
   
@@ -276,7 +377,8 @@ const handleConflictUpdate = async () => {
     // Add success message
     chatHistory.value.push({
       content: `Great! I've updated "${newSuggestion.description}" in your calendar.`,
-      sender: 'assistant'
+      sender: 'assistant',
+      timestamp: new Date().toISOString()
     });
     
     // Emit event to refresh calendar
@@ -286,7 +388,8 @@ const handleConflictUpdate = async () => {
     console.error('Error updating conflicting event:', error);
     chatHistory.value.push({
       content: "I'm sorry, I couldn't update this event.",
-      sender: 'assistant'
+      sender: 'assistant',
+      timestamp: new Date().toISOString()
     });
   }
   
@@ -294,6 +397,7 @@ const handleConflictUpdate = async () => {
   await scrollToBottom();
 };
 
+// Handle conflict cancel //
 const handleConflictCancel = async () => {
   const { messageIndex } = conflictData.value;
   
@@ -304,7 +408,8 @@ const handleConflictCancel = async () => {
   
   chatHistory.value.push({
     content: "No problem. The existing event remains unchanged. Is there anything else you'd like me to help you with?",
-    sender: 'assistant'
+    sender: 'assistant',
+    timestamp: new Date().toISOString()
   });
   
   showConflictDialog.value = false;
@@ -317,8 +422,35 @@ const acceptSuggestion = async (messageIndex: number) => {
   if (!message || !message.eventSuggestion) return;
   
   try {
-    if (message.isUpdate || message.isMoved) {
-      await updateExistingEvent(message.eventSuggestion);
+    if (message.isDelete) {
+      // When user confirms deletion via the UI component
+      const eventsJson = await invoke<string[]>('get_events_for_ai');
+      const events = eventsJson.map(eventStr => JSON.parse(eventStr));
+      
+      // Find the matching event again
+      const matchingEvent = findMatchingEvent(events, message.eventSuggestion);
+      
+      if (matchingEvent) {
+        await invoke('delete_event', { id: matchingEvent.id });
+        message.eventAccepted = true;
+        
+        // Ensure calendar refreshes
+        try {
+          await invoke('trigger_sync');
+          await tauriEmit('event-saved');
+        } catch (syncError) {
+          console.warn('Failed to trigger sync:', syncError);
+        }
+        
+        // Add confirmation message
+        chatHistory.value.push({
+          content: `I've deleted "${matchingEvent.description}" from your calendar.`,
+          sender: 'assistant',
+          timestamp: new Date().toISOString()
+        });
+      }
+    } else if (message.isUpdate || message.isMoved) {
+      await updateExistingEvent(message.eventSuggestion, message.isMoved);
     } else {
       await createNewEvent(message.eventSuggestion);
     }
@@ -332,7 +464,8 @@ const acceptSuggestion = async (messageIndex: number) => {
     console.error('Error processing event suggestion:', error);
     chatHistory.value.push({
       content: "I'm sorry, I couldn't process this event suggestion.",
-      sender: 'assistant'
+      sender: 'assistant',
+      timestamp: new Date().toISOString()
     });
   }
   
@@ -438,7 +571,8 @@ const createNewEvent = async (eventSuggestion: EventSuggestion) => {
   
   chatHistory.value.push({
     content: `Great! I've added "${eventSuggestion.description}" to your calendar.`,
-    sender: 'assistant'
+    sender: 'assistant',
+    timestamp: new Date().toISOString()
   });
 };
 
@@ -449,7 +583,13 @@ const updateExistingEvent = async (eventSuggestion: EventSuggestion, isMoved: bo
     const eventsJson = await invoke<string[]>('get_events_for_ai');
     const events = eventsJson.map(eventStr => JSON.parse(eventStr));
     
-    const matchingEvent = findMatchingEvent(events, eventSuggestion);
+    // For move operations, find by description and date (not exact time)
+    let matchingEvent;
+    if (isMoved) {
+      matchingEvent = findEventForMove(events, eventSuggestion);
+    } else {
+      matchingEvent = findMatchingEvent(events, eventSuggestion);
+    }
     
     if (!matchingEvent) {
       throw new Error("Could not find the event to update");
@@ -501,7 +641,8 @@ const updateExistingEvent = async (eventSuggestion: EventSuggestion, isMoved: bo
     
     chatHistory.value.push({
       content: messageText,
-      sender: 'assistant'
+      sender: 'assistant',
+      timestamp: new Date().toISOString()
     });
     
   } catch (error) {
@@ -510,43 +651,356 @@ const updateExistingEvent = async (eventSuggestion: EventSuggestion, isMoved: bo
   }
 };
 
-// Helper function to find matching event //
-const findMatchingEvent = (events: any[], eventSuggestion: EventSuggestion, originalDescription?: string) => {
-  const description = eventSuggestion.description.toLowerCase();
+// Helper function to find matching event for move operations //
+const findEventForMove = (events: any[], eventSuggestion: EventSuggestion) => {
+  const targetDescription = eventSuggestion.description.toLowerCase().trim();
   
-  // If we have original description (for updates), search by that first
-  if (originalDescription) {
-    const match = events.find(e => 
-      e.description.toLowerCase() === originalDescription.toLowerCase()
-    );
-    if (match) return match;
+  // For move operations, we want to find by description primarily
+  // and if time is provided, use it to find events on the same day
+  if (eventSuggestion.time) {
+    const targetTime = new Date(eventSuggestion.time);
+    const targetDate = new Date(targetTime.getFullYear(), targetTime.getMonth(), targetTime.getDate());
+    
+    // Find events on the same day with matching description
+    const sameDayEvents = events.filter(e => {
+      const eventTime = new Date(e.time);
+      const eventDate = new Date(eventTime.getFullYear(), eventTime.getMonth(), eventTime.getDate());
+      return eventDate.getTime() === targetDate.getTime() &&
+             e.description.toLowerCase().trim() === targetDescription;
+    });
+    
+    if (sameDayEvents.length > 0) {
+      return sameDayEvents[0]; // Return the first match
+    }
+    
+    // If no exact description match, try partial match on same day
+    const partialMatches = events.filter(e => {
+      const eventTime = new Date(e.time);
+      const eventDate = new Date(eventTime.getFullYear(), eventTime.getMonth(), eventTime.getDate());
+      return eventDate.getTime() === targetDate.getTime() &&
+             (e.description.toLowerCase().includes(targetDescription) ||
+              targetDescription.includes(e.description.toLowerCase()));
+    });
+    
+    if (partialMatches.length > 0) {
+      return partialMatches[0];
+    }
   }
   
-  // First try exact description match
-  let match = events.find(e => 
-    e.description.toLowerCase() === description
+  // Fallback to description-only matching
+  return events.find(e => 
+    e.description.toLowerCase().trim() === targetDescription ||
+    e.description.toLowerCase().includes(targetDescription) ||
+    targetDescription.includes(e.description.toLowerCase())
   );
-  
-  if (match) return match;
-  
-  // Try time match if provided
-  if (eventSuggestion.time) {
-    const updateTime = new Date(eventSuggestion.time);
-    match = events.find(e => {
-      const eventTime = new Date(e.time);
-      return Math.abs(eventTime.getTime() - updateTime.getTime()) < 30 * 60 * 1000; // 30 minutes
+};
+
+// Function to delete an existing event //
+const deleteExistingEvent = async (eventSuggestion: EventSuggestion) => {
+  try {
+    // Get all events to find the one to delete
+    const eventsJson = await invoke<string[]>('get_events_for_ai');
+    const events = eventsJson.map(eventStr => JSON.parse(eventStr));
+    
+    // First prioritize finding events by date
+    let matchingEvent = null;
+    if (eventSuggestion.time) {
+      const deleteTime = new Date(eventSuggestion.time);
+      const deleteDay = new Date(deleteTime.getFullYear(), deleteTime.getMonth(), deleteTime.getDate());
+      
+      // First, try to find an event on the exact same day and time if specified
+      const eventsOnSameDay = events.filter(e => {
+        const eventTime = new Date(e.time);
+        const eventDay = new Date(eventTime.getFullYear(), eventTime.getMonth(), eventTime.getDate());
+        return eventDay.getTime() === deleteDay.getTime();
+      });
+      
+      // If there's only one event on that day, use it regardless of time or description
+      if (eventsOnSameDay.length === 1) {
+        matchingEvent = eventsOnSameDay[0];
+      } 
+      // If there are multiple events on the same day, try to match by time too
+      else if (eventsOnSameDay.length > 1) {
+        // Try to match by hour if time was specified
+        matchingEvent = eventsOnSameDay.find(e => {
+          const eventTime = new Date(e.time);
+          return eventTime.getHours() === deleteTime.getHours();
+        });
+        
+        // If still no match, just use the first event of the day
+        if (!matchingEvent) {
+          matchingEvent = eventsOnSameDay[0];
+        }
+      }
+    }
+    
+    // If no match by date/time, only then try to find by description as fallback
+    if (!matchingEvent) {
+      matchingEvent = events.find(e => 
+        e.description.toLowerCase().includes(eventSuggestion.description.toLowerCase()) ||
+        eventSuggestion.description.toLowerCase().includes(e.description.toLowerCase())
+      );
+    }
+    
+    if (!matchingEvent) {
+      chatHistory.value.push({
+        content: "I couldn't find an event matching your request. Could you provide more details?",
+        sender: 'assistant',
+        timestamp: new Date().toISOString()
+      });
+      return;
+    }
+    
+    // Delete the event
+    await invoke('delete_event', { 
+      id: matchingEvent.id 
+    });
+
+    try {
+      await invoke('trigger_sync');
+      // ADDED: Emit event to refresh calendar UI
+      await tauriEmit('event-saved');
+    } catch (syncError) {
+      console.warn('Failed to trigger sync:', syncError);
+    }
+    
+    // Use the actual event details from the database, not the AI suggestion
+    const formattedTime = new Date(matchingEvent.time).toLocaleString();
+    chatHistory.value.push({
+      content: `I've deleted "${matchingEvent.description}" scheduled for ${formattedTime} from your calendar.`,
+      sender: 'assistant',
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Error deleting event:', error);
+    chatHistory.value.push({
+      content: "I'm sorry, I encountered an error while trying to delete the event.",
+      sender: 'assistant',
+      timestamp: new Date().toISOString()
     });
   }
+};
+
+const handleEventDeletion = async (eventSuggestion: EventSuggestion, responseText: string) => {
+  try {
+    const eventsJson = await invoke<string[]>('get_events_for_ai');
+    const events = eventsJson.map(eventStr => JSON.parse(eventStr));
+    
+    // Time-based matching (prioritize)
+    let matchingEvent = null;
+    if (eventSuggestion.time) {
+      const deleteTime = new Date(eventSuggestion.time);
+      
+      // Match events on the same day
+      const eventsOnSameDay = events.filter(e => {
+        const eventTime = new Date(e.time);
+        return eventTime.getFullYear() === deleteTime.getFullYear() &&
+               eventTime.getMonth() === deleteTime.getMonth() &&
+               eventTime.getDate() === deleteTime.getDate();
+      });
+      
+      if (eventsOnSameDay.length === 1) {
+        // If only one event on that day, it's likely the target
+        matchingEvent = eventsOnSameDay[0];
+      } else if (eventsOnSameDay.length > 1) {
+        // Multiple events on same day, try to match by hour
+        matchingEvent = eventsOnSameDay.find(e => {
+          const eventTime = new Date(e.time);
+          return eventTime.getHours() === deleteTime.getHours();
+        });
+        
+        // If still no match by hour, show suggestion UI for user to select
+        if (!matchingEvent) {
+          // Show event selection UI with all events from that day
+          chatHistory.value.push({
+            content: responseText,
+            sender: 'assistant',
+            timestamp: new Date().toISOString(),
+            eventSuggestion: eventSuggestion,
+            isDelete: true,
+            multipleOptions: eventsOnSameDay // Add this field to store multiple options
+          });
+          return;
+        }
+      }
+    }
+    
+    // If no match by time, try description
+    if (!matchingEvent) {
+      matchingEvent = events.find(e => 
+        e.description.toLowerCase().includes(eventSuggestion.description.toLowerCase()) ||
+        eventSuggestion.description.toLowerCase().includes(e.description.toLowerCase())
+      );
+    }
+    
+    if (!matchingEvent) {
+      chatHistory.value.push({
+        content: "I couldn't find an event matching your request. Could you please provide more specific details like the date or time?",
+        sender: 'assistant',
+        timestamp: new Date().toISOString()
+      });
+      return;
+    }
+    
+    // Delete the found event
+    await invoke('delete_event', { id: matchingEvent.id });
+    await invoke('trigger_sync').catch(e => console.warn('Failed to trigger sync:', e));
+    
+    // Show confirmation with actual event details
+    const formattedTime = new Date(matchingEvent.time).toLocaleString();
+    chatHistory.value.push({
+      content: `I've deleted "${matchingEvent.description}" scheduled for ${formattedTime} from your calendar.`,
+      sender: 'assistant',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error deleting event:', error);
+    chatHistory.value.push({
+      content: "I encountered an error while trying to delete the event.",
+      sender: 'assistant',
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
+// Function to delete all events //
+const deleteAllEvents = async () => {
+  try {
+    const deletedCount = await invoke<number>('delete_all_events');
+    
+    try {
+      await invoke('trigger_sync');
+    } catch (syncError) {
+      console.warn('Failed to trigger sync:', syncError);
+    }
+    
+    chatHistory.value.push({
+      content: `I've deleted all your events from the calendar.`,
+      sender: 'assistant',
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Error deleting all events:', error);
+    chatHistory.value.push({
+      content: "I'm sorry, I encountered an error while trying to delete your events.",
+      sender: 'assistant',
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
+// Helper function to find matching event //
+const findMatchingEvent = (events: any[], eventSuggestion: EventSuggestion) => {
+  if (eventSuggestion.time) {
+    const targetTime = new Date(eventSuggestion.time);
+    
+    // 1. Try exact time match first (same hour on same day)
+    let match = events.find(e => {
+      const eventTime = new Date(e.time);
+      return eventTime.getFullYear() === targetTime.getFullYear() &&
+             eventTime.getMonth() === targetTime.getMonth() &&
+             eventTime.getDate() === targetTime.getDate() &&
+             eventTime.getHours() === targetTime.getHours();
+    });
+    
+    if (match) return match;
+    
+    // 2. Try same day match
+    const sameDayEvents = events.filter(e => {
+      const eventTime = new Date(e.time);
+      return eventTime.getFullYear() === targetTime.getFullYear() &&
+             eventTime.getMonth() === targetTime.getMonth() &&
+             eventTime.getDate() === targetTime.getDate();
+    });
+    
+    if (sameDayEvents.length === 1) return sameDayEvents[0];
+    
+    // 3. If multiple events on same day, try partial description match
+    if (sameDayEvents.length > 1) {
+      const description = eventSuggestion.description.toLowerCase();
+      match = sameDayEvents.find(e => 
+        e.description.toLowerCase().includes(description) || 
+        description.includes(e.description.toLowerCase())
+      );
+      
+      if (match) return match;
+    }
+  }
   
-  if (match) return match;
+  // 4. If no time match or no time provided, fall back to description match
+  const description = eventSuggestion.description.toLowerCase();
+  return events.find(e => e.description.toLowerCase() === description ||
+                          e.description.toLowerCase().includes(description) ||
+                          description.includes(e.description.toLowerCase()));
+};
+
+// Function to find events in a date range //
+const findEventsInDateRange = (events: any[], startDate: Date, endDate: Date | null = null) => {
+  // If no end date, assume same day as start date
+  const rangeEndDate = endDate || new Date(
+    startDate.getFullYear(),
+    startDate.getMonth(),
+    startDate.getDate(),
+    23, 59, 59
+  );
   
-  // Try partial description match as last resort
-  match = events.find(e => {
-    const eventDesc = e.description.toLowerCase();
-    return eventDesc.includes(description) || description.includes(eventDesc);
+  return events.filter(e => {
+    const eventTime = new Date(e.time);
+    return eventTime >= startDate && eventTime <= rangeEndDate;
   });
-  
-  return match;
+};
+
+// Enhanced delete function for date ranges
+const deleteEventsInRange = async (startDate: Date, endDate: Date | null = null) => {
+  try {
+    const eventsJson = await invoke<string[]>('get_events_for_ai');
+    const events = eventsJson.map(eventStr => JSON.parse(eventStr));
+    
+    const eventsToDelete = findEventsInDateRange(events, startDate, endDate);
+    
+    if (eventsToDelete.length === 0) {
+      chatHistory.value.push({
+        content: "I couldn't find any events in the specified date range.",
+        sender: 'assistant',
+        timestamp: new Date().toISOString()
+      });
+      return;
+    }
+    
+    // Delete each event
+    for (const event of eventsToDelete) {
+      await invoke('delete_event', { id: event.id });
+    }
+    
+    // Trigger sync after all deletions
+    await invoke('trigger_sync').catch(e => console.warn('Failed to trigger sync:', e));
+    
+    // Build a meaningful response based on date range and deleted count
+    const formatDate = (date: Date) => date.toLocaleDateString();
+    let responseMsg = '';
+    
+    if (endDate) {
+      responseMsg = `I've deleted ${eventsToDelete.length} events from ${formatDate(startDate)} to ${formatDate(endDate)}.`;
+    } else {
+      responseMsg = `I've deleted ${eventsToDelete.length} events on ${formatDate(startDate)}.`;
+    }
+    
+    chatHistory.value.push({
+      content: responseMsg,
+      sender: 'assistant',
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Error deleting events in range:', error);
+    chatHistory.value.push({
+      content: "I encountered an error while trying to delete events in that date range.",
+      sender: 'assistant',
+      timestamp: new Date().toISOString()
+    });
+  }
 };
 
 // Reject event suggestion //
@@ -558,7 +1012,8 @@ const rejectSuggestion = async (messageIndex: number) => {
   
   chatHistory.value.push({
     content: "No problem. Is there anything else you'd like me to help you with?",
-    sender: 'assistant'
+    sender: 'assistant',
+    timestamp: new Date().toISOString()
   });
   
   await scrollToBottom();
@@ -596,6 +1051,13 @@ watch(chatHistory, () => {
   padding: 1rem;
   background-color: rgba(0, 0, 0, 0.05);
   border-radius: 8px;
+}
+
+.message-timestamp {
+  font-size: 0.75rem;
+  color: var(--color-text);
+  opacity: 0.6;
+  margin-bottom: 0.25rem;
 }
 
 .message {
