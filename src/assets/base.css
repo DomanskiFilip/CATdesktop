@@ -1,11 +1,11 @@
 /* color palette from <https://github.com/vuejs/theme> */
 :root {
-  --color-light: 	#f0ebe3;
+  --color-light: 	#eeeeea;
   --color-dark: #252526;
   --color-shadow-dark: #2d2d30;
-  --color-shadow-light: #e1e8ed;
+  --color-shadow-light: #dcdde8;
   --color-rasberry: #D91858;
-  --color-lemon: #fff700;
+  --color-lemon: #ffff00;
   --color-whale: #18C9D9;
   --color-error: #D91858;
 }

@@ -343,15 +343,27 @@ const handleBlur = (hour: number) => {
 const deleteEvent = async (hour: number) => {
   const existingEvent = findEventAtHour(hour);
   if (existingEvent) {
+    // Clear any pending saves for this event first
+    const existingTimeout = pendingSaves.get(existingEvent.id);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+      pendingSaves.delete(existingEvent.id);
+    }
+    
     // Delete the event from backend
     await invoke('delete_event', { id: existingEvent.id });
     
     // Remove from local state
     events.value = events.value.filter(e => e.id !== existingEvent.id);
     
-    // Clear the input for this hour
+    // Clear the input and editor state for this hour
     const key = getHourKey(hour);
     hourInputs.value[key] = '';
+    
+    // Reset active editor if it was being edited
+    if (activeEditor.value === `editor-${key}`) {
+      activeEditor.value = null;
+    }
     
     // Trigger sync
     try {
