@@ -34,13 +34,24 @@
               <svg v-if="isAlarmOn(hour)" xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M96-528q0-88.39 35.5-162.19Q167-764 230-818l51 50q-52 43-82.5 105.5T168-528H96Zm696 0q0-73-30.5-135.5T678-769l52-51q62 53 98 128.5T864-528h-72ZM192-216v-72h48v-240q0-87 53.5-153T432-763v-53q0-20 14-34t34-14q20 0 34 14t14 34v53q85 16 138.5 82T720-528v240h48v72H192Zm288-276Zm-.21 396Q450-96 429-117.15T408-168h144q0 30-21.21 51t-51 21ZM312-288h336v-240q0-70-49-119t-119-49q-70 0-119 49t-49 119v240Z"/></svg>
               <svg v-else xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M192-216v-72h48v-240q0-87 53.5-153T432-763v-53q0-20 14-34t34-14q20 0 34 14t14 34v53q85 16 138.5 82T720-528v240h48v72H192Zm288-276Zm-.21 396Q450-96 429-117.15T408-168h144q0 30-21.21 51t-51 21ZM312-288h336v-240q0-70-49-119t-119-49q-70 0-119 49t-49 119v240Z"/></svg>
              </button>
+             <button class="delete-btn" @click="deleteEvent(hour)" title="delete event" v-if="hasEventAtHour(hour) && !isInPast(hour) && !isNow(hour)">
+              <svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z"/></svg>
+             </button>
              <button class="expand" @click="toggleExpand(hour)" title="expand/collapse">
               <svg v-if="!expand[hour]" xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M480-344 240-584l56-56 184 184 184-184 56 56-240 240Z"/></svg>
               <svg v-else xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M480-528 296-344l-56-56 240-240 240 240-56 56-184-184Z"/></svg>
              </button>
           </span>
           <!-- Hidden textarea for editing (shows when clicking the display div) -->
-          <textarea v-show="activeEditor === `editor-${getHourKey(hour)}`" :class="{ 'text-editor': true, 'in-the-past': isInPast(hour), 'has-event': hasEventAtHour(hour), 'expand': expand[hour] }" :id="`editor-${getHourKey(hour)}`" v-model="hourInputs[getHourKey(hour)]" @input="updateEventDescription($event, hour)" @blur="activeEditor = null" :disabled="isInPast(hour) || isNow(hour)" :placeholder="isInPast(hour) || isNow(hour) ? '' : 'Add event...'"></textarea>
+          <textarea v-show="activeEditor === `editor-${getHourKey(hour)}`" 
+                   :class="{ 'text-editor': true, 'in-the-past': isInPast(hour), 'has-event': hasEventAtHour(hour), 'expand': expand[hour] }" 
+                   :id="`editor-${getHourKey(hour)}`" 
+                   v-model="hourInputs[getHourKey(hour)]" 
+                   @input="updateEventDescription($event, hour)" 
+                   @blur="handleBlur(hour)" 
+                   :disabled="isInPast(hour) || isNow(hour)" 
+                   :placeholder="isInPast(hour) || isNow(hour) ? '' : 'Add event...'">
+          </textarea>
           <!-- Display div with linked text (shows when not editing) -->
           <div v-show="activeEditor !== `editor-${getHourKey(hour)}`" :class="{ 'link-display': true, 'in-the-past': isInPast(hour), 'has-event': hasEventAtHour(hour), 'expand': expand[hour] }" v-html="formatLinkedText(hourInputs[getHourKey(hour)] || getEventDescription(hour))" @click="startEditing(hour)"></div>
         </span>
@@ -269,9 +280,23 @@ const updateEventDescription = async (event: Event, hour: number) => {
 
   if (existingEvent) {
     if (!value.trim()) {
-      // Delete event if description is empty
-      await invoke('delete_event', { id: existingEvent.id });
+      // Clear any pending saves for this event first
+      const existingTimeout = pendingSaves.get(existingEvent.id)
+      if (existingTimeout) {
+        clearTimeout(existingTimeout)
+        pendingSaves.delete(existingEvent.id)
+      }
+      
+      // Immediately update UI to show no event
       events.value = events.value.filter(e => e.id !== existingEvent.id);
+      
+      // Then delete from backend
+      try {
+        await invoke('delete_event', { id: existingEvent.id });
+        await invoke('trigger_sync');
+      } catch (error) {
+        console.warn('Failed to delete event:', error);
+      }
     } else {
       existingEvent.description = value;
       saveEvent(existingEvent);
@@ -298,6 +323,42 @@ const updateEventDescription = async (event: Event, hour: number) => {
     };
     events.value.push(newEvent);
     saveEvent(newEvent);
+  }
+};
+
+// Function to handle blur event on hour input //
+const handleBlur = (hour: number) => {
+  const key = getHourKey(hour);
+  const value = hourInputs.value[key]?.trim() || '';
+  
+  // If the field is empty after trimming, ensure the event is deleted
+  if (!value && hasEventAtHour(hour)) {
+    deleteEvent(hour);
+  }
+  
+  activeEditor.value = null;
+};
+
+// Function to delete an event at a specific hour //
+const deleteEvent = async (hour: number) => {
+  const existingEvent = findEventAtHour(hour);
+  if (existingEvent) {
+    // Delete the event from backend
+    await invoke('delete_event', { id: existingEvent.id });
+    
+    // Remove from local state
+    events.value = events.value.filter(e => e.id !== existingEvent.id);
+    
+    // Clear the input for this hour
+    const key = getHourKey(hour);
+    hourInputs.value[key] = '';
+    
+    // Trigger sync
+    try {
+      await invoke('trigger_sync');
+    } catch (error) {
+      console.warn('Failed to trigger sync after deletion:', error);
+    }
   }
 };
 
@@ -709,6 +770,21 @@ onMounted(async () => {
     cursor: not-allowed;
     pointer-events: none;
   }
+
+.delete-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text);
+}
+
+.delete-btn:hover {
+  color: #dc3545;
+}
 
 .expand {
   background: transparent;
