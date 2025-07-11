@@ -74,10 +74,7 @@
 import { ref, onMounted, nextTick, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { emit as tauriEmit } from '@tauri-apps/api/event'
-import EventSuggestion from './eventSuggestion.vue'
 import DeleteSuggestion from './deleteSuggestion.vue'
-import ConflictMessage from './conflictMessage.vue'
-import { tr } from 'date-fns/locale'
 
 interface EventSuggestion {
   description: string;
@@ -1034,7 +1031,7 @@ watch(chatHistory, () => {
 .ai-assistant {
   display: flex;
   flex-direction: column;
-  height: 95vh;
+  height: 90vh;
   max-width: 800px;
   margin: 0 auto;
   background-color: var(--color-main);

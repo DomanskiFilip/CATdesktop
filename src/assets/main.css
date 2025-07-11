@@ -4,15 +4,3 @@
   width: 100vw;
   height: 100vh;
 }
-
-#theme-background-element {
-  position: absolute;
-  bottom: 0;
-  right: 0;
-  width: 42vw;
-  height: 50vh;
-  opacity: 50%;
-  background-color: var(--color-theme);
-  clip-path: polygon(100% 100%, 0 100%, 100% 0);
-  z-index: -1;
-}

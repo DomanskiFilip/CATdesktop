@@ -92,7 +92,8 @@ section {
   gap: 1rem;
 }
 button {
-  margin-top: 1rem;
+  margin: 1rem;
+  margin-left: 0.5rem;
   padding: 0.5rem 1.5rem;
   font-size: 1rem;
   cursor: pointer;

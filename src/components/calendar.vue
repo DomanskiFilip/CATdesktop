@@ -546,7 +546,6 @@ onMounted(async () => {
   gap: 1rem;
   width: 64rem;
   height: 30rem;
-  padding-top: 1rem;
 }
 
 /* calendar styles */
@@ -574,9 +573,9 @@ onMounted(async () => {
   justify-content: center;
 }
 
-  #calendar-header button:first-of-type {
-    margin-left: auto;
-  }
+#calendar-header button:first-of-type {
+  margin-left: auto;
+}
 
 #calendar-header button svg {
   opacity: 1;
@@ -609,18 +608,18 @@ onMounted(async () => {
   margin-left: 8px;
 }
 
-  .calendar-cell:hover {
-    box-shadow: 0 0 10px var(--color-theme);
-  }
+.calendar-cell:hover {
+  box-shadow: 0 0 10px var(--color-theme);
+}
 
-  .calendar-cell.active {
-    background-color: var(--color-theme);
-    color: var(--color-dark);
-  }
+.calendar-cell.active {
+  background-color: var(--color-theme);
+  color: var(--color-dark);
+}
 
-  .calendar-cell.current-day {
-    border: 1px solid var(--color-theme);
-  }
+.calendar-cell.current-day {
+  border: 1px solid var(--color-theme);
+}
 
 .event-indicators {
   position: absolute;
@@ -639,21 +638,21 @@ onMounted(async () => {
 
 /* day schedule styles */
 #schedule-container {
-  background: transparent;
+  background: var(--color-main);
   border-radius: 10px;
-  padding: 1rem;
-  width: 32rem;
-  height: 30rem;
+  margin: 1rem;
+  width: 31rem;
+  height: 29rem;
   display: flex;
   flex-direction: column;
 }
 
-  #schedule-container h3 {
-  color: var(--color-text);
-  font-size: 1.2rem;
-  text-align: center;
-  margin-bottom: 1rem;
-  }
+#schedule-container h3 {
+color: var(--color-text);
+font-size: 1.2rem;
+text-align: center;
+margin-bottom: 1rem;
+}
 
 #day-schedule-container {
   border: 1px solid var(--color-theme);
@@ -683,105 +682,105 @@ onMounted(async () => {
   padding-left: 0.3rem;
 }
 
-  .hour:last-of-type {
-    padding-bottom: 0.3rem;
-  }
-
-  .hour span.event-time {
-    color: var(--color-theme);
-  }
-
-  .hour hr {
-    width: 100%;
-    border: 1px solid var(--color-text);
-  }
-    .hour hr.event-time {
-    border-color: var(--color-theme);
-    }
-
-  .hour textarea, .hour .link-display {
-  width: 100%;
-  height: 2rem;
-  font-size: 1rem;
-  font-family:
-    Inter,
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    Roboto,
-    Oxygen,
-    Ubuntu,
-    Cantarell,
-    'Fira Sans',
-    'Droid Sans',
-    'Helvetica Neue',
-    sans-serif;
-  border: none;
-  background: var(--color-shadow);
-  color: var(--color-text);
-  resize: none;
-  outline: none;
-  overflow-y: auto;
-  scrollbar-width: none; /* Firefox */
-  -ms-overflow-style: none; /* IE and Edge */
-  transition: transform 0.3s ease, height 0.3s ease;
-  margin: 0;
-  padding: 0.1rem;
-  min-height: 2rem; /* Ensure minimum height */
-  cursor: text; /* Show text cursor */
-  line-height: 1.5;
-  vertical-align: middle;
-  box-sizing: border-box;
+.hour:last-of-type {
+  padding-bottom: 0.3rem;
 }
 
-
-.hour .link-display:empty::before {
-  opacity: 0.7;
-}
-
-.hour textarea::-webkit-scrollbar, .hour .link-display::-webkit-scrollbar {
-  display: none; /* Chrome, Safari, Opera */
-}
-
-.hour textarea.has-event, .hour .link-display.has-event {
+.hour span.event-time {
   color: var(--color-theme);
 }
 
+.hour hr {
+  width: 100%;
+  border: 1px solid var(--color-text);
+}
+
+.hour hr.event-time {
+border-color: var(--color-theme);
+}
+
+.hour textarea, .hour .link-display {
+width: 100%;
+height: 2rem;
+font-size: 1rem;
+font-family:
+  Inter,
+  -apple-system,
+  BlinkMacSystemFont,
+  'Segoe UI',
+  Roboto,
+  Oxygen,
+  Ubuntu,
+  Cantarell,
+  'Fira Sans',
+  'Droid Sans',
+  'Helvetica Neue',
+  sans-serif;
+border: none;
+background: var(--color-shadow);
+color: var(--color-text);
+resize: none;
+outline: none;
+overflow-y: auto;
+scrollbar-width: none; /* Firefox */
+-ms-overflow-style: none; /* IE and Edge */
+transition: transform 0.3s ease, height 0.3s ease;
+margin: 0;
+padding: 0.1rem;
+min-height: 2rem; /* Ensure minimum height */
+cursor: text; /* Show text cursor */
+line-height: 1.5;
+vertical-align: middle;
+box-sizing: border-box;
+}
+
+.hour .link-display:empty::before {
+opacity: 0.7;
+}
+
+.hour textarea::-webkit-scrollbar, .hour .link-display::-webkit-scrollbar {
+display: none; /* Chrome, Safari, Opera */
+}
+
+.hour textarea.has-event, .hour .link-display.has-event {
+color: var(--color-theme);
+}
+
 .hour textarea.in-the-past, .hour .link-display.in-the-past {
-  opacity: 0.5;
-  cursor: not-allowed;
-  pointer-events: none;
-  background-color: var(--color-theme);
+opacity: 0.5;
+cursor: not-allowed;
+pointer-events: none;
+background-color: var(--color-theme);
 }
 
 .hour textarea.expand, .hour .link-display.expand {
-  display: block;
-  height: 6rem;
-  margin: 0;
-  padding: 0.1rem;
+display: block;
+height: 6rem;
+margin: 0;
+padding: 0.1rem;
 }
 
 .alarm {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 0.2rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+background: transparent;
+border: none;
+cursor: pointer;
+padding: 0.2rem;
+display: flex;
+align-items: center;
+justify-content: center;
 }
 
-  .alarm.in-the-past {
-    opacity: 0.5;
-    cursor: not-allowed;
-    pointer-events: none;
-  }
+.alarm.in-the-past {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
 
-  .alarm:disabled{
-    opacity: 0.5;
-    cursor: not-allowed;
-    pointer-events: none;
-  }
+.alarm:disabled{
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
 
 .delete-btn {
   background: transparent;

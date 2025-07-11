@@ -1,5 +1,5 @@
 <template>
-  <div id="theme-background-element" :class="{ hidden: activeSection === 'section2' }"></div> <!-- background visual element -->
+  <titleBar />
   <section v-if="loggedIn" id="main-page">
     <section id="side-bar">
       <button @click="moreInfo(ismoreInfoVisible)">
@@ -31,16 +31,20 @@
       </button>
     </section>
     <section id="main-content">
-      <section v-show="activeSection === 'section1'">
+      <section v-show="activeSection === 'section1'" class="content-section">
+        <div id="theme-background-element"></div> <!-- background visual element -->
         <calendar />
       </section>
-      <section v-show="activeSection === 'section2'">
+      <section v-show="activeSection === 'section2'" class="content-section">
         <aiAssistant />
       </section>
-      <section v-show="activeSection === 'section3'">
+      <section v-show="activeSection === 'section3'" class="content-section">
+        <div id="theme-background-element"></div> <!-- background visual element -->
         <h2>SETTINGS:</h2>
         <hr>
         <themes />
+        <h2>CONNECT WITH GOOGLE:</h2>
+        <hr>
         <GoogleOauth />
       </section>
     </section>
@@ -73,6 +77,7 @@
 import { ref, watch, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, emit } from '@tauri-apps/api/event'
+import TitleBar from './components/titleBar.vue'
 import GoogleOauth from './components/googleOauth.vue'
 import Login from './components/login.vue'
 import register from './components/register.vue'
@@ -128,10 +133,10 @@ const moreInfo = (isVisible: boolean) => {
   if (sideBar && mainContent) {
     if (ismoreInfoVisible.value) {
       sideBar.style.width = '8.5rem'
-      mainContent.style.marginLeft = '8rem'
+      mainContent.style.marginLeft = '8.5rem'
     } else {
       sideBar.style.width = '3rem'
-      mainContent.style.marginLeft = '3.5rem'
+      mainContent.style.marginLeft = '3rem'
     }
   }
 }
@@ -164,145 +169,165 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-  .hidden {
-    display: none;
-  }
+#main-page {
+  display: flex;
+  flex-direction: row;
+  height: 100%;
+  width: 100%;
+  background-color: var(--color-shadow);
+}
 
-  #sync-page {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100vh;
-    gap: 1rem;
-  }
+.hidden {
+  display: none;
+}
 
-  /* login page styles */
-  #login-register-page {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100vh;
-    width: 100vw;
-    gap: 1rem;
-  }
+/* login page styles */
+#login-register-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  width: 100%;
+  gap: 1rem;
+}
 
-  #login-register-page button {
-    background-color: transparent;
-    border: none;
-    color: var(--color-theme);
-    cursor: pointer;
-    font-size: 1rem;
-  }
+#login-register-page button {
+  background-color: transparent;
+  border: none;
+  color: var(--color-theme);
+  cursor: pointer;
+  font-size: 1rem;
+}
 
-  #login-register-page button:hover {
-    text-decoration: underline;
-  }
+#login-register-page button:hover {
+  text-decoration: underline;
+}
 
-  #theme-background-element.logged-in-background {
-    height: 40vh;
-    width: 30vw;
-  }
+#theme-background-element.logged-in-background {
+  height: 40vh;
+  width: 30vw;
+}
 
-  /* side bar styles */
-  #side-bar {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 3rem;
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    justify-content: flex-start;
-    padding: 0.5rem;
-    gap: 0.5rem;
-    border-right: 1px solid var(--color-border);
-    transition: transform 0.2s ease, width 0.4s ease;
-  }
+/* side bar styles */
+#side-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 3rem;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 0.5rem;
+  padding-top: 2.5rem;
+  gap: 0.5rem;
+  transition: transform 0.2s ease, width 0.4s ease;
+  background-color: var(--color-shadow);
+}
 
-  #side-bar button {
-    background-color: transparent;
-    border: 1px solid var(--color-border);
-    border-radius: 10px;
-    cursor: pointer;
-    width: 2rem;
-    height: 2rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: relative;
-    transition: transform 0.2s ease;
-  }
+#side-bar button {
+  background-color: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  cursor: pointer;
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  transition: transform 0.2s ease;
+}
 
-  #side-bar button:active {
-    transform: scale(1.2);
-  }
+#side-bar button:active {
+  transform: scale(1.2);
+}
 
-  #side-bar button::before {
-    content: '';
-    position: absolute;
-    left: -8px;
-    width: 5px;
-    height: 70%;
-    background-color: var(--color-theme);
-    border-radius: 10px;
-    opacity: 0;
-  }
+#side-bar button::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  width: 5px;
+  height: 70%;
+  background-color: var(--color-theme);
+  border-radius: 10px;
+  opacity: 0;
+}
 
-  #side-bar button.active::before {
-    opacity: 1;
-  }
+#side-bar button.active::before {
+  opacity: 1;
+}
 
-    #side-bar button:first-of-type {
-      border: none;
-    }
+#side-bar button:first-of-type {
+  border: none;
+}
 
-    #side-bar button:first-of-type::before {
-      display: none;
-    }
+#side-bar button:first-of-type::before {
+  display: none;
+}
 
-    #side-bar button:nth-last-of-type(2) {
-      margin-top: auto;
-    }
+#side-bar button:nth-last-of-type(2) {
+  margin-top: auto;
+}
 
-  #side-bar button:hover {
-    background-color: var(--color-theme);
-    border: none;
-  }
+#side-bar button:hover {
+background-color: var(--color-theme);
+border: none;
+}
 
-  #side-bar button:hover svg {
-    fill: var(--color-dark);
-    stroke: var(--color-dark); 
-  }
+#side-bar button:hover svg {
+fill: var(--color-dark);
+stroke: var(--color-dark); 
+}
 
-  .moreInfo {
-    position: absolute;
-    top: 0;
-    left: 100%;
-    color: var(--color-text);
-    padding: 0.5rem;
-    border-radius: 5px;
-    opacity: 0;
-    clip-path: inset(0 100% 0 0);
-    transition: clip-path 0.4s ease, opacity 0.4s ease;
-    text-wrap: nowrap;
-    font-size: 0.75rem;
-  }
+.moreInfo {
+  position: absolute;
+  top: 0;
+  left: 100%;
+  color: var(--color-text);
+  padding: 0.5rem;
+  border-radius: 5px;
+  opacity: 0;
+  clip-path: inset(0 100% 0 0);
+  transition: clip-path 0.4s ease, opacity 0.4s ease;
+  text-wrap: nowrap;
+  font-size: 0.75rem;
+}
 
-  .moreInfo.active {
-    opacity: 1;
-    clip-path: inset(0 0 0 0)
-  }
+.moreInfo.active {
+  opacity: 1;
+  clip-path: inset(0 0 0 0)
+}
 
-  /* main content styles */
-  #main-content {
-    margin-left: 3.5rem;
-    padding: 1rem;
-    height: 100vh;
-    overflow-y: hidden;
-    transition: transform 0.2s ease, margin-left 0.4s ease;
-    overflow-x: hidden;
-  }
+/* main content styles */
+#main-content {
+  margin-left: 3.5rem;
+  padding-top: 2rem;
+  height: 100%;
+  width: 100%;
+  overflow-y: hidden;
+  transition: transform 0.2s ease, margin-left 0.4s ease;
+  overflow-x: hidden;
+}
+
+#main-content .content-section {
+ border-top-left-radius: 10px;
+ height: 100%;
+ background-color: var(--color-main);
+ padding: 1rem;
+}
+
+#theme-background-element {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 42vw;
+  height: 50vh;
+  opacity: 30%;
+  background-color: var(--color-theme);
+  clip-path: polygon(100% 100%, 0 100%, 100% 0);
+  pointer-events: none;
+}
 </style>

@@ -16,6 +16,7 @@
   --color-main: light-dark(var(--color-light), var(--color-dark));
   --color-border: light-dark(var(--color-dark), var(--color-light));
   --color-text: light-dark(var(--color-dark), var(--color-light));
+  --color-shadow: light-dark(var(--color-shadow-light), var(--color-shadow-dark));
   --color-theme: var(--color-whale);
   --color-action: var(--color-theme);
   --section-gap: 160px;
