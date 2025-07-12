@@ -4,3 +4,14 @@
   width: 100vw;
   height: 100vh;
 }
+
+.error {
+  color: var(--color-error);
+  font-size: 12px;
+  font-weight: 500;
+  margin-top: 5px;
+  padding: 5px;
+  background-color: rgba(231, 76, 60, 0.1);
+  border-radius: 4px;
+  border-left: 3px solid var(--color-error);
+}

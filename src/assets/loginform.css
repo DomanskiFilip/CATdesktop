@@ -41,14 +41,6 @@ button:hover {
   transition: all 0.3s ease;
 }
 
-.error {
-  color: var(--color-error);
-  font-size: 0.8rem;
-  margin: 0.5rem;
-  text-align: center;
-  width: 70%;
-}
-
 .input-error {
   border-color: var(--color-error);
 }

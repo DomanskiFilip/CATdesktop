@@ -1,17 +1,15 @@
-use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc, Duration, Local, TimeZone};
-use tauri::AppHandle;
+use serde::{ Deserialize, Serialize };
+use chrono::{ DateTime, Utc, Duration, Local, TimeZone };
+use tauri::{ AppHandle, Manager };
 use uuid::Uuid;
 use rand::Rng;
 use base64::Engine;
 use regex::Regex;
 use crate::ConversationMessage;
-use crate::database_utils::{CalendarEvent, get_db_connection, save_event, get_events};
+use crate::database_utils::{ CalendarEvent, get_db_connection, save_event, get_events };
 use crate::user_utils::get_current_user_id;
 use crate::api_utils::AppConfig;
-use crate::trigger_sync;
-use crate::schedule_event_notification;
-use crate::prompt::get_calendar_assistant_prompt;
+use crate::{ trigger_sync, UserLocation, get_weekly_weather };
 
 #[derive(Deserialize)]
 struct LambdaResponse {
@@ -75,7 +73,8 @@ impl AIAssistantService {
         }
 
         // Create prompt for the LLM
-        let prompt = self.create_prompt_with_history(&query, app_handle, conversation_history).await?;
+        let location_state = app_handle.state::<tokio::sync::Mutex<UserLocation>>();
+        let prompt = self.create_prompt_with_history(&query, app_handle, conversation_history, location_state).await?;
        
         // Call Lambda endpoint and get parsed LLM response
         let mut llm_response = self.invoke_lambda_endpoint(prompt, app_handle).await?;
@@ -83,448 +82,229 @@ impl AIAssistantService {
         Ok(llm_response)
     }
 
-        // Method to get canned responses for common queries //
-        fn get_canned_response(&self, query: &str) -> Option<LLMResponse> {
-          let lowercase_query = query.to_lowercase();
-          let normalized_query = lowercase_query.trim();
-          
-          // Create a random number generator instance
-          let mut rng = rand::thread_rng();
+      // Method to get canned responses for common queries //
+      fn get_canned_response(&self, query: &str) -> Option<LLMResponse> {
+        let lowercase_query = query.to_lowercase();
+        let normalized_query = lowercase_query.trim();
+        
+        // random number generator instance
+        let mut rng = rand::thread_rng();
 
-          // Define patterns for common greetings and questions
-          match normalized_query {
-              q if (q == "hi" || q == "hello" || q == "hey" || q == "hi there" || q == "hi cat") => {
-                  // Return one of 3 random greetings
-                  let greetings = [
-                      "Hi there! I'm CAT, your calendar assistant. How can I help with your schedule today?",
-                      "Hello! I'm here to help manage your calendar. Need to schedule something?",
-                      "Hey! I'm your calendar assistant. What can I do for you today?"
-                  ];
-                  
-                  let index = rng.gen_range(0..greetings.len());
-                  let greeting = greetings[index];
-                        
-                  Some(LLMResponse {
-                      response_text: greeting.to_string(),
-                      extracted_events: None,
-                      conversation_id: None,
-                      action_taken: Some("none".to_string())
-                  })
-              },
-              "how are you" | "how are you?" | "how are you doing" | "how are you doing?" => {
-                  // Return one of 3 random responses for "how are you"
-                  let responses = [
-                      "I'm functioning well and ready to help organize your calendar! What can I do for you?",
-                      "I'm good, thanks for asking! Would you like to check your schedule or create a new event?",
-                      "All systems operational! I'm here to assist with your calendar needs. What's on your mind?"
-                  ];
-                  
-                  let index = rng.random_range(0..responses.len());
-                  let response = responses[index];
-                  
-                  Some(LLMResponse {
-                      response_text: response.to_string(),
-                      extracted_events: None,
-                      conversation_id: None,
-                      action_taken: Some("none".to_string())
-                  })
-              },
-              "what can you do" | "what can you do?" | "help" | "what are your features" => {
-                  Some(LLMResponse {
-                      response_text: "I can help you manage your calendar by creating, updating, and finding events. Just ask me things like 'Schedule a meeting tomorrow at 2pm', 'When's my next appointment?', or 'Move my dentist appointment to Friday'.".to_string(),
-                      extracted_events: None,
-                      conversation_id: None,
-                      action_taken: Some("none".to_string())
-                  })
-              },
-              "thanks" | "thank you" | "thanks!" | "thank you!" => {
-                  Some(LLMResponse {
-                      response_text: "You're welcome! Let me know if you need any other help with your calendar.".to_string(),
-                      extracted_events: None,
-                      conversation_id: None,
-                      action_taken: Some("none".to_string())
-                  })
-              },
-              "bye" | "goodbye" | "see you" | "bye bye" => {
-                  Some(LLMResponse {
-                      response_text: "Goodbye! I'm here whenever you need help managing your calendar.".to_string(),
-                      extracted_events: None,
-                      conversation_id: None,
-                      action_taken: Some("none".to_string())
-                  })
-              },
-              _ => None, // No canned response found
-          }
-      }
-      
-      // Method to create a prompt for the LLM based on user query and recent events //
-      async fn create_prompt_with_history(&self, query: &str, app_handle: &AppHandle, conversation_history: Option<Vec<ConversationMessage>>) -> Result<String, String> {
-            // Get recent user events for context (existing logic)
-            let recent_events = self.get_recent_events(app_handle).await?;
-            
-            // Format events for the prompt (existing logic)
-            let events_context = if recent_events.is_empty() {
-                "You don't have any upcoming events scheduled.".to_string()
-            } else {
-                let events_formatted = recent_events.iter()
-                    .map(|event| {
-                        let time_str = event.time.format("%Y-%m-%d %H:%M").to_string();
-                        format!("- description: {} ; time: {}", event.description, time_str)
-                    })
-                    .collect::<Vec<String>>()
-                    .join("\n");
+        match normalized_query {
+            q if (q == "hi" || q == "hello" || q == "hey" || q == "hi there" || q == "hi cat") => {
+                let greetings = [
+                    "Hi there! I'm CAT, your calendar assistant. How can I help with your schedule today?",
+                    "Hello! I'm here to help manage your calendar. Need to schedule something?",
+                    "Hey! I'm your calendar assistant. What can I do for you today?"
+                ];
                 
-                format!("Your upcoming events:\n{}", events_formatted)
-            };
+                let index = rng.random_range(0..greetings.len());
+                let greeting = greetings[index];
+                      
+                Some(LLMResponse {
+                    response_text: greeting.to_string(),
+                    extracted_events: None,
+                    conversation_id: None,
+                    action_taken: Some("none".to_string())
+                })
+            },
+            "how are you" | "how are you?" | "how are you doing" | "how are you doing?" => {
+                let responses = [
+                    "I'm functioning well and ready to help organize your calendar! What can I do for you?",
+                    "I'm good, thanks for asking! Would you like to check your schedule or create a new event?",
+                    "All systems operational! I'm here to assist with your calendar needs. What's on your mind?"
+                ];
+                
+                let index = rng.random_range(0..responses.len());
+                let response = responses[index];
+                
+                Some(LLMResponse {
+                    response_text: response.to_string(),
+                    extracted_events: None,
+                    conversation_id: None,
+                    action_taken: Some("none".to_string())
+                })
+            },
+            "what can you do" | "what can you do?" | "help" | "what are your features" => {
+                Some(LLMResponse {
+                    response_text: "I can help you manage your calendar by creating, updating, and finding events. Just ask me things like 'Schedule a meeting tomorrow at 2pm', 'When's my next appointment?', or 'Move my dentist appointment to Friday'.".to_string(),
+                    extracted_events: None,
+                    conversation_id: None,
+                    action_taken: Some("none".to_string())
+                })
+            },
+            "thanks" | "thank you" | "thanks!" | "thank you!" => {
+                Some(LLMResponse {
+                    response_text: "You're welcome! Let me know if you need any other help with your calendar.".to_string(),
+                    extracted_events: None,
+                    conversation_id: None,
+                    action_taken: Some("none".to_string())
+                })
+            },
+            "bye" | "goodbye" | "see you" | "bye bye" => {
+                Some(LLMResponse {
+                    response_text: "Goodbye! I'm here whenever you need help managing your calendar.".to_string(),
+                    extracted_events: None,
+                    conversation_id: None,
+                    action_taken: Some("none".to_string())
+                })
+            },
+            _ => None, // No canned response found
+        }
+    }
+      
+    // Method to create a prompt for the LLM based on user query and recent events //
+    async fn create_prompt_with_history(&self, query: &str, app_handle: &AppHandle, conversation_history: Option<Vec<ConversationMessage>>, location_state: tauri::State<'_, tokio::sync::Mutex<UserLocation>>,) -> Result<String, String> {
+        // Get recent user events for context (existing logic)
+        let recent_events = self.get_recent_events(app_handle).await?;
+        
+        // Format events for the prompt (existing logic)
+        let events_context = if recent_events.is_empty() {
+            "You don't have any upcoming events scheduled.".to_string()
+        } else {
+            let events_formatted = recent_events.iter()
+                .map(|event| {
+                    let time_str = event.time.format("%Y-%m-%d %H:%M").to_string();
+                    format!("- description: {} ; time: {}", event.description, time_str)
+                })
+                .collect::<Vec<String>>()
+                .join("\n");
             
-            // Format conversation history for context
-            let conversation_context = if let Some(history) = conversation_history {
-                if !history.is_empty() {
-                    history.iter()
-                        .map(|msg| format!("{}: {}", msg.sender, msg.content))
-                        .collect::<Vec<String>>()
-                        .join("\n")
-                } else {
-                    "No previous conversation.".to_string()
-                }
+            format!("Your upcoming events:\n{}", events_formatted)
+        };
+        
+        // Format conversation history for context
+        let conversation_context = if let Some(history) = conversation_history {
+            if !history.is_empty() {
+                history.iter()
+                    .map(|msg| format!("{}: {}", msg.sender, msg.content))
+                    .collect::<Vec<String>>()
+                    .join("\n")
             } else {
                 "No previous conversation.".to_string()
-            };
-            
-            println!("events_context: {}", &events_context);
+            }
+        } else {
+            "No previous conversation.".to_string()
+        };
 
-            let prompt = get_calendar_assistant_prompt(&conversation_context, &events_context, query);
-            
-            Ok(prompt)
-        }
+        let loc = location_state.lock().await;
+        let latitude = loc.latitude;
+        let longitude = loc.longitude;
+
+        // Fetch weather using coordinates
+        let weather_forecast = if weather_map.is_empty() {
+            "No weather data available.".to_string()
+        } else {
+            weather_map.iter()
+                .map(|(date, daily)| format!(
+                    "{}: {}, max temp: {:.1}°C, max wind: {:.1} km/h",
+                    date,
+                    daily.weather,
+                    daily.temperature_2m_max,
+                    daily.wind_speed_10m_max
+                ))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        let prompt = serde_json::json!({
+            "weather_forecast": weather_forecast,
+            "current_time": Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            "conversation_history": conversation_context,
+            "events_context": events_context,
+            "user_query": query,
+        });
+
+        println!("📝 Generated Prompt: {}", prompt);
+        
+        Ok(prompt)
+    }
       
-      // Method to invoke the Lambda endpoint for LLM processing //
-      async fn invoke_lambda_endpoint(&self, prompt: String, app_handle: &AppHandle) -> Result<LLMResponse, String> {
-        // Check if user is logged in
-        let _user_id = get_current_user_id(app_handle)
-            .map_err(|_| "User is not logged in.".to_string())?;
+    // Method to invoke the Lambda endpoint for LLM processing //
+    async fn invoke_lambda_endpoint(&self, prompt: String, app_handle: &AppHandle) -> Result<LLMResponse, String> {
+      // Check if user is logged in
+      let _user_id = get_current_user_id(app_handle)
+          .map_err(|_| "User is not logged in.".to_string())?;
 
-        // Get API config
-        let config = AppConfig::new()?;
-        let url = format!("{}/llm", config.lambda_base_url);
+      // Get API config
+      let config = AppConfig::new()?;
+      let url = format!("{}/llm", config.lambda_base_url);
 
-        // Prepare request body for Lambda
-        let inner_body = serde_json::json!({
-            "inputs": prompt,
-            "parameters": {
-                "max_new_tokens": 150,
-                "temperature": 0.05,
-                "top_p": 0.85,
-                "return_full_text": false
-            }
-        });
-        
-        let request_body = serde_json::json!({
-            "body": inner_body.to_string()
-        });
 
-        // Send POST request to Lambda
-        let client = reqwest::Client::new();
-        let resp = client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .header("x-api-key", config.api_key)
-            .json(&request_body)
-            .send()
-            .await
-            .map_err(|e| format!("Failed to call Lambda: {}", e))?;
+      // Send POST request to Lambda
+      let client = reqwest::Client::new();
+      let resp = client
+          .post(&url)
+          .header("Content-Type", "application/json")
+          .header("x-api-key", config.api_key)
+          .json(&prompt)
+          .send()
+          .await
+          .map_err(|e| format!("Failed to call Lambda: {}", e))?;
 
-        let text = resp.text().await
-        .map_err(|e| format!("Failed to read Lambda response: {}", e))?;
+      let text = resp.text().await
+      .map_err(|e| format!("Failed to read Lambda response: {}", e))?;
 
-        // Parse Lambda response
-        let lambda_resp: LambdaResponse = serde_json::from_str(&text)
-            .map_err(|e| format!("Failed to parse Lambda response: {}", e))?;
-        
-        // Validate status code
-        if lambda_resp.status_code != 200 {
-            return Err(format!("Lambda returned non-200 status: {}", lambda_resp.status_code));
-        }
+      // Parse Lambda response
+      let lambda_resp: LambdaResponse = serde_json::from_str(&text)
+          .map_err(|e| format!("Failed to parse Lambda response: {}", e))?;
+      
+      // Validate status code
+      if lambda_resp.status_code == 500 {
+        println!("Lambda returned error: {}", lambda_resp.body);
+      }
 
-        // Parse the body for LLM response - Handle deeply nested JSON properly
-        let body_json: serde_json::Value = serde_json::from_str(&lambda_resp.body)
-            .map_err(|e| format!("Failed to parse response body: {}", e))?;
-        
-        let llm_response_str = body_json["llm_response"]
-            .as_str()
-            .ok_or_else(|| "llm_response is not a string".to_string())?;
-        
-        // Clean up the JSON string before parsing
-        let cleaned_json = post_process_json(llm_response_str);
-        
-        // Validate JSON before parsing
-        if let Err(e) = serde_json::from_str::<serde_json::Value>(&cleaned_json) {
-            println!("❌ Invalid JSON after post-processing: {}", e);
-            return Err(format!("Failed to process LLM response: {}", e));
-        }
+      // Parse the body for LLM response
+      let body_json: serde_json::Value = serde_json::from_str(&lambda_resp.body)
+          .map_err(|e| format!("Failed to parse response body: {}", e))?;
+      
+      let llm_response: LLMResponse = match serde_json::from_str(&body_json.to_string()) {
+          Ok(response) => response,
+          Err(e) => {
+              println!("❌ Failed to parse as LLMResponse: {} - JSON was: {}", e, body_json);
+              return Err(format!("Failed to parse LLM response: {} - JSON was: {}", e, body_json));
+          }
+      };
 
-        let llm_response: LLMResponse = match serde_json::from_str(&cleaned_json) {
-            Ok(response) => response,
-            Err(e) => {
-                println!("❌ Failed to parse as LLMResponse: {} - JSON was: {}", e, cleaned_json);
-                return Err(format!("Failed to parse LLM response: {} - JSON was: {}", e, cleaned_json));
-            }
-        };
+      Ok(llm_response)
+  }
 
-        Ok(llm_response)
-    }
-
-    // Helper method to get recent events for the user //
-    async fn get_recent_events(&self, app_handle: &AppHandle) -> Result<Vec<CalendarEvent>, String> {
-        // Use the existing get_events function which handles decryption
-        let events_json = get_events(app_handle)
-            .map_err(|e| format!("Failed to get events: {}", e))?;
-        
-        // Parse the JSON strings back to CalendarEvent structs
-        let events: Result<Vec<CalendarEvent>, _> = events_json
-            .into_iter()
-            .map(|json_str| {
-                serde_json::from_str(&json_str)
-                    .map_err(|e| format!("Failed to parse event JSON: {}", e))
-            })
-            .collect();
-        
-        let mut events = events?;
-        
-        // Filter for recent/upcoming events (within the last 24 hours to next 30 days)
-        let now = chrono::Local::now();
-        let recent_cutoff = now - chrono::Duration::hours(24);
-        let future_cutoff = now + chrono::Duration::days(30);
-        
-        events.retain(|event| {
-            !event.deleted && 
-            event.time >= recent_cutoff && 
-            event.time <= future_cutoff
-        });
-        
-        // Sort by time
-        events.sort_by(|a, b| a.time.cmp(&b.time));
-        
-        // Limit to reasonable number for AI context
-        events.truncate(20);
-        
-        Ok(events)
-    }
-}
-
-// Public function to process user query through the AI assistant service //
-fn post_process_json(json_str: &str) -> String {
-    println!("🔍 Original LLM response: {}", json_str);
-
-    // Check if the response is just repeated backticks or empty
-    let trimmed = json_str.trim();
-    if trimmed.is_empty() || trimmed.chars().all(|c| c == '`' || c.is_whitespace()) {
-        println!("❌ Response contains only backticks or whitespace, returning fallback");
-        return r#"{"response_text":"I'm having trouble processing your request. Could you try rephrasing?","extracted_events":null,"action_taken":"none"}"#.to_string();
-    }
-
-    // Find the FIRST complete JSON object in the response
-    let extracted_str = if let Some(captures) = Regex::new(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```").unwrap().captures(json_str) {
-        captures.get(1).map_or("", |m| m.as_str()).trim()
-    } else if let Some(start) = json_str.find('{') {
-        // Find the matching closing brace for the FIRST JSON object
-        let mut brace_count = 0;
-        let mut end_pos = start;
-        for (i, ch) in json_str[start..].char_indices() {
-            match ch {
-                '{' => brace_count += 1,
-                '}' => {
-                    brace_count -= 1;
-                    if brace_count == 0 {
-                        end_pos = start + i;
-                        break; // Stop at the first complete JSON object
-                    }
-                },
-                _ => {}
-            }
-        }
-        &json_str[start..=end_pos]
-    } else {
-        // No JSON found, return fallback
-        println!("❌ No JSON object found in response");
-        return r#"{"response_text":"I'm having trouble processing your request. Could you try rephrasing?","extracted_events":null,"action_taken":"none"}"#.to_string();
-    };
-
-    // Check if extracted string is empty or just whitespace
-    if extracted_str.trim().is_empty() {
-        println!("❌ Extracted JSON string is empty");
-        return r#"{"response_text":"I'm having trouble processing your request. Could you try rephrasing?","extracted_events":null,"action_taken":"none"}"#.to_string();
-    }
-
-    let mut cleaned_json = fix_json_formatting(extracted_str);
-    cleaned_json = fix_response_text_quotes(&cleaned_json);
-
-    // Remove any trailing quotes or extra characters after the closing brace
-    if let Some(last_brace) = cleaned_json.rfind('}') {
-        cleaned_json = cleaned_json[..=last_brace].to_string();
-    }
-
-    println!("🔍 Cleaned JSON for parsing: {}", cleaned_json);
-
-    // Try to parse and validate the JSON
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&cleaned_json) {
-        let response_text = value["response_text"].as_str().unwrap_or("I'm having trouble processing your request. Could you try rephrasing?").to_string();
-        let action_taken = value["action_taken"].as_str().unwrap_or("none").to_string();
-
-        let extracted_events = value["extracted_events"].as_array().map(|arr| {
-            arr.iter().filter_map(|event_val| {
-                let mut description = event_val["description"].as_str().unwrap_or("").to_string();
-                
-                // Handle empty descriptions for ALL actions that need event details
-                if description.trim().is_empty() {
-                    match action_taken.as_str() {
-                        "create_event" => description = "Event".to_string(),
-                        _ => description = "Event".to_string(),
-                    }
-                }
-                
-                let alarm = event_val["alarm"].as_bool().unwrap_or(true);
-                let recurrence = event_val["recurrence"].as_str().map(String::from);
-
-                let time = if let Some(time_str) = event_val["time"].as_str() {
-                    // Try RFC3339 first (with timezone)
-                    DateTime::parse_from_rfc3339(time_str)
-                        .map(|dt| dt.with_timezone(&Local).with_timezone(&Utc))
-                        .ok()
-                        .or_else(|| {
-                            // If that fails, try parsing as naive datetime and assume local timezone
-                            chrono::NaiveDateTime::parse_from_str(time_str, "%Y-%m-%dT%H:%M:%S")
-                                .ok()
-                                .and_then(|naive| {
-                                    Local.from_local_datetime(&naive)
-                                        .single()
-                                        .map(|local_dt| local_dt.into())
-                                })
-                        })
-                } else {
-                    None
-                };
-
-                // Don't include events with empty descriptions after all processing
-                if description.trim().is_empty() {
-                    return None;
-                }
-
-                Some(ExtractedEvent {
-                    description,
-                    time,
-                    alarm,
-                    recurrence,
-                })
-            }).collect::<Vec<ExtractedEvent>>()
-        }).unwrap_or_default();
-
-        let llm_response = LLMResponse {
-            response_text,
-            extracted_events: if extracted_events.is_empty() { None } else { Some(extracted_events) },
-            conversation_id: value["conversation_id"].as_str().map(String::from),
-            action_taken: Some(action_taken),
-        };
-
-        if let Ok(final_json) = serde_json::to_string(&llm_response) {
-            println!("✅ Successfully reconstructed and serialized JSON: {}", final_json);
-            return final_json;
-        } else {
-            println!("❌ Failed to serialize reconstructed JSON");
-        }
-    } else {
-        println!("❌ Failed to parse cleaned JSON as serde_json::Value");
-    }
-
-    println!("❌ Failed to parse and reconstruct JSON, returning emergency fallback.");
-    r#"{"response_text":"I'm having trouble processing your request. Could you try rephrasing?","extracted_events":null,"action_taken":"none"}"#.to_string()
-}
-
-// Helper function to fix quote issues in response_text //
-fn fix_response_text_quotes(json: &str) -> String {
-    // First, handle single quotes that might be surrounding the entire response_text value
-    let single_quote_regex = Regex::new(r#"("response_text"\s*:\s*)'([^']*)'"#).unwrap();
-    let json = single_quote_regex.replace_all(json, r#"$1"$2""#).to_string();
-    
-    // Use regex to find the response_text field and its content
-    let response_text_regex = Regex::new(r#""response_text"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"("?)"#).unwrap();
-    
-    response_text_regex.replace_all(&json, |caps: &regex::Captures| {
-        let content = &caps[1];
-        // Check if there's an extra quote at the end
-        let extra_quote = &caps[2];
-        
-        // Fix common quote issues in the content
-        let mut fixed_content = content
-            .replace("I\"ve", "I've")
-            .replace("I\"ll", "I'll") 
-            .replace("I\"m", "I'm")
-            .replace("don\"t", "don't")
-            .replace("can\"t", "can't")
-            .replace("won\"t", "won't")
-            .replace("\\'", "'");
-            
-        // Handle quoted words inside response text - escape internal quotes
-        // Split on quotes and handle each part
-        let parts: Vec<&str> = fixed_content.split('"').collect();
-        if parts.len() > 1 {
-            // If we have quotes, escape them properly
-            let mut escaped_parts = Vec::new();
-            for (i, part) in parts.iter().enumerate() {
-                if i == 0 || i == parts.len() - 1 {
-                    // First and last parts don't need escaping
-                    escaped_parts.push(part.to_string());
-                } else {
-                    // Middle parts need to be escaped
-                    escaped_parts.push(format!("\\\"{}\\\"", part));
-                }
-            }
-            fixed_content = escaped_parts.join("");
-        }
-        
-        // If there was an extra quote, don't add it back
-        if extra_quote.is_empty() {
-            format!("\"response_text\": \"{}\"", fixed_content)
-        } else {
-            // Include the extra quote in the output
-            format!("\"response_text\": \"{}{}\"", fixed_content, extra_quote)
-        }
-    }).to_string()
-}
-
-// Helper function to fix JSON formatting issues //
-fn fix_json_formatting(json_text: &str) -> String {
-    let mut json = json_text.trim().to_string();
-
-    if json.trim_start().starts_with('{') && json.trim_end().ends_with('}') {
-        // Fix boolean and null values
-        json = json
-            .replace("True", "true")
-            .replace("False", "false") 
-            .replace("None", "null")
-            .replace(",\n}", "\n}")
-            .replace(",\n]", "\n]");
-        
-        // Fix quotes in property names
-        let property_regex = Regex::new(r"'([^']+)'(\s*:)").unwrap();
-        json = property_regex.replace_all(&json, "\"$1\"$2").to_string();
-        
-        // Fix quotes in string values
-        let value_regex = Regex::new(r":\s*'([^']*(?:\\'[^']*)*)'").unwrap();
-        json = value_regex.replace_all(&json, |caps: &regex::Captures| {
-            format!(": \"{}\"", &caps[1].replace("\\'", "'"))
-        }).to_string();
-        
-        // Handle any trailing quotes in response_text
-        let trailing_quote_regex = Regex::new(r#""([^"\\]*(?:\\.[^"\\]*)*)""([,\n\r]|$)"#).unwrap();
-        json = trailing_quote_regex.replace_all(&json, "\"$1\"$2").to_string();
-        
-        // Handle remaining single quotes in property names
-        let remaining_props_regex = Regex::new(r"'([^']*(?:\\'[^']*)*)':?\s*").unwrap();
-        json = remaining_props_regex.replace_all(&json, "\"$1\": ").to_string();
-    }
-    
-    json
+  // Helper method to get recent events for the user //
+  async fn get_recent_events(&self, app_handle: &AppHandle) -> Result<Vec<CalendarEvent>, String> {
+      // Use the existing get_events function which handles decryption
+      let events_json = get_events(app_handle)
+          .map_err(|e| format!("Failed to get events: {}", e))?;
+      
+      // Parse the JSON strings back to CalendarEvent structs
+      let events: Result<Vec<CalendarEvent>, _> = events_json
+          .into_iter()
+          .map(|json_str| {
+              serde_json::from_str(&json_str)
+                  .map_err(|e| format!("Failed to parse event JSON: {}", e))
+          })
+          .collect();
+      
+      let mut events = events?;
+      
+      // Filter for recent/upcoming events (within the last 24 hours to next 30 days)
+      let now = chrono::Local::now();
+      let recent_cutoff = now - chrono::Duration::hours(24);
+      let future_cutoff = now + chrono::Duration::days(30);
+      
+      events.retain(|event| {
+          !event.deleted && 
+          event.time >= recent_cutoff && 
+          event.time <= future_cutoff
+      });
+      
+      // Sort by time
+      events.sort_by(|a, b| a.time.cmp(&b.time));
+      
+      // Limit to reasonable number for AI context
+      events.truncate(20);
+      
+      Ok(events)
+  }
 }
 
 pub async fn process_user_query(app_handle: &AppHandle, query: String, conversation_history: Option<Vec<ConversationMessage>>) -> Result<LLMResponse, String> {

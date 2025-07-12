@@ -14,8 +14,9 @@
         <!-- Calendar days -->
         <div v-for="date in calendarDays" :key="date.id" class="calendar-cell" :class="{ 'current-day': isToday(date), 'active': activeCell === date.id }" @click="selectDate(date)">
           {{ date.day }}
-          <div class="event-indicators" v-if="getEventsForDate(date).length > 0">
-            <span class="event-dot"></span>
+          <div class="indicators">
+            <span v-if="getWeatherDescription(date.id)" class="weather-indicator" v-html="weatherIcon(getWeatherDescription(date.id))"></span>
+            <span class="event-indicator" v-if="getEventsForDate(date).length > 0"></span>
           </div>
         </div>
       </section>
@@ -64,7 +65,6 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import linkify from 'linkifyjs'
 import linkifyStr from 'linkify-string'
 
 
@@ -85,6 +85,14 @@ interface CalendarEvent {
   deleted: boolean;
 }
 
+// interface for daily weather data
+interface DailyWeather {
+  date: string;
+  weather: string;
+  temperature_2m_max: number;
+  wind_speed_10m_max: number;
+}
+
 // constant for days of the week
 const daysOfWeek = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 const now = new Date()
@@ -101,6 +109,7 @@ const calendarDays = ref<CalendarDay[]>([])
 const expand = ref<Record<number, boolean>>({})
 const hourInputs = ref<Record<string, string>>({});
 const activeEditor = ref<string | null>(null)
+const weather = ref<Record<string, DailyWeather> | 'no data'>('no data')
 
 
 // == Utility functions == //
@@ -209,6 +218,58 @@ const formatLinkedText = (text: string): string => {
     rel: 'noopener noreferrer'
   });
 }
+
+// Utility function to get weather description for a date string
+const getWeatherDescription = (dateStr: string | Date): string => {
+  if (weather.value === 'no data') return '';
+
+  // If dateStr is a Date object, format it
+  let key: string;
+  if (typeof dateStr === 'object' && dateStr instanceof Date) {
+    key = `${dateStr.getFullYear()}-${String(dateStr.getMonth() + 1).padStart(2, '0')}-${String(dateStr.getDate()).padStart(2, '0')}`;
+  } else {
+    // If dateStr is already a string, try to parse and format it
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      key = `${parts[0]}-${String(parts[1]).padStart(2, '0')}-${String(parts[2]).padStart(2, '0')}`;
+    } else {
+      key = dateStr;
+    }
+  }
+
+  return weather.value[key]?.weather || '';
+};
+
+const weatherIcon = (desc: string) => {
+  if (!desc) return '';
+  const lowerDesc = desc.toLowerCase();
+  if (lowerDesc.includes('clear sky')) {
+    // Sun SVG
+    return `<svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M440-760v-160h80v160h-80Zm266 110-55-55 112-115 56 57-113 113Zm54 210v-80h160v80H760ZM440-40v-160h80v160h-80ZM254-652 140-763l57-56 113 113-56 54Zm508 512L651-255l54-54 114 110-57 59ZM40-440v-80h160v80H40Zm157 300-56-57 112-112 29 27 29 28-114 114Zm283-100q-100 0-170-70t-70-170q0-100 70-170t170-70q100 0 170 70t70 170q0 100-70 170t-170 70Zm0-80q66 0 113-47t47-113q0-66-47-113t-113-47q-66 0-113 47t-47 113q0 66 47 113t113 47Zm0-160Z"/></svg>`;
+  }
+  if (lowerDesc.includes('mainly clear')) {
+    // Cloud SVG
+    return `<svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M440-760v-160h80v160h-80Zm266 110-56-56 113-114 56 57-113 113Zm54 210v-80h160v80H760Zm3 299L650-254l56-56 114 112-57 57ZM254-650 141-763l57-57 112 114-56 56Zm-14 450h180q25 0 42.5-17.5T480-260q0-25-17-42.5T421-320h-51l-20-48q-14-33-44-52.5T240-440q-50 0-85 35t-35 85q0 50 35 85t85 35Zm0 80q-83 0-141.5-58.5T40-320q0-83 58.5-141.5T240-520q60 0 109.5 32.5T423-400q58 0 97.5 43T560-254q-2 57-42.5 95.5T420-120H240Zm320-134q-5-20-10-39t-10-39q45-19 72.5-59t27.5-89q0-66-47-113t-113-47q-60 0-105 39t-53 99q-20-5-41-9t-41-9q14-88 82.5-144T480-720q100 0 170 70t70 170q0 77-44 138.5T560-254Zm-79-226Z"/></svg>`;
+  }
+  if (lowerDesc.includes('rain') || lowerDesc.includes('rain showers') || ('drizzle') || lowerDesc.includes('freezing drizzle')) {
+    // Rain SVG
+    return `<svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M558-84q-15 8-30.5 2.5T504-102l-60-120q-8-15-2.5-30.5T462-276q15-8 30.5-2.5T516-258l60 120q8 15 2.5 30.5T558-84Zm240 0q-15 8-30.5 2.5T744-102l-60-120q-8-15-2.5-30.5T702-276q15-8 30.5-2.5T756-258l60 120q8 15 2.5 30.5T798-84Zm-480 0q-15 8-30.5 2.5T264-102l-60-120q-8-15-2.5-30.5T222-276q15-8 30.5-2.5T276-258l60 120q8 15 2.5 30.5T318-84Zm-18-236q-91 0-155.5-64.5T80-540q0-83 55-145t136-73q32-57 87.5-89.5T480-880q90 0 156.5 57.5T717-679q69 6 116 57t47 122q0 75-52.5 127.5T700-320H300Zm0-80h400q42 0 71-29t29-71q0-42-29-71t-71-29h-60v-40q0-66-47-113t-113-47q-48 0-87.5 26T333-704l-10 24h-25q-57 2-97.5 42.5T160-540q0 58 41 99t99 41Zm180-200Z"/></svg>`;
+  }
+  if (lowerDesc.includes('thunderstorm')) {
+    // Thunderstorm SVG
+    return `<svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="m300-40 36-100h-76l50-140h100l-43 100h83L340-40h-40Zm270-40 28-80h-78l43-120h100l-35 80h82L610-80h-40ZM300-320q-91 0-155.5-64.5T80-540q0-83 55-145t136-73q32-57 87.5-89.5T480-880q90 0 156.5 57.5T717-679q69 6 116 57t47 122q0 75-52.5 127.5T700-320H300Zm0-80h400q42 0 71-29t29-71q0-42-29-71t-71-29h-60v-40q0-66-47-113t-113-47q-48 0-87.5 26T333-704l-10 24h-25q-57 2-97.5 42.5T160-540q0 58 41 99t99 41Zm180-200Z"/></svg>`;
+  }
+  if (lowerDesc.includes('snow') || lowerDesc.includes('snow fall') || lowerDesc.includes('snow grains') || lowerDesc.includes('snow showers')) {
+    // Snow SVG
+    return `<svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M260-200q-21 0-35.5-14.5T210-250q0-21 14.5-35.5T260-300q21 0 35.5 14.5T310-250q0 21-14.5 35.5T260-200ZM380-80q-21 0-35.5-14.5T330-130q0-21 14.5-35.5T380-180q21 0 35.5 14.5T430-130q0 21-14.5 35.5T380-80Zm120-120q-21 0-35.5-14.5T450-250q0-21 14.5-35.5T500-300q21 0 35.5 14.5T550-250q0 21-14.5 35.5T500-200Zm240 0q-21 0-35.5-14.5T690-250q0-21 14.5-35.5T740-300q21 0 35.5 14.5T790-250q0 21-14.5 35.5T740-200ZM620-80q-21 0-35.5-14.5T570-130q0-21 14.5-35.5T620-180q21 0 35.5 14.5T670-130q0 21-14.5 35.5T620-80ZM300-360q-91 0-155.5-64.5T80-580q0-83 55-145t136-73q32-57 87.5-89.5T480-920q90 0 156.5 57.5T717-719q69 6 116 57t47 122q0 75-52.5 127.5T700-360H300Zm0-80h400q42 0 71-29t29-71q0-42-29-71t-71-29h-60v-40q0-66-47-113t-113-47q-48 0-87.5 26T333-744l-10 24h-25q-57 2-97.5 42.5T160-580q0 58 41 99t99 41Zm180-100Z"/></svg>`;
+  }
+  if (lowerDesc.includes('fog')) {
+    // Fog SVG
+    return `<svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M720-200q-17 0-28.5-11.5T680-240q0-17 11.5-28.5T720-280q17 0 28.5 11.5T760-240q0 17-11.5 28.5T720-200ZM280-80q-17 0-28.5-11.5T240-120q0-17 11.5-28.5T280-160q17 0 28.5 11.5T320-120q0 17-11.5 28.5T280-80Zm-40-120q-17 0-28.5-11.5T200-240q0-17 11.5-28.5T240-280h360q17 0 28.5 11.5T640-240q0 17-11.5 28.5T600-200H240ZM400-80q-17 0-28.5-11.5T360-120q0-17 11.5-28.5T400-160h280q17 0 28.5 11.5T720-120q0 17-11.5 28.5T680-80H400ZM300-320q-91 0-155.5-64.5T80-540q0-83 55-145t136-73q32-57 87.5-89.5T480-880q90 0 156.5 57.5T717-679q69 6 116 57t47 122q0 75-52.5 127.5T700-320H300Zm0-80h400q42 0 71-29t29-71q0-42-29-71t-71-29h-60v-40q0-66-47-113t-113-47q-48 0-87.5 26T333-704l-10 24h-25q-57 2-97.5 42.5T160-540q0 58 41 99t99 41Zm180-200Z"/></svg>`;
+  }
+  // Default: Rainbow SVG
+  return `<svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M40-280q0-91 34.5-171T169-591q60-60 140-94.5T480-720q91 0 171 34.5T791-591q60 60 94.5 140T920-280h-80q0-149-105.5-254.5T480-640q-149 0-254.5 105.5T120-280H40Zm160 0q0-116 82-198t198-82q116 0 198 82t82 198h-80q0-83-58.5-141.5T480-480q-83 0-141.5 58.5T280-280h-80Z"/></svg>`;
+};
 
 // == Event logic == //
 // Map to keep track of pending saves for debouncing
@@ -457,7 +518,7 @@ const renderCalendar = () => {
   const lastDayOfMonth = new Date(currentDate.value.getFullYear(), currentDate.value.getMonth() + 1, 0)
   
   const daysInMonth = lastDayOfMonth.getDate()
-  const firstDayIndex = firstDayOfMonth.getDay()
+  const firstDayIndex = (firstDayOfMonth.getDay() + 6) % 7
   
   calendarDays.value = []
   
@@ -494,6 +555,17 @@ const loadEvents = async () => {
   }
 }
 
+// Function to fetch weather data for given coordinates
+const fetchWeatherData = async (latitude: number, longitude: number) => {
+  try {
+    const weatherData = await invoke<Record<string, DailyWeather>>('get_weekly_weather', { latitude, longitude });
+    weather.value = weatherData;
+  } catch (error) {
+    weather.value = 'no data';
+    console.error('Failed to fetch weather:', error);
+  }
+}
+
 // helper function -> Refresh events function
 const refreshEvents = async () => {
   await invoke('clean_old_events')
@@ -516,6 +588,26 @@ onMounted(async () => {
       await invoke('setup_auto_launch')
     } catch (autoLaunchError) {
       console.warn('Auto-launch setup failed:', autoLaunchError)
+    }
+
+    // Listen for location changes from the location component
+    listen('location-changed', async (event: any) => {
+      const { latitude, longitude } = event.payload;
+      await fetchWeatherData(latitude, longitude);
+    });
+
+    // Default weather fetch with IP location as fallback
+    try {
+      const response = await fetch('http://ip-api.com/json/');
+      const data = await response.json();
+      if (data.status === 'success') {
+        await fetchWeatherData(data.lat, data.lon);
+      } else {
+        weather.value = 'no data';
+      }
+    } catch (error) {
+      weather.value = 'no data';
+      console.warn('Could not get default location for weather:', error);
     }
     
     // Clean and load events, but don't block the calendar UI
@@ -621,19 +713,30 @@ onMounted(async () => {
   border: 1px solid var(--color-theme);
 }
 
-.event-indicators {
+.indicators {
   position: absolute;
-  right: -12px;
+  right: -14px;
   display: flex;
+  flex-direction: column;
   gap: 2px;
-  justify-content: center;
+  justify-content: flex-end;
+  align-items: center;
 }
 
-.event-dot {
+.event-indicator {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background-color: var(--color-theme);
+}
+
+.weather-indicator {
+  position: absolute;
+  top: -1.5rem;
+  right: -0.4rem;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
 }
 
 /* day schedule styles */

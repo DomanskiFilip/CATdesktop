@@ -4,20 +4,20 @@ mod api_utils;
 mod token_utils;
 mod theme_utils;
 mod database_utils;
+mod encryption_utils;
 mod user_utils;
-mod google_oauth;
-mod login;
-mod register;
 mod notification_service;
 mod database_sync_service;
 mod google_sync_service;
-mod encryption_utils;
+mod weather_service;
+mod google_oauth;
+mod login;
+mod register;
 mod auto_login;
 mod ai_assistant;
-mod prompt;
 
 
-use tauri::{AppHandle, Manager, Emitter};
+use tauri::{AppHandle, Manager, Emitter, State};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::menu::{Menu, MenuItem};
 use std::sync::Arc;
@@ -28,6 +28,7 @@ use serde::{Serialize, Deserialize};
 use crate::notification_service::NotificationService;
 use crate::database_sync_service::DbSyncService;
 use crate::google_sync_service::GoogleSyncService;
+use crate::weather_service::get_weekly_weather;
 
 pub type NotificationServiceState = Arc<Mutex<Option<NotificationService>>>;
 pub type DbSyncServiceState = Arc<Mutex<Option<DbSyncService>>>;
@@ -38,6 +39,12 @@ pub struct ConversationMessage {
     pub sender: String,
     pub content: String,
     pub timestamp: String,
+}
+
+#[derive(Default)]
+pub struct UserLocation {
+    pub latitude: f64,
+    pub longitude: f64,
 }
 
 // Check login status command
@@ -212,6 +219,15 @@ async fn setup_auto_launch() -> Result<(), String> {
     Ok(())
 }
 
+// save user coordinates command
+#[tauri::command]
+async fn set_user_coordinates(state: State<'_, Mutex<UserLocation>>, latitude: f64, longitude: f64) -> Result<(), String> {
+    let mut loc = state.lock().await;
+    loc.latitude = latitude;
+    loc.longitude = longitude;
+    Ok(())
+}
+
 // ai assistant comands //
 #[tauri::command]
 async fn process_ai_message(app_handle: AppHandle, query: String, conversation_history: String) -> Result<String, String> {
@@ -255,11 +271,6 @@ async fn save_event_from_ai(event_json: String, app_handle: AppHandle) -> Result
 async fn reject_event_suggestion(event_id: String) -> Result<(), String> {
     println!("Event suggestion with ID {} rejected.", event_id);
     Ok(())
-}
-
-#[tauri::command]
-async fn trigger_immediate_sync(app_handle: AppHandle) -> Result<(), String> {
-    trigger_sync(app_handle).await
 }
 
 #[tauri::command]
@@ -462,6 +473,7 @@ fn create_system_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 // Main function to run the Tauri application
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     tauri::Builder::default()
+        .manage(tokio::sync::Mutex::new(UserLocation::default()))
         .invoke_handler(tauri::generate_handler![
             check_login_status,
             login_user,
@@ -480,9 +492,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             process_ai_message,
             save_event_from_ai,
             reject_event_suggestion,
-            trigger_immediate_sync,
             get_events_for_ai,
             delete_all_events,
+            get_weekly_weather,
+            set_user_coordinates,
         ])
         .setup(|app| {
           // Request notification permissions on macOS

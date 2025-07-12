@@ -46,6 +46,9 @@
         <h2>CONNECT WITH GOOGLE:</h2>
         <hr>
         <GoogleOauth />
+        <h2>LOCATION:</h2>
+        <hr>
+        <location @updateCoordinates="handleLocationUpdate" @updateLocationName="handleLocationNameUpdate" />
       </section>
     </section>
   </section>
@@ -79,6 +82,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, emit } from '@tauri-apps/api/event'
 import TitleBar from './components/titleBar.vue'
 import GoogleOauth from './components/googleOauth.vue'
+import location from './components/location.vue'
 import Login from './components/login.vue'
 import register from './components/register.vue'
 import themes from './components/themes.vue'
@@ -89,6 +93,8 @@ const showLogin = ref(true)
 const loggedIn = ref(false)
 const activeSection = ref('section1')
 const ismoreInfoVisible = ref(false)
+const currentCoordinates = ref(null)
+const currentLocationName = ref('')
 
 // Function to log out the user
 const logout = async () => {
@@ -139,6 +145,26 @@ const moreInfo = (isVisible: boolean) => {
       mainContent.style.marginLeft = '3rem'
     }
   }
+}
+
+// Function to handle location updates from the location component
+const handleLocationUpdate = async (coordinates: any) => {
+  currentCoordinates.value = coordinates
+  if (coordinates) {
+    // Emit location change event to notify calendar component
+    emit('location-changed', { 
+      latitude: coordinates.lat, 
+      longitude: coordinates.lng 
+    })
+    await invoke('set_user_coordinates', {
+      latitude: coordinates.lat,
+      longitude: coordinates.lng
+    });
+  }
+}
+
+const handleLocationNameUpdate = (name: string) => {
+  currentLocationName.value = name
 }
 
 onMounted(async () => {
