@@ -1,15 +1,12 @@
 use serde::{ Deserialize, Serialize };
-use chrono::{ DateTime, Utc, Duration, Local, TimeZone };
+use chrono::{ Utc, DateTime }; // <-- Add DateTime import
 use tauri::{ AppHandle, Manager };
-use uuid::Uuid;
 use rand::Rng;
-use base64::Engine;
-use regex::Regex;
 use crate::ConversationMessage;
-use crate::database_utils::{ CalendarEvent, get_db_connection, save_event, get_events };
+use crate::database_utils::{ CalendarEvent, get_events };
 use crate::user_utils::get_current_user_id;
 use crate::api_utils::AppConfig;
-use crate::{ trigger_sync, UserLocation, get_weekly_weather };
+use crate::{ UserLocation, get_weekly_weather };
 
 #[derive(Deserialize)]
 struct LambdaResponse {
@@ -47,7 +44,7 @@ pub struct LLMResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtractedEvent {
     pub description: String,
-    pub time: Option<DateTime<Utc>>,
+    pub time: Option<DateTime<Utc>>, // <-- Now DateTime is imported
     pub alarm: bool,
     pub recurrence: Option<String>,
 }
@@ -77,7 +74,7 @@ impl AIAssistantService {
         let prompt = self.create_prompt_with_history(&query, app_handle, conversation_history, location_state).await?;
        
         // Call Lambda endpoint and get parsed LLM response
-        let mut llm_response = self.invoke_lambda_endpoint(prompt, app_handle).await?;
+        let llm_response = self.invoke_lambda_endpoint(prompt, app_handle).await?;
 
         Ok(llm_response)
     }
@@ -88,7 +85,7 @@ impl AIAssistantService {
         let normalized_query = lowercase_query.trim();
         
         // random number generator instance
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         match normalized_query {
             q if (q == "hi" || q == "hello" || q == "hey" || q == "hi there" || q == "hi cat") => {
@@ -98,7 +95,7 @@ impl AIAssistantService {
                     "Hey! I'm your calendar assistant. What can I do for you today?"
                 ];
                 
-                let index = rng.random_range(0..greetings.len());
+                let index = rng.random_range(0..greetings.len()); // <-- Use random_range
                 let greeting = greetings[index];
                       
                 Some(LLMResponse {
@@ -115,7 +112,7 @@ impl AIAssistantService {
                     "All systems operational! I'm here to assist with your calendar needs. What's on your mind?"
                 ];
                 
-                let index = rng.random_range(0..responses.len());
+                let index = rng.random_range(0..responses.len()); // <-- Use random_range
                 let response = responses[index];
                 
                 Some(LLMResponse {
@@ -192,6 +189,9 @@ impl AIAssistantService {
         let longitude = loc.longitude;
 
         // Fetch weather using coordinates
+        let weather_map = get_weekly_weather(app_handle.clone(), latitude, longitude).await // <-- Pass app_handle
+            .map_err(|e| format!("Failed to fetch weather: {}", e))?;
+
         let weather_forecast = if weather_map.is_empty() {
             "No weather data available.".to_string()
         } else {
@@ -207,7 +207,7 @@ impl AIAssistantService {
                 .join("\n")
         };
 
-        let prompt = serde_json::json!({
+        let prompt_json = serde_json::json!({
             "weather_forecast": weather_forecast,
             "current_time": Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
             "conversation_history": conversation_context,
@@ -215,9 +215,10 @@ impl AIAssistantService {
             "user_query": query,
         });
 
-        println!("📝 Generated Prompt: {}", prompt);
-        
-        Ok(prompt)
+        println!("📝 Generated Prompt: {}", prompt_json);
+
+        // Convert prompt_json to String before returning
+        Ok(prompt_json.to_string())
     }
       
     // Method to invoke the Lambda endpoint for LLM processing //
