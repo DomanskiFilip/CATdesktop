@@ -272,11 +272,6 @@ async fn reject_event_suggestion(event_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn get_events_for_ai(app_handle: AppHandle) -> Result<Vec<String>, String> {
-    get_events(app_handle).await
-}
-
-#[tauri::command]
 async fn delete_all_events(app_handle: tauri::AppHandle) -> Result<usize, String> {
     let conn = match database_utils::get_db_connection(&app_handle) {
         Ok(conn) => conn,
@@ -490,7 +485,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             process_ai_message,
             save_event_from_ai,
             reject_event_suggestion,
-            get_events_for_ai,
             delete_all_events,
             get_weekly_weather,
             set_user_coordinates,

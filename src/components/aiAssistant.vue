@@ -157,14 +157,10 @@ const processQuery = async (message: string) => {
       query: message,
       conversationHistory: JSON.stringify(chatHistory.value.slice(0, -1))
     });
-    
     const aiResponse = JSON.parse(response);
-    
-    // Validate response structure
     if (!aiResponse.response_text || !aiResponse.action_taken) {
       throw new Error('Invalid AI response format');
     }
-    
     return aiResponse;
   } catch (error) {
     console.error("Error in processQuery:", error);
@@ -179,27 +175,20 @@ const processQuery = async (message: string) => {
 
 const sendMessage = async () => {
   if (!userInput.value.trim() || isProcessing.value) return;
-  
   const message = userInput.value.trim();
   userInput.value = '';
-  
   chatHistory.value.push({
     content: message,
     sender: 'user',
     timestamp: new Date().toISOString()
   });
-  
   isProcessing.value = true;
   isTyping.value = true;
-  
   await scrollToBottom();
-  
   try {
     const aiResponse = await processQuery(message);
     isTyping.value = false;
-    
     await handleAIResponse(aiResponse);
-    
   } catch (error) {
     isTyping.value = false;
     console.error('Error processing message:', error);
@@ -214,7 +203,7 @@ const sendMessage = async () => {
   }
 };
 
-// Handle AI responses based on action type
+// Unified handler for AI responses
 const handleAIResponse = async (aiResponse: any) => {
   const baseMessage = {
     content: aiResponse.response_text,
@@ -225,24 +214,19 @@ const handleAIResponse = async (aiResponse: any) => {
   switch (aiResponse.action_taken) {
     case 'create_event':
       if (aiResponse.extracted_events && aiResponse.extracted_events.length > 0) {
-        // Check for conflicts before showing suggestion
         const suggestion = aiResponse.extracted_events[0];
         const conflict = await checkForConflicts(suggestion);
-        
         if (conflict) {
-          // Show conflict dialog instead of suggestion
           conflictData.value = {
             existingEvent: conflict.existingEvent,
             newSuggestion: suggestion,
             conflictType: conflict.type,
             messageIndex: chatHistory.value.length
           };
-          
           chatHistory.value.push({
             ...baseMessage,
             content: baseMessage.content + " However, I found a potential conflict."
           });
-          
           showConflictDialog.value = true;
         } else {
           chatHistory.value.push({
@@ -254,7 +238,7 @@ const handleAIResponse = async (aiResponse: any) => {
         chatHistory.value.push(baseMessage);
       }
       break;
-      
+
     case 'update_event':
       if (aiResponse.extracted_events && aiResponse.extracted_events.length > 0) {
         const event = aiResponse.extracted_events[0];
@@ -274,7 +258,7 @@ const handleAIResponse = async (aiResponse: any) => {
         chatHistory.value.push(baseMessage);
       }
       break;
-      
+
     case 'delete_event':
       if (aiResponse.extracted_events && aiResponse.extracted_events.length > 0) {
         const event = aiResponse.extracted_events[0];
@@ -294,29 +278,7 @@ const handleAIResponse = async (aiResponse: any) => {
         chatHistory.value.push(baseMessage);
       }
       break;
-      
-    case 'move_event':
-      if (aiResponse.extracted_events && aiResponse.extracted_events.length > 0) {
-        const event = aiResponse.extracted_events[0];
-        if (event.target_event_id) {
-          chatHistory.value.push({
-            ...baseMessage,
-            eventSuggestion: event,
-            isMoved: true
-          });
-        } else {
-          chatHistory.value.push({
-            ...baseMessage,
-            content: baseMessage.content + " (Note: I couldn't identify which specific event to move)"
-          });
-        }
-      } else {
-        chatHistory.value.push(baseMessage);
-      }
-      break;
-      
-    case 'query_events':
-    case 'weather_query':
+
     case 'none':
     default:
       chatHistory.value.push(baseMessage);
@@ -327,31 +289,24 @@ const handleAIResponse = async (aiResponse: any) => {
 // Check for conflicts when creating events
 const checkForConflicts = async (suggestion: EventSuggestion) => {
   try {
-    const eventsJson = await invoke<string[]>('get_events_for_ai');
+    const eventsJson = await invoke<string[]>('get_events');
     const events = eventsJson.map(eventStr => JSON.parse(eventStr));
-    
-    // Check for time conflicts
     if (suggestion.time) {
       const suggestionTime = new Date(suggestion.time);
       const timeConflict = events.find(e => {
         const eventTime = new Date(e.time);
-        return Math.abs(eventTime.getTime() - suggestionTime.getTime()) < 30 * 60 * 1000; // 30 minutes
+        return Math.abs(eventTime.getTime() - suggestionTime.getTime()) < 30 * 60 * 1000;
       });
-      
       if (timeConflict) {
         return { existingEvent: timeConflict, type: 'time' };
       }
     }
-    
-    // Check for description conflicts
     const descriptionConflict = events.find(e => 
       e.description.toLowerCase().trim() === suggestion.description.toLowerCase().trim()
     );
-    
     if (descriptionConflict) {
       return { existingEvent: descriptionConflict, type: 'description' };
     }
-    
     return null;
   } catch (error) {
     console.error('Error checking conflicts:', error);
@@ -359,32 +314,25 @@ const checkForConflicts = async (suggestion: EventSuggestion) => {
   }
 };
 
-// Main function to handle accepting suggestions
+// Accept suggestion handler (unified for update/move)
 const acceptSuggestion = async (messageIndex: number) => {
   const message = chatHistory.value[messageIndex];
   if (!message || !message.eventSuggestion) return;
-  
   try {
     const suggestion = message.eventSuggestion;
-    
     if (message.isDelete) {
       await handleDeleteEvent(suggestion, message);
     } else if (message.isUpdate) {
       await handleUpdateEvent(suggestion, message);
-    } else if (message.isMoved) {
-      await handleMoveEvent(suggestion, message);
     } else {
-      await handleCreateEvent(suggestion, message);
+      await createNewEvent(suggestion);
     }
-    
-    // Refresh calendar
     try {
       await invoke('trigger_sync');
       await tauriEmit('event-saved');
     } catch (syncError) {
       console.warn('Failed to trigger sync:', syncError);
     }
-    
   } catch (error) {
     console.error('Error processing event suggestion:', error);
     chatHistory.value.push({
@@ -393,108 +341,50 @@ const acceptSuggestion = async (messageIndex: number) => {
       timestamp: new Date().toISOString()
     });
   }
-  
   await scrollToBottom();
 };
 
-// Handle deleting an event
+// Handle deleting an event by target_event_id
 const handleDeleteEvent = async (suggestion: EventSuggestion, message: ChatMessage) => {
   if (suggestion.target_event_id) {
-    // Use target_event_id from AI response
     await invoke('delete_event', { id: suggestion.target_event_id });
     message.eventAccepted = true;
-    
     chatHistory.value.push({
       content: `✅ I've successfully deleted "${suggestion.description}" from your calendar.`,
       sender: 'assistant',
       timestamp: new Date().toISOString()
     });
   } else {
-    // Fallback to finding event by description
-    const eventsJson = await invoke<string[]>('get_events_for_ai');
-    const events = eventsJson.map(eventStr => JSON.parse(eventStr));
-    const matchingEvent = findMatchingEvent(events, suggestion);
-    
-    if (matchingEvent) {
-      await invoke('delete_event', { id: matchingEvent.id });
-      message.eventAccepted = true;
-      
-      chatHistory.value.push({
-        content: `✅ I've successfully deleted "${matchingEvent.description}" from your calendar.`,
-        sender: 'assistant',
-        timestamp: new Date().toISOString()
-      });
-    } else {
-      throw new Error('Could not find the event to delete');
-    }
+    throw new Error('Could not find the event to delete');
   }
 };
 
-// Handle updating an event
+// Handle updating an event by target_event_id
 const handleUpdateEvent = async (suggestion: EventSuggestion, message: ChatMessage) => {
   if (suggestion.target_event_id) {
-    // Use target_event_id from AI response
-    await updateEventById(suggestion);
+    await updateEventByTargetId(suggestion);
     message.eventAccepted = true;
-    
     chatHistory.value.push({
       content: `✅ I've successfully updated "${suggestion.description}" in your calendar.`,
       sender: 'assistant',
       timestamp: new Date().toISOString()
     });
   } else {
-    // Fallback to finding event by description/time
-    await updateExistingEvent(suggestion, false);
-    message.eventAccepted = true;
+    throw new Error("Could not find the event to update");
   }
 };
 
-// Handle moving an event
-const handleMoveEvent = async (suggestion: EventSuggestion, message: ChatMessage) => {
-  if (suggestion.target_event_id) {
-    // Use target_event_id from AI response
-    await updateEventById(suggestion);
-    message.eventAccepted = true;
-    
-    const timeStr = suggestion.time ? new Date(suggestion.time).toLocaleString() : 'the new time';
-    chatHistory.value.push({
-      content: `✅ I've successfully moved "${suggestion.description}" to ${timeStr}.`,
-      sender: 'assistant',
-      timestamp: new Date().toISOString()
-    });
-  } else {
-    // Fallback to finding event by description/time
-    await updateExistingEvent(suggestion, true);
-    message.eventAccepted = true;
-  }
-};
-
-// Handle creating a new event
-const handleCreateEvent = async (suggestion: EventSuggestion, message: ChatMessage) => {
-  await createNewEvent(suggestion);
-  message.eventAccepted = true;
-  
-  chatHistory.value.push({
-    content: `✅ I've successfully added "${suggestion.description}" to your calendar.`,
-    sender: 'assistant',
-    timestamp: new Date().toISOString()
-  });
-};
-
-// Update event by ID (when AI provides target_event_id)
-const updateEventById = async (eventSuggestion: EventSuggestion) => {
+// Update event by target_event_id
+const updateEventByTargetId = async (eventSuggestion: EventSuggestion) => {
   if (!eventSuggestion.target_event_id) {
     throw new Error('No target event ID provided');
   }
-  
-  const eventsJson = await invoke<string[]>('get_events_for_ai');
+  const eventsJson = await invoke<string[]>('get_events');
   const events = eventsJson.map(eventStr => JSON.parse(eventStr));
   const existingEvent = events.find(e => e.id === eventSuggestion.target_event_id);
-  
   if (!existingEvent) {
     throw new Error('Target event not found');
   }
-  
   const updatedEvent = {
     ...existingEvent,
     description: eventSuggestion.description || existingEvent.description,
@@ -504,16 +394,10 @@ const updateEventById = async (eventSuggestion: EventSuggestion) => {
     synced: false,
     synced_google: false
   };
-  
-  await invoke('save_event', { 
-    event: JSON.stringify(updatedEvent)
-  });
-  
+  await invoke('save_event', { event: JSON.stringify(updatedEvent) });
   if (updatedEvent.alarm) {
     try {
-      await invoke('schedule_event_notification', { 
-        event_json: JSON.stringify(updatedEvent) 
-      });
+      await invoke('schedule_event_notification', { event_json: JSON.stringify(updatedEvent) });
     } catch (notificationError) {
       console.warn('Failed to schedule notification:', notificationError);
     }
@@ -525,7 +409,6 @@ const createNewEvent = async (eventSuggestion: EventSuggestion) => {
   const eventDate = eventSuggestion.time ? 
     new Date(eventSuggestion.time) : 
     new Date(Date.now() + 60 * 60 * 1000);
-  
   const calendarEvent = {
     id: crypto.randomUUID(),
     user_id: "",
@@ -537,149 +420,32 @@ const createNewEvent = async (eventSuggestion: EventSuggestion) => {
     deleted: false,
     recurrence: eventSuggestion.recurrence
   };
-  
-  await invoke('save_event', { 
-    event: JSON.stringify(calendarEvent)
-  });
-  
+  await invoke('save_event', { event: JSON.stringify(calendarEvent) });
   if (calendarEvent.alarm) {
     try {
-      await invoke('schedule_event_notification', { 
-        event_json: JSON.stringify(calendarEvent) 
-      });
+      await invoke('schedule_event_notification', { event_json: JSON.stringify(calendarEvent) });
     } catch (notificationError) {
       console.warn('Failed to schedule notification:', notificationError);
     }
   }
-};
-
-// Update existing event (fallback when no target_event_id)
-const updateExistingEvent = async (eventSuggestion: EventSuggestion, isMoved: boolean = false) => {
-  const eventsJson = await invoke<string[]>('get_events_for_ai');
-  const events = eventsJson.map(eventStr => JSON.parse(eventStr));
-  
-  let matchingEvent;
-  if (isMoved) {
-    matchingEvent = findEventForMove(events, eventSuggestion);
-  } else {
-    matchingEvent = findMatchingEvent(events, eventSuggestion);
-  }
-  
-  if (!matchingEvent) {
-    throw new Error("Could not find the event to update");
-  }
-  
-  const updatedEvent = {
-    ...matchingEvent,
-    description: eventSuggestion.description,
-    time: eventSuggestion.time || matchingEvent.time,
-    alarm: eventSuggestion.alarm !== undefined ? eventSuggestion.alarm : matchingEvent.alarm,
-    recurrence: eventSuggestion.recurrence || matchingEvent.recurrence,
-    synced: false,
-    synced_google: false
-  };
-  
-  await invoke('save_event', { 
-    event: JSON.stringify(updatedEvent)
-  });
-  
-  if (updatedEvent.alarm) {
-    try {
-      await invoke('schedule_event_notification', { 
-        event_json: JSON.stringify(updatedEvent) 
-      });
-    } catch (notificationError) {
-      console.warn('Failed to schedule notification:', notificationError);
-    }
-  }
-  
-  const actionText = isMoved ? 'moved' : 'updated';
-  const timeStr = eventSuggestion.time ? ` to ${new Date(eventSuggestion.time).toLocaleString()}` : '';
-  
-  chatHistory.value.push({
-    content: `✅ I've successfully ${actionText} "${updatedEvent.description}"${timeStr}.`,
-    sender: 'assistant',
-    timestamp: new Date().toISOString()
-  });
-};
-
-// Helper function to find matching event for move operations
-const findEventForMove = (events: any[], eventSuggestion: EventSuggestion) => {
-  const targetDescription = eventSuggestion.description.toLowerCase().trim();
-  
-  // Try description matching first for move operations
-  return events.find(e => 
-    e.description.toLowerCase().trim() === targetDescription ||
-    e.description.toLowerCase().includes(targetDescription) ||
-    targetDescription.includes(e.description.toLowerCase())
-  );
-};
-
-// Helper function to find matching event
-const findMatchingEvent = (events: any[], eventSuggestion: EventSuggestion) => {
-  if (eventSuggestion.time) {
-    const targetTime = new Date(eventSuggestion.time);
-    
-    // Try exact time match first
-    let match = events.find(e => {
-      const eventTime = new Date(e.time);
-      return eventTime.getFullYear() === targetTime.getFullYear() &&
-             eventTime.getMonth() === targetTime.getMonth() &&
-             eventTime.getDate() === targetTime.getDate() &&
-             eventTime.getHours() === targetTime.getHours();
-    });
-    
-    if (match) return match;
-    
-    // Try same day match
-    const sameDayEvents = events.filter(e => {
-      const eventTime = new Date(e.time);
-      return eventTime.getFullYear() === targetTime.getFullYear() &&
-             eventTime.getMonth() === targetTime.getMonth() &&
-             eventTime.getDate() === targetTime.getDate();
-    });
-    
-    if (sameDayEvents.length === 1) return sameDayEvents[0];
-    
-    if (sameDayEvents.length > 1) {
-      const description = eventSuggestion.description.toLowerCase();
-      match = sameDayEvents.find(e => 
-        e.description.toLowerCase().includes(description) || 
-        description.includes(e.description.toLowerCase())
-      );
-      
-      if (match) return match;
-    }
-  }
-  
-  // Fallback to description match
-  const description = eventSuggestion.description.toLowerCase();
-  return events.find(e => e.description.toLowerCase() === description ||
-                          e.description.toLowerCase().includes(description) ||
-                          description.includes(e.description.toLowerCase()));
 };
 
 // Handle conflict resolution
 const handleConflictUpdate = async () => {
   const { existingEvent, newSuggestion, conflictType } = conflictData.value;
-  
   if (!newSuggestion) {
     console.error('No suggestion data available for update');
     showConflictDialog.value = false;
     return;
   }
-  
   try {
     await updateConflictingEvent(existingEvent, newSuggestion, conflictType);
-    
     chatHistory.value.push({
       content: `✅ I've updated the existing event "${newSuggestion.description}" with your new details.`,
       sender: 'assistant',
       timestamp: new Date().toISOString()
     });
-    
     await tauriEmit('event-saved');
-    
   } catch (error) {
     console.error('Error updating conflicting event:', error);
     chatHistory.value.push({
@@ -688,31 +454,24 @@ const handleConflictUpdate = async () => {
       timestamp: new Date().toISOString()
     });
   }
-  
   showConflictDialog.value = false;
   await scrollToBottom();
 };
 
-// Handle conflict cancel
 const handleConflictCancel = async () => {
   chatHistory.value.push({
     content: "No problem. The existing event remains unchanged. Is there anything else you'd like me to help you with?",
     sender: 'assistant',
     timestamp: new Date().toISOString()
   });
-  
   showConflictDialog.value = false;
   await scrollToBottom();
 };
 
-// Update conflicting event
+// Update conflicting event by id
 const updateConflictingEvent = async (existingEvent: any, newSuggestion: EventSuggestion, conflictType: string) => {
-  if (!newSuggestion) {
-    throw new Error('No suggestion data provided');
-  }
-  
+  if (!newSuggestion) throw new Error('No suggestion data provided');
   let updatedEvent;
-  
   if (conflictType === 'time') {
     updatedEvent = {
       ...existingEvent,
@@ -732,21 +491,14 @@ const updateConflictingEvent = async (existingEvent: any, newSuggestion: EventSu
       synced_google: false
     };
   }
-  
-  await invoke('save_event', { 
-    event: JSON.stringify(updatedEvent)
-  });
-  
+  await invoke('save_event', { event: JSON.stringify(updatedEvent) });
   if (updatedEvent.alarm) {
     try {
-      await invoke('schedule_event_notification', { 
-        event_json: JSON.stringify(updatedEvent) 
-      });
+      await invoke('schedule_event_notification', { event_json: JSON.stringify(updatedEvent) });
     } catch (notificationError) {
       console.warn('Failed to schedule notification:', notificationError);
     }
   }
-  
   try {
     await invoke('trigger_sync');
   } catch (syncError) {
@@ -758,29 +510,21 @@ const updateConflictingEvent = async (existingEvent: any, newSuggestion: EventSu
 const rejectSuggestion = async (messageIndex: number) => {
   const message = chatHistory.value[messageIndex];
   if (!message) return;
-  
   message.eventRejected = true;
-  
   let rejectionMessage = "No problem. ";
-  
   if (message.isDelete) {
     rejectionMessage += "The event remains in your calendar. ";
   } else if (message.isUpdate) {
     rejectionMessage += "I've kept the event as it was. ";
-  } else if (message.isMoved) {
-    rejectionMessage += "The event will stay at its current time. ";
   } else {
     rejectionMessage += "I won't add this event to your calendar. ";
   }
-  
   rejectionMessage += "Is there anything else you'd like me to help you with?";
-  
   chatHistory.value.push({
     content: rejectionMessage,
     sender: 'assistant',
     timestamp: new Date().toISOString()
   });
-  
   await scrollToBottom();
 };
 

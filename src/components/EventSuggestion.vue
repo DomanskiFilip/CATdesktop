@@ -52,6 +52,7 @@ import { ref, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 
 interface EventSuggestion {
+  target_event_id?: string;
   description: string;
   time?: string;
   alarm: boolean;
@@ -99,48 +100,17 @@ const getRejectedStatusText = () => {
   return 'Event Rejected';
 };
 
-// Fetch current event details when it's an update or move //
+// Fetch current event details by id only
 const loadCurrentEvent = async () => {
   if (!props.isUpdate && !props.isMoved) return;
-  
   try {
-    const eventsJson = await invoke<string[]>('get_events_for_ai');
-    const events = eventsJson.map(eventStr => JSON.parse(eventStr));
-    let match = null;
-    
-    // First try to match by time if available
-    if (props.eventSuggestion.time) {
-      const suggestionTime = new Date(props.eventSuggestion.time);
-      match = events.find(e => {
-        const eventTime = new Date(e.time);
-        return eventTime.getDate() === suggestionTime.getDate() &&
-               eventTime.getMonth() === suggestionTime.getMonth() &&
-               eventTime.getFullYear() === suggestionTime.getFullYear();
-      });
-    }
-    
-    // If no time match, try description matching
-    if (!match) {
-      const description = props.eventSuggestion.description.toLowerCase().trim();
-      match = events.find(e => {
-        const eventDesc = e.description.toLowerCase().trim();
-        return eventDesc === description ||
-               eventDesc.includes(description) ||
-               description.includes(eventDesc);
-      });
-    }
-    
-    // If still no match, get the most recent event (fallback)
-    if (!match && events.length > 0) {
-      const now = new Date();
-      const futureEvents = events.filter(e => new Date(e.time) >= now);
-      match = futureEvents.length > 0 ? futureEvents[0] : events[events.length - 1];
-    }
-    
-    if (match) {
-      currentEvent.value = match;
-    } else {
-      console.warn('Could not find matching current event for suggestion:', props.eventSuggestion);
+    if (props.eventSuggestion.target_event_id) {
+      const eventsJson = await invoke<string[]>('get_events');
+      const events = eventsJson.map(eventStr => JSON.parse(eventStr));
+      const match = events.find(e => e.id === props.eventSuggestion.target_event_id);
+      if (match) {
+        currentEvent.value = match;
+      }
     }
   } catch (error) {
     console.error('Error loading current event:', error);

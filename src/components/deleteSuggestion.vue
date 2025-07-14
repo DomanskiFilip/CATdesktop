@@ -40,6 +40,7 @@ import { ref, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 
 interface EventSuggestion {
+  target_event_id?: string;
   description: string;
   time?: string;
   alarm: boolean;
@@ -64,22 +65,18 @@ const formatTime = (timeString: string) => {
   return new Date(timeString).toLocaleString();
 };
 
-// Find the event to be deleted
+// Find the event to be deleted by id only
 const loadEventToDelete = async () => {
   try {
-    const eventsJson = await invoke<string[]>('get_events_for_ai');
-    const events = eventsJson.map(eventStr => JSON.parse(eventStr));
-    
-    // Find the matching event using description
-    const description = props.eventSuggestion.description.toLowerCase();
-    const match = events.find(e => 
-      e.description.toLowerCase() === description ||
-      e.description.toLowerCase().includes(description) ||
-      description.includes(e.description.toLowerCase())
-    );
-    
-    if (match) {
-      currentEvent.value = match;
+    if (props.eventSuggestion.target_event_id) {
+      const eventsJson = await invoke<string[]>('get_events');
+      const events = eventsJson.map(eventStr => JSON.parse(eventStr));
+      console.log('Loaded events:', events);
+      const match = events.find(e => e.id === props.eventSuggestion.target_event_id);
+      console.log('Matched event:', match);
+      if (match) {
+        currentEvent.value = match;
+      }
     }
   } catch (error) {
     console.error('Error loading event to delete:', error);
