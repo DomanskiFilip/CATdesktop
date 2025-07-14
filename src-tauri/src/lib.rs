@@ -231,7 +231,6 @@ async fn set_user_coordinates(state: State<'_, Mutex<UserLocation>>, latitude: f
 // ai assistant comands //
 #[tauri::command]
 async fn process_ai_message(app_handle: AppHandle, query: String, conversation_history: String) -> Result<String, String> {
-    println!("Received conversation_history: {}", conversation_history); 
       let parsed_history: Option<Vec<ConversationMessage>> = if conversation_history.is_empty() {
         None
     } else {
@@ -244,7 +243,6 @@ async fn process_ai_message(app_handle: AppHandle, query: String, conversation_h
         }
     };
 
-    println!("Received conversation history: {:?}", parsed_history);  
   // Call the AI processing logic
     match crate::ai_assistant::process_user_query(&app_handle, query, parsed_history).await {
         Ok(response) => {

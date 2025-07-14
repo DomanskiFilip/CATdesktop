@@ -1,5 +1,5 @@
 use serde::{ Deserialize, Serialize };
-use chrono::{ Utc, DateTime }; // <-- Add DateTime import
+use chrono::{ Utc, DateTime, TimeZone };
 use tauri::{ AppHandle, Manager };
 use rand::Rng;
 use crate::ConversationMessage;
@@ -15,76 +15,49 @@ struct LambdaResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct LLMRequest {
-    pub prompt: String,
-    pub user_id: String,
-    pub conversation_id: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct LLMEventRequest {
-    pub request_type: String,     // "create", "update", "delete", "query"
-    pub description: Option<String>,
-    pub date: Option<String>,     // ISO date format
-    pub time: Option<String>,     // 24-hour format (e.g. "14:30")
-    pub duration: Option<i64>,    // minutes
-    pub alarm: Option<bool>,
-    pub recurrence: Option<String>, // RRULE format
-    pub event_id: Option<String>, // For update/delete operations
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 pub struct LLMResponse {
     pub response_text: String,
     pub extracted_events: Option<Vec<ExtractedEvent>>,
-    pub conversation_id: Option<String>,
     pub action_taken: Option<String>,
+    pub confidence: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtractedEvent {
+    pub target_event_id: Option<String>,
     pub description: String,
-    pub time: Option<DateTime<Utc>>, // <-- Now DateTime is imported
+    pub time: Option<DateTime<Utc>>,
     pub alarm: bool,
     pub recurrence: Option<String>,
 }
 
-
-
 pub struct AIAssistantService;
 
 impl AIAssistantService {
-      pub fn new() -> Self {
-          Self
-      }
+    pub fn new() -> Self {
+        Self
+    }
 
-      // Public function to process AI messages //
-      pub async fn process_user_query(&self, query: String, app_handle: &AppHandle,  conversation_history: Option<Vec<ConversationMessage>>) -> Result<LLMResponse, String> {
-        // log user query
+    pub async fn process_user_query(&self, query: String, app_handle: &AppHandle, conversation_history: Option<Vec<ConversationMessage>>) -> Result<LLMResponse, String> {
         println!("📝 User Query: {}", query);
 
-        // Check if we have a canned response for this query
+        // Check for canned responses first
         if let Some(response) = self.get_canned_response(&query) {
             println!("🤖 Using canned response");
             return Ok(response);
         }
 
-        // Create prompt for the LLM
+        // Create enhanced prompt with event IDs
         let location_state = app_handle.state::<tokio::sync::Mutex<UserLocation>>();
-        let prompt = self.create_prompt_with_history(&query, app_handle, conversation_history, location_state).await?;
+        let prompt = self.create_enhanced_prompt(&query, app_handle, conversation_history, location_state).await?;
        
-        // Call Lambda endpoint and get parsed LLM response
         let llm_response = self.invoke_lambda_endpoint(prompt, app_handle).await?;
-
         Ok(llm_response)
     }
 
-      // Method to get canned responses for common queries //
-      fn get_canned_response(&self, query: &str) -> Option<LLMResponse> {
+    fn get_canned_response(&self, query: &str) -> Option<LLMResponse> {
         let lowercase_query = query.to_lowercase();
         let normalized_query = lowercase_query.trim();
-        
-        // random number generator instance
         let mut rng = rand::rng();
 
         match normalized_query {
@@ -95,74 +68,40 @@ impl AIAssistantService {
                     "Hey! I'm your calendar assistant. What can I do for you today?"
                 ];
                 
-                let index = rng.random_range(0..greetings.len()); // <-- Use random_range
+                let index = rng.random_range(0..greetings.len());
                 let greeting = greetings[index];
                       
                 Some(LLMResponse {
                     response_text: greeting.to_string(),
                     extracted_events: None,
-                    conversation_id: None,
-                    action_taken: Some("none".to_string())
-                })
-            },
-            "how are you" | "how are you?" | "how are you doing" | "how are you doing?" => {
-                let responses = [
-                    "I'm functioning well and ready to help organize your calendar! What can I do for you?",
-                    "I'm good, thanks for asking! Would you like to check your schedule or create a new event?",
-                    "All systems operational! I'm here to assist with your calendar needs. What's on your mind?"
-                ];
-                
-                let index = rng.random_range(0..responses.len()); // <-- Use random_range
-                let response = responses[index];
-                
-                Some(LLMResponse {
-                    response_text: response.to_string(),
-                    extracted_events: None,
-                    conversation_id: None,
-                    action_taken: Some("none".to_string())
+                    action_taken: Some("none".to_string()),
+                    confidence: Some(1.0),
                 })
             },
             "what can you do" | "what can you do?" | "help" | "what are your features" => {
                 Some(LLMResponse {
-                    response_text: "I can help you manage your calendar by creating, updating, and finding events. Just ask me things like 'Schedule a meeting tomorrow at 2pm', 'When's my next appointment?', or 'Move my dentist appointment to Friday'.".to_string(),
+                    response_text: "I can help you manage your calendar by creating, updating, moving, and deleting events. I can also check your schedule, provide weather information, and set reminders. Just ask me things like 'Schedule a meeting tomorrow at 2pm', 'When's my next appointment?', 'Move my dentist appointment to Friday', or 'What's the weather like?'".to_string(),
                     extracted_events: None,
-                    conversation_id: None,
-                    action_taken: Some("none".to_string())
+                    action_taken: Some("none".to_string()),
+                    confidence: Some(1.0),
                 })
             },
-            "thanks" | "thank you" | "thanks!" | "thank you!" => {
-                Some(LLMResponse {
-                    response_text: "You're welcome! Let me know if you need any other help with your calendar.".to_string(),
-                    extracted_events: None,
-                    conversation_id: None,
-                    action_taken: Some("none".to_string())
-                })
-            },
-            "bye" | "goodbye" | "see you" | "bye bye" => {
-                Some(LLMResponse {
-                    response_text: "Goodbye! I'm here whenever you need help managing your calendar.".to_string(),
-                    extracted_events: None,
-                    conversation_id: None,
-                    action_taken: Some("none".to_string())
-                })
-            },
-            _ => None, // No canned response found
+            _ => None,
         }
     }
-      
-    // Method to create a prompt for the LLM based on user query and recent events //
-    async fn create_prompt_with_history(&self, query: &str, app_handle: &AppHandle, conversation_history: Option<Vec<ConversationMessage>>, location_state: tauri::State<'_, tokio::sync::Mutex<UserLocation>>,) -> Result<String, String> {
-        // Get recent user events for context (existing logic)
+
+    async fn create_enhanced_prompt(&self, query: &str, app_handle: &AppHandle, conversation_history: Option<Vec<ConversationMessage>>, location_state: tauri::State<'_, tokio::sync::Mutex<UserLocation>>) -> Result<serde_json::Value, String> {
         let recent_events = self.get_recent_events(app_handle).await?;
         
-        // Format events for the prompt (existing logic)
+        // Format events with IDs for AI context
         let events_context = if recent_events.is_empty() {
             "You don't have any upcoming events scheduled.".to_string()
         } else {
             let events_formatted = recent_events.iter()
                 .map(|event| {
                     let time_str = event.time.format("%Y-%m-%d %H:%M").to_string();
-                    format!("- description: {} ; time: {}", event.description, time_str)
+                    format!("- ID: {} | description: {} | time: {} | alarm: {}", 
+                        event.id, event.description, time_str, event.alarm)
                 })
                 .collect::<Vec<String>>()
                 .join("\n");
@@ -170,7 +109,6 @@ impl AIAssistantService {
             format!("Your upcoming events:\n{}", events_formatted)
         };
         
-        // Format conversation history for context
         let conversation_context = if let Some(history) = conversation_history {
             if !history.is_empty() {
                 history.iter()
@@ -188,8 +126,7 @@ impl AIAssistantService {
         let latitude = loc.latitude;
         let longitude = loc.longitude;
 
-        // Fetch weather using coordinates
-        let weather_map = get_weekly_weather(app_handle.clone(), latitude, longitude).await // <-- Pass app_handle
+        let weather_map = get_weekly_weather(app_handle.clone(), latitude, longitude).await
             .map_err(|e| format!("Failed to fetch weather: {}", e))?;
 
         let weather_forecast = if weather_map.is_empty() {
@@ -215,97 +152,91 @@ impl AIAssistantService {
             "user_query": query,
         });
 
-        println!("📝 Generated Prompt: {}", prompt_json);
+        println!("📝 Prompt: {}", prompt_json);
 
-        // Convert prompt_json to String before returning
-        Ok(prompt_json.to_string())
+        Ok(prompt_json)
     }
-      
-    // Method to invoke the Lambda endpoint for LLM processing //
-    async fn invoke_lambda_endpoint(&self, prompt: String, app_handle: &AppHandle) -> Result<LLMResponse, String> {
-      // Check if user is logged in
-      let _user_id = get_current_user_id(app_handle)
-          .map_err(|_| "User is not logged in.".to_string())?;
 
-      // Get API config
-      let config = AppConfig::new()?;
-      let url = format!("{}/llm", config.lambda_base_url);
+    async fn invoke_lambda_endpoint(&self, prompt: serde_json::Value, app_handle: &AppHandle) -> Result<LLMResponse, String> {
+        let _user_id = get_current_user_id(app_handle)
+            .map_err(|_| "User is not logged in.".to_string())?;
 
+        let config = AppConfig::new()?;
+        let url = format!("{}/llm", config.lambda_base_url);
 
-      // Send POST request to Lambda
-      let client = reqwest::Client::new();
-      let resp = client
-          .post(&url)
-          .header("Content-Type", "application/json")
-          .header("x-api-key", config.api_key)
-          .json(&prompt)
-          .send()
-          .await
-          .map_err(|e| format!("Failed to call Lambda: {}", e))?;
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .header("x-api-key", config.api_key)
+            .json(&prompt)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to call Lambda: {}", e))?;
 
-      let text = resp.text().await
-      .map_err(|e| format!("Failed to read Lambda response: {}", e))?;
+        let text = resp.text().await
+            .map_err(|e| format!("Failed to read Lambda response: {}", e))?;
 
-      // Parse Lambda response
-      let lambda_resp: LambdaResponse = serde_json::from_str(&text)
-          .map_err(|e| format!("Failed to parse Lambda response: {}", e))?;
-      
-      // Validate status code
-      if lambda_resp.status_code == 500 {
-        println!("Lambda returned error: {}", lambda_resp.body);
-      }
+        println!("🔍 Raw Lambda response: {}", text);
 
-      // Parse the body for LLM response
-      let body_json: serde_json::Value = serde_json::from_str(&lambda_resp.body)
-          .map_err(|e| format!("Failed to parse response body: {}", e))?;
-      
-      let llm_response: LLMResponse = match serde_json::from_str(&body_json.to_string()) {
-          Ok(response) => response,
-          Err(e) => {
-              println!("❌ Failed to parse as LLMResponse: {} - JSON was: {}", e, body_json);
-              return Err(format!("Failed to parse LLM response: {} - JSON was: {}", e, body_json));
-          }
-      };
+        let lambda_resp: LambdaResponse = serde_json::from_str(&text)
+            .map_err(|e| format!("Failed to parse Lambda response: {}", e))?;
+        
+        if lambda_resp.status_code == 500 {
+            println!("Lambda returned error: {}", lambda_resp.body);
+        }
 
-      Ok(llm_response)
-  }
+        // Try to parse the response as LLMResponse directly
+        let mut llm_response: LLMResponse = serde_json::from_str(&lambda_resp.body)
+            .map_err(|e| {
+                println!("❌ Failed to parse LLM response: {} - JSON was: {}", e, lambda_resp.body);
+                format!("Failed to parse LLM response: {}", e)
+            })?;
 
-  // Helper method to get recent events for the user //
-  async fn get_recent_events(&self, app_handle: &AppHandle) -> Result<Vec<CalendarEvent>, String> {
-      // Use the existing get_events function which handles decryption
-      let events_json = get_events(app_handle)
-          .map_err(|e| format!("Failed to get events: {}", e))?;
-      
-      // Parse the JSON strings back to CalendarEvent structs
-      let events: Result<Vec<CalendarEvent>, _> = events_json
-          .into_iter()
-          .map(|json_str| {
-              serde_json::from_str(&json_str)
-                  .map_err(|e| format!("Failed to parse event JSON: {}", e))
-          })
-          .collect();
-      
-      let mut events = events?;
-      
-      // Filter for recent/upcoming events (within the last 24 hours to next 30 days)
-      let now = chrono::Local::now();
-      let recent_cutoff = now - chrono::Duration::hours(24);
-      let future_cutoff = now + chrono::Duration::days(30);
-      
-      events.retain(|event| {
-          !event.deleted && 
-          event.time >= recent_cutoff && 
-          event.time <= future_cutoff
-      });
-      
-      // Sort by time
-      events.sort_by(|a, b| a.time.cmp(&b.time));
-      
-      // Limit to reasonable number for AI context
-      events.truncate(20);
-      
-      Ok(events)
-  }
+        // treat AI times as local times, not UTC
+        if let Some(ref mut events) = llm_response.extracted_events {
+            for event in events.iter_mut() {
+                if let Some(utc_time) = event.time {
+                    // Convert the UTC time to a naive datetime and then treat it as local
+                    let naive_time = utc_time.naive_utc();
+                    let local_time = chrono::Local.from_local_datetime(&naive_time).unwrap();
+                    event.time = Some(local_time.with_timezone(&Utc));
+                }
+            }
+        }    
+
+        Ok(llm_response)
+    }
+
+    async fn get_recent_events(&self, app_handle: &AppHandle) -> Result<Vec<CalendarEvent>, String> {
+        let events_json = get_events(app_handle)
+            .map_err(|e| format!("Failed to get events: {}", e))?;
+        
+        let events: Result<Vec<CalendarEvent>, _> = events_json
+            .into_iter()
+            .map(|json_str| {
+                serde_json::from_str(&json_str)
+                    .map_err(|e| format!("Failed to parse event JSON: {}", e))
+            })
+            .collect();
+        
+        let mut events = events?;
+        
+        let now = chrono::Local::now();
+        let recent_cutoff = now - chrono::Duration::hours(24);
+        let future_cutoff = now + chrono::Duration::days(30);
+        
+        events.retain(|event| {
+            !event.deleted && 
+            event.time >= recent_cutoff && 
+            event.time <= future_cutoff
+        });
+        
+        events.sort_by(|a, b| a.time.cmp(&b.time));
+        events.truncate(20);
+        
+        Ok(events)
+    }
 }
 
 pub async fn process_user_query(app_handle: &AppHandle, query: String, conversation_history: Option<Vec<ConversationMessage>>) -> Result<LLMResponse, String> {

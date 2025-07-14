@@ -268,7 +268,7 @@ onMounted(async () => {
 }
 
 #side-bar button:active {
-  transform: scale(1.2);
+  transform: scale(1.1);
 }
 
 #side-bar button::before {
@@ -300,7 +300,7 @@ onMounted(async () => {
 
 #side-bar button:hover {
 background-color: var(--color-theme);
-border: none;
+border-color: var(--color-theme);
 }
 
 #side-bar button:hover svg {
@@ -324,7 +324,15 @@ stroke: var(--color-dark);
 
 .moreInfo.active {
   opacity: 1;
-  clip-path: inset(0 0 0 0)
+  clip-path: inset(0 0 0 0);
+}
+
+#side-bar button:hover .moreInfo{
+  color: var(--color-theme);
+}
+
+.moreInfo:hover {
+  color: var(--color-theme);
 }
 
 /* main content styles */
