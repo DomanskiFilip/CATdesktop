@@ -14,14 +14,16 @@ use base64::Engine;
 use tauri::Emitter;
 
 pub struct GoogleSyncService {
+    config: Arc<crate::api_utils::AppConfig>,
     client: Client,
     running: Arc<AtomicBool>,
     task_handle: Option<JoinHandle<()>>,
 }
 
 impl GoogleSyncService {
-    pub fn new() -> Self {
+    pub fn new(config: Arc<crate::api_utils::AppConfig>) -> Self {
         Self {
+            config,
             client: Client::new(),
             running: Arc::new(AtomicBool::new(false)),
             task_handle: None,
@@ -53,6 +55,7 @@ impl GoogleSyncService {
         self.running.store(true, Ordering::SeqCst);
 
         let running = Arc::clone(&self.running);
+        let config = Arc::clone(&self.config);
         let client = self.client.clone();
         let app_handle_ref = Arc::clone(&app_handle_arc);
 
@@ -64,6 +67,7 @@ impl GoogleSyncService {
             let mut interval = time::interval(sync_interval);
 
             let temp_service = GoogleSyncService {
+                config,
                 client,
                 running: Arc::new(AtomicBool::new(true)),
                 task_handle: None,

@@ -2,6 +2,7 @@ use dotenvy::dotenv;
 use std::env;
 use mac_address::get_mac_address;
 use serde_json::Value;
+use std::sync::Arc;
 
 pub struct AppConfig {
     pub api_key: String,
@@ -18,8 +19,8 @@ impl AppConfig {
         let lambda_base_url = env::var("LAMBDA_BASE_URL")
             .unwrap_or_else(|_| "https://ywaixwivt3.execute-api.eu-west-2.amazonaws.com/prod".to_string());
         
-        let enable_database_sync = false;
-        let enable_google_sync = false;
+        let enable_database_sync = true;
+        let enable_google_sync = true;
 
         Ok(Self {
             api_key,
@@ -43,3 +44,5 @@ pub fn get_device_info() -> Value {
         "mac_address": mac_address
     })
 }
+
+pub type SharedAppConfig = Arc<AppConfig>;

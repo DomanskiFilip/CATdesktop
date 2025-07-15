@@ -11,17 +11,15 @@ use tokio::task::JoinHandle;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub struct DbSyncService {
-    config: AppConfig,
+    config: Arc<AppConfig>,
     client: Client,
     running: Arc<AtomicBool>,
     task_handle: Option<JoinHandle<()>>,
 }
 
 impl DbSyncService {
-    pub fn new() -> Result<Self, String> {
-        let config = AppConfig::new().map_err(|e| format!("Failed to load config: {}", e))?;
+    pub fn new(config: Arc<AppConfig>) -> Result<Self, String> {
         let client = Client::new();
-        
         Ok(Self {
             config,
             client,
@@ -63,7 +61,7 @@ impl DbSyncService {
         
         // Create clones for the background task
         let running = Arc::clone(&self.running);
-        let config = self.config.clone();
+        let config = Arc::clone(&self.config);
         let client = self.client.clone();
         let app_handle_ref = Arc::clone(&app_handle_arc);
         
@@ -360,17 +358,5 @@ impl DbSyncService {
         }
         
         Ok(())
-    }
-}
-
-// config cloned for background task service for syncing events //
-impl Clone for AppConfig {
-    fn clone(&self) -> Self {
-        Self {
-            api_key: self.api_key.clone(),
-            lambda_base_url: self.lambda_base_url.clone(),
-            enable_database_sync: self.enable_database_sync,
-            enable_google_sync: self.enable_google_sync,
-        }
     }
 }
