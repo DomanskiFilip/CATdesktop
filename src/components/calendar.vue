@@ -38,11 +38,8 @@
              <button class="delete-btn" @click="deleteEvent(hour)" title="delete event" v-if="hasEventAtHour(hour) && !isInPast(hour) && !isNow(hour)">
               <svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z"/></svg>
              </button>
-             <button class="smart-features-btn"
-                    @click="openSmartFeatures(hour)"
-                    v-if="hasEventAtHour(hour) && !isInPast(hour) && !isNow(hour)"
-                    title="Smart Features">
-               <svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 0 24 24" width="20px" fill="var(--color-text)"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 17.93c-3.95-.49-7.07-3.85-7.07-7.93 0-.62.08-1.21.21-1.79l4.86 4.86v.01a1.5 1.5 0 002.12 2.12l.01-.01 4.86 4.86c-.58.13-1.17.21-1.79.21zm6.36-2.1l-4.86-4.86a1.5 1.5 0 00-2.12-2.12l-4.86-4.86c.58-.13 1.17-.21 1.79-.21 4.08 0 7.44 3.12 7.93 7.07.01.62-.07 1.21-.21 1.79z"/></svg>
+             <button class="smart-features-btn" @click="openSmartFeatures(hour)" title="Smart Features" v-if="hasEventAtHour(hour) && !isInPast(hour) && !isNow(hour)">
+               <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M323-160q-11 0-20.5-5.5T288-181l-78-139h58l40 80h92v-40h-68l-40-80H188l-57-100q-2-5-3.5-10t-1.5-10q0-4 5-20l57-100h104l40-80h68v-40h-92l-40 80h-58l78-139q5-10 14.5-15.5T323-800h97q17 0 28.5 11.5T460-760v160h-60l-40 40h100v120h-88l-40-80h-92l-40 40h108l40 80h112v200q0 17-11.5 28.5T420-160h-97Zm217 0q-17 0-28.5-11.5T500-200v-200h112l40-80h108l-40-40h-92l-40 80h-88v-120h100l-40-40h-60v-160q0-17 11.5-28.5T540-800h97q11 0 20.5 5.5T672-779l78 139h-58l-40-80h-92v40h68l40 80h104l57 100q2 5 3.5 10t1.5 10q0 4-5 20l-57 100H668l-40 80h-68v40h92l40-80h58l-78 139q-5 10-14.5 15.5T637-160h-97Z"/></svg>
             </button>
              <button class="expand" @click="toggleExpand(hour)" title="expand/collapse">
               <svg v-if="!expand[hour]" xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M480-344 240-584l56-56 184 184 184-184 56 56-240 240Z"/></svg>
@@ -663,8 +660,16 @@ onMounted(async () => {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1rem;
-  width: 64rem;
-  height: 30rem;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+}
+
+#calendar::-webkit-scrollbar {
+  display: none; /* Hide scrollbar for WebKit browsers */
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
 }
 
 /* calendar styles */
@@ -672,13 +677,19 @@ onMounted(async () => {
   background: transparent;
   border-radius: 10px;
   padding: 1rem;
-  width: 32rem;
+  width: 100%;
+  min-width: 490px;
+  height: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 #calendar-header {
   display: flex;
   gap: 0.5rem;
   margin-bottom: 1rem;
+  width: 100%;
 }
 
 #calendar-header button {
@@ -702,10 +713,11 @@ onMounted(async () => {
 
 #calendar-grid {
   display: grid;
-  grid-template-columns: repeat(7, 4rem);
-  justify-content: center;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  justify-items: center;
   align-items: center;
   gap: 0.5rem;
+  width: 100%;
 }
 
 .days-of-week {
@@ -717,14 +729,18 @@ onMounted(async () => {
   border: 1px solid var(--color-border);
   border-radius: 50%;
   padding: 0.5rem;
-  width: 3rem;
-  height: 3rem;
+  width: 50%;
+  height: 100%;
+  aspect-ratio: 1 / 1;
+  min-width: 3rem;
+  min-height: 3rem;
+  max-width: 4rem;
+  max-height: 4rem;
   cursor: pointer;
   display: flex;
   justify-content: center;
   align-items: center;
   position: relative;
-  margin-left: 8px;
 }
 
 .calendar-cell:hover {
@@ -771,7 +787,7 @@ onMounted(async () => {
   background: var(--color-main);
   border-radius: 10px;
   margin: 1rem;
-  width: 31rem;
+  width: 95%;
   height: 29rem;
   display: flex;
   flex-direction: column;
@@ -785,7 +801,8 @@ margin-bottom: 1rem;
 }
 
 #day-schedule-container {
-  border: 1px solid var(--color-theme);
+  box-shadow: 0 0 10px var(--color-theme);
+  padding: 0.5rem;
   border-radius: 10px;
   width: 100%;
   height: 90%;

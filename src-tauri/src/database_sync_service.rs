@@ -345,7 +345,7 @@ impl DbSyncService {
                 "description": event_data["description"],
                 "time": event_data["time"],
                 "alarm": event_data["alarm"],
-                "deleted": event_data["deleted"],
+                "deleted": event_data.get("deleted").and_then(|v| v.as_bool()).unwrap_or(false),
                 "synced": true,
                 "synced_google": event_data["synced_google"],
                 "recurrence": event_data.get("recurrence").and_then(|v| v.as_str()).map(String::from)
