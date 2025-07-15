@@ -67,7 +67,7 @@ impl DbSyncService {
         
         // Start periodic checking in a separate task
         self.task_handle = Some(tokio::spawn(async move {
-            let sync_interval = Duration::from_secs(300); // 5 minutes
+            let sync_interval = Duration::from_secs(240); // 4 minutes
             let mut interval = time::interval(sync_interval);
             
             // Create a temporary service instance for the background task
@@ -101,9 +101,6 @@ impl DbSyncService {
                 if let Err(e) = temp_service.sync_from_dynamodb(&app_handle_ref, user_logged_in).await {
                   eprintln!("Sync from DynamoDB failed: {}", e); 
                 }
-
-                // Sleep for 5 minutes before next sync
-                tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
             }
             
             println!("DB sync background task completed");
@@ -328,35 +325,34 @@ impl DbSyncService {
 
     // Helper method -> merge remote events into local database //
     async fn merge_remote_events(&self, app_handle: &AppHandle, remote_events: &[Value]) -> Result<(), String> {
-        let _conn = get_db_connection(app_handle)
+        let conn = get_db_connection(app_handle)
             .map_err(|e| format!("Database connection failed: {}", e))?;
-        
-        // Get today's date at midnight
-        let today = chrono::Utc::now().date_naive().and_hms_opt(0, 0, 0).unwrap();
 
         for event_data in remote_events {
-            // Parse event time as chrono::DateTime
-            if let Some(time_str) = event_data["time"].as_str() {
-                if let Ok(event_time) = chrono::DateTime::parse_from_rfc3339(time_str) {
-                    if event_time.naive_utc() < today {
-                        continue; // Skip past events
-                    }
-                }
+            let event_id = event_data["id"].as_str().unwrap_or("");
+            let user_id = event_data["email"].as_str().unwrap_or("");
+            let mut query = conn.prepare("SELECT COUNT(*) FROM events WHERE id = ?1 AND user_id = ?2")
+                .map_err(|e| format!("Failed to prepare check statement: {}", e))?;
+            let exists: i64 = query.query_row([event_id, user_id], |row| row.get(0))
+                .map_err(|e| format!("Failed to check for existing event: {}", e))?;
+            if exists > 0 {
+                continue; // Skip if already exists
             }
+
             let event_json = json!({
-            "id": event_data["id"],
-            "user_id": event_data["email"],
-            "description": event_data["description"],
-            "time": event_data["time"],
-            "alarm": event_data["alarm"],
-            "deleted": event_data["deleted"],
-            "synced": true,  // Mark as synced since it came from the server
-            "synced_google": event_data["synced_google"],
-            "recurrence": event_data.get("recurrence").and_then(|v| v.as_str()).map(String::from)
-          });
-          let _ = save_event(app_handle, event_json.to_string());
+                "id": event_data["id"],
+                "user_id": event_data["email"],
+                "description": event_data["description"],
+                "time": event_data["time"],
+                "alarm": event_data["alarm"],
+                "deleted": event_data["deleted"],
+                "synced": true,
+                "synced_google": event_data["synced_google"],
+                "recurrence": event_data.get("recurrence").and_then(|v| v.as_str()).map(String::from)
+            });
+            let _ = save_event(app_handle, event_json.to_string());
         }
-        
+
         Ok(())
     }
 }

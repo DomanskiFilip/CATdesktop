@@ -61,9 +61,9 @@ impl GoogleSyncService {
 
         self.task_handle = Some(tokio::spawn(async move {
             // Add a longer initial delay before first periodic sync
-            tokio::time::sleep(Duration::from_secs(20)).await; // Wait 1 minute after initial sync
+            tokio::time::sleep(Duration::from_secs(20)).await; // Wait 20s after initial sync
             
-            let sync_interval = Duration::from_secs(300); // 5 minutes
+            let sync_interval = Duration::from_secs(240); // 4 minutes
             let mut interval = time::interval(sync_interval);
 
             let temp_service = GoogleSyncService {
@@ -95,8 +95,6 @@ impl GoogleSyncService {
                 if let Err(e) = temp_service.sync_from_google(&app_handle_ref, user_logged_in).await {
                     eprintln!("Sync from Google failed: {}", e);
                 }
-
-                tokio::time::sleep(Duration::from_secs(240)).await; // Wait for 4 minutes before next sync
             }
             println!("Google sync background task completed");
         }));
@@ -124,9 +122,31 @@ impl GoogleSyncService {
             .map_err(|e| format!("Failed to read token: {}", e))?;
         let token_data: Value = serde_json::from_str(&token_json)
             .map_err(|e| format!("Failed to parse token JSON: {}", e))?;
-        let access_token = token_data.get("access_token")
+        let mut access_token = token_data.get("access_token")
             .and_then(|v| v.as_str())
-            .ok_or("No access_token in token file")?;
+            .ok_or("No access_token in token file")?
+            .to_string();
+
+        let refresh_token = token_data.get("refresh_token")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        // Load client_id and client_secret from google_client.json
+        let google_client_path = std::env::current_dir()
+            .map_err(|e| format!("Failed to get current dir: {}", e))?
+            .join("google_client.json");
+        let google_client_json = std::fs::read_to_string(&google_client_path)
+            .map_err(|e| format!("Failed to read google_client.json: {}", e))?;
+        let google_client_data: Value = serde_json::from_str(&google_client_json)
+            .map_err(|e| format!("Failed to parse google_client.json: {}", e))?;
+        let installed = google_client_data.get("installed")
+            .ok_or("No 'installed' section in google_client.json")?;
+        let client_id = installed.get("client_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let client_secret = installed.get("client_secret")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
         // Get unsynced_google events
         let events = {
@@ -193,7 +213,7 @@ impl GoogleSyncService {
         
         // First, fetch events from Google Calendar for this hour
         let events_url = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
-        let events_response = tokio::time::timeout(
+        let mut events_response = tokio::time::timeout(
             Duration::from_secs(15),
             self.client
                 .get(events_url)
@@ -205,7 +225,27 @@ impl GoogleSyncService {
                 ])
                 .send()
         ).await.map_err(|e| format!("Request timed out: {}", e))?.map_err(|e| format!("Failed to get events for hour: {}", e))?;
-        
+
+        // If unauthorized, refresh token and retry once
+        if events_response.status() == reqwest::StatusCode::UNAUTHORIZED && !refresh_token.is_empty() {
+            if let Ok(new_token) = self.refresh_google_access_token(refresh_token, client_id, client_secret).await {
+                self.update_access_token_file(&token_path, &new_token)?;
+                access_token = new_token;
+                events_response = tokio::time::timeout(
+                    Duration::from_secs(15),
+                    self.client
+                        .get(events_url)
+                        .bearer_auth(access_token.trim())
+                        .query(&[
+                            ("timeMin", event_hour_start.to_rfc3339().as_str()),
+                            ("timeMax", event_hour_end.to_rfc3339().as_str()),
+                            ("singleEvents", "true")
+                        ])
+                        .send()
+                ).await.map_err(|e| format!("Request timed out: {}", e))?.map_err(|e| format!("Failed to get events for hour: {}", e))?;
+            }
+        }
+
         if events_response.status().is_success() {
             let json: serde_json::Value = events_response.json().await.map_err(|e| e.to_string())?;
             
@@ -320,7 +360,6 @@ impl GoogleSyncService {
                 .send()
         ).await.map_err(|e| format!("Request timed out: {}", e))?.map_err(|e| format!("Request failed: {}", e))?;
 
-        // Improved error handling to display server messages
         if !response.status().is_success() {
             let status = response.status();
             let error_body = response.text().await.unwrap_or_else(|_| "Could not read error response".to_string());
@@ -367,23 +406,24 @@ impl GoogleSyncService {
                           .and_hms_opt(event_time.hour(), 59, 59)
                           .unwrap_or_else(|| event_time.naive_utc());
                           
-                      let mut same_hour_query = conn.prepare(
+                      let mut same_event_query = conn.prepare(
                           "SELECT COUNT(*) FROM events 
                           WHERE user_id = ?1 
                           AND time >= ?2 
                           AND time <= ?3 
+                          AND description = ?4
                           AND deleted = 0"
-                      ).map_err(|e| format!("Failed to prepare same hour check: {}", e))?;
-                      
-                      let same_hour_count: i64 = same_hour_query.query_row(
-                          (&username, &event_hour_start.to_string(), &event_hour_end.to_string()), 
+                      ).map_err(|e| format!("Failed to prepare same event check: {}", e))?;
+
+                      let same_event_count: i64 = same_event_query.query_row(
+                          (&username, &event_hour_start.to_string(), &event_hour_end.to_string(), &summary), 
                           |row| row.get(0)
-                      ).map_err(|e| format!("Failed to check for same hour events: {}", e))?;
-                      
-                      if same_hour_count > 0 {
-                          println!("Skipping Google event at {} as there's already an event at the same hour", 
+                      ).map_err(|e| format!("Failed to check for same event: {}", e))?;
+
+                      if same_event_count > 0 {
+                          println!("Skipping Google event at {} as there's already a matching local event", 
                                   event_time.format("%Y-%m-%d %H:%M:%S"));
-                          continue; // Skip if there's already an event at the same hour
+                          continue; // Skip if there's already a matching event
                       }
                   }
                   
@@ -428,5 +468,54 @@ impl GoogleSyncService {
         }
 
         Ok(())
+    }
+
+    /// Refreshes the Google access token using the refresh token.
+    pub async fn refresh_google_access_token(
+        &self,
+        refresh_token: &str,
+        client_id: &str,
+        client_secret: &str,
+    ) -> Result<String, String> {
+        let url = "https://oauth2.googleapis.com/token";
+        let params = [
+            ("client_id", client_id),
+            ("client_secret", client_secret),
+            ("refresh_token", refresh_token),
+            ("grant_type", "refresh_token"),
+        ];
+
+        let resp = self.client
+            .post(url)
+            .form(&params)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to send refresh request: {}", e))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!("Google token refresh failed: {} - {}", status, body));
+        }
+
+        let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+        let access_token = json.get("access_token")
+            .and_then(|v| v.as_str())
+            .ok_or("No access_token in response")?;
+        Ok(access_token.to_string())
+    }
+
+    /// Updates the token file with the new access token.
+    pub fn update_access_token_file(
+        &self,
+        token_path: &std::path::Path,
+        new_access_token: &str,
+    ) -> Result<(), String> {
+        let mut token_json: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(token_path).map_err(|e| e.to_string())?
+        ).map_err(|e| e.to_string())?;
+
+        token_json["access_token"] = serde_json::Value::String(new_access_token.to_string());
+        std::fs::write(token_path, token_json.to_string()).map_err(|e| e.to_string())
     }
 }

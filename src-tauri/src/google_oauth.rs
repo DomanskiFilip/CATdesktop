@@ -84,7 +84,6 @@ pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String,
                                         <html><body><h2>Authentication complete. You can close this window.</h2></body></html>";
                                     stream.write_all(response.as_bytes()).map_err(|e| e.to_string())?;
                                     code = value.to_string();
-                                    println!("Extracted code: {}", code);
                                     break 'outer;
                                 }
                             }
@@ -99,7 +98,6 @@ pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String,
         }
     }
     let code = urlencoding::decode(&code).map_err(|e| e.to_string())?.to_string();
-    println!("Exchanging code for token...");
     let token_result: oauth2::StandardTokenResponse<oauth2::EmptyExtraTokenFields, BasicTokenType> = client
         .exchange_code(AuthorizationCode::new(code))
         .set_pkce_verifier(pkce_verifier)
@@ -112,7 +110,6 @@ pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String,
 
     let access_token = token_result.access_token().secret().to_string();
     let refresh_token = token_result.refresh_token().map(|t| t.secret().to_string());
-    println!("Token exchange complete, writing access_token.txt...");
     // Get the current user's email (user_id)
     let user_id = get_current_user_id(app_handle)?;
 

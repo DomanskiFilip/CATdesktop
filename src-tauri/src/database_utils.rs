@@ -145,7 +145,6 @@ pub fn init_db(app_handle: &AppHandle) -> Result<(), SqliteError> {
 
 // Function to save events //
 pub fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), String> {
-  println!("📝 Saving event JSON: {}", event_json);
     let mut event = CalendarEvent::from_json(&event_json)?;
 
     // Get current user ID and assign to event
@@ -156,21 +155,9 @@ pub fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), Stri
 
     event.user_id = user_id.clone();
 
-    // Encrypt the event description before saving
-    let encrypted_description = if !event.description.is_empty() {
-        let encryption_result = encrypt_user_data(
-            app_handle, 
-            &user_id, 
-            event.description.as_bytes()
-        );
-        
-        match encryption_result {
-            Ok(encrypted) => general_purpose::STANDARD.encode(encrypted),
-            Err(e) => return Err(format!("Failed to encrypt event data: {}", e))
-        }
-    } else {
-        String::new()
-    };
+    // Extract synced and deleted status from original JSON to determine if they were explicitly provided
+    let json_value: serde_json::Value = serde_json::from_str(&event_json)
+      .map_err(|_| "Failed to re-parse event JSON".to_string())?;
 
     let mut conn = get_db_connection(app_handle)
         .map_err(|e| format!("Connection error: {}", e.to_string()))?;
@@ -178,10 +165,6 @@ pub fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), Stri
     let tx = conn.transaction()
         .map_err(|e| format!("Transaction error: {}", e.to_string()))?;
 
-    // Extract synced and deleted status from original JSON to determine if they were explicitly provided
-    let json_value: serde_json::Value = serde_json::from_str(&event_json)
-      .map_err(|_| "Failed to re-parse event JSON".to_string())?;
-    
     // Check if this is an existing event being updated
     let is_existing_event = {
         let existing_event_query = tx.prepare("SELECT id FROM events WHERE id = ? AND user_id = ?");
@@ -192,23 +175,31 @@ pub fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), Stri
             Err(_) => false
         }
     };
-    
+
     // Use the values from JSON if present, otherwise determine based on whether it's a new or existing event
     let synced = if json_value.get("synced").is_some() {
-        // If synced is explicitly provided in JSON, use that value
         json_value.get("synced").and_then(|v| v.as_bool()).unwrap_or(false)
     } else {
         !is_existing_event
     };
 
     let synced_google = if json_value.get("synced_google").is_some() {
-        // If synced_google is explicitly provided in JSON, use that value
         json_value.get("synced_google").and_then(|v| v.as_bool()).unwrap_or(false)
     } else {
         !is_existing_event
     };
-    
+
     let deleted = json_value.get("deleted").and_then(|v| v.as_bool()).unwrap_or(false);
+
+
+    let encrypted_description = match encrypt_user_data(
+        app_handle, 
+        &user_id, 
+        event.description.as_bytes()
+    ) {
+        Ok(encrypted) => general_purpose::STANDARD.encode(encrypted),
+        Err(e) => return Err(format!("Failed to encrypt event data: {}", e)),
+    };
 
     println!("📝 Parsed event: {:?}", event);
 
@@ -224,7 +215,7 @@ pub fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), Stri
             synced,
             synced_google,
             deleted,
-            event.recurrence.as_deref(), // If recurrence is None, it will be stored as NULL in the database
+            event.recurrence.as_deref(),
         ),
     ).map_err(|e| format!("Execute error: {}", e.to_string()))?;
 
@@ -269,8 +260,6 @@ pub fn get_events(app_handle: &AppHandle) -> Result<Vec<String>, SqliteError> {
             continue;
         }
         
-        // Decrypt the description
-        if !event.description.is_empty() {
             let decoded = match general_purpose::STANDARD.decode(&event.description) {
                 Ok(decoded) => decoded,
                 Err(_) => {
@@ -290,7 +279,7 @@ pub fn get_events(app_handle: &AppHandle) -> Result<Vec<String>, SqliteError> {
                     eprintln!("Failed to decrypt event data: {}", e);
                 }
             }
-        }
+
 
         events.push(event);
     }
