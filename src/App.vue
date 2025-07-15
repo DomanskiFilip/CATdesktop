@@ -45,7 +45,7 @@
         <themes />
         <h2>CONNECT WITH GOOGLE:</h2>
         <hr>
-        <GoogleOauth />
+        <googleOauth />
         <h2>LOCATION:</h2>
         <hr>
         <location @updateCoordinates="handleLocationUpdate" @updateLocationName="handleLocationNameUpdate" />
@@ -80,8 +80,8 @@
 import { ref, watch, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, emit } from '@tauri-apps/api/event'
-import TitleBar from './components/titleBar.vue'
-import GoogleOauth from './components/googleOauth.vue'
+import titleBar from './components/titleBar.vue'
+import googleOauth from './components/googleOauth.vue'
 import location from './components/location.vue'
 import Login from './components/login.vue'
 import register from './components/register.vue'

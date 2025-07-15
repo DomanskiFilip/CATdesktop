@@ -38,6 +38,12 @@
              <button class="delete-btn" @click="deleteEvent(hour)" title="delete event" v-if="hasEventAtHour(hour) && !isInPast(hour) && !isNow(hour)">
               <svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z"/></svg>
              </button>
+             <button class="smart-features-btn"
+                    @click="openSmartFeatures(hour)"
+                    v-if="hasEventAtHour(hour) && !isInPast(hour) && !isNow(hour)"
+                    title="Smart Features">
+               <svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 0 24 24" width="20px" fill="var(--color-text)"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 17.93c-3.95-.49-7.07-3.85-7.07-7.93 0-.62.08-1.21.21-1.79l4.86 4.86v.01a1.5 1.5 0 002.12 2.12l.01-.01 4.86 4.86c-.58.13-1.17.21-1.79.21zm6.36-2.1l-4.86-4.86a1.5 1.5 0 00-2.12-2.12l-4.86-4.86c.58-.13 1.17-.21 1.79-.21 4.08 0 7.44 3.12 7.93 7.07.01.62-.07 1.21-.21 1.79z"/></svg>
+            </button>
              <button class="expand" @click="toggleExpand(hour)" title="expand/collapse">
               <svg v-if="!expand[hour]" xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M480-344 240-584l56-56 184 184 184-184 56 56-240 240Z"/></svg>
               <svg v-else xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M480-528 296-344l-56-56 240-240 240 240-56 56-184-184Z"/></svg>
@@ -58,6 +64,7 @@
         </span>
       </section>
     </section>
+    <smartFeatures v-if="showSmartFeatures" :event="smartFeaturesEvent" @close="closeSmartFeatures"/>
    </section>
 </template>
 
@@ -66,7 +73,7 @@ import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import linkifyStr from 'linkify-string'
-
+import smartFeatures from './smartFeatures.vue'
 
 // interface for calendar days
 interface CalendarDay {
@@ -110,7 +117,8 @@ const expand = ref<Record<number, boolean>>({})
 const hourInputs = ref<Record<string, string>>({});
 const activeEditor = ref<string | null>(null)
 const weather = ref<Record<string, DailyWeather> | 'no data'>('no data')
-
+const showSmartFeatures = ref(false)
+const smartFeaturesEvent = ref<CalendarEvent | null>(null)
 
 // == Utility functions == //
 // utility function -> check if its current day
@@ -270,6 +278,25 @@ const weatherIcon = (desc: string) => {
   // Default: Rainbow SVG
   return `<svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M40-280q0-91 34.5-171T169-591q60-60 140-94.5T480-720q91 0 171 34.5T791-591q60 60 94.5 140T920-280h-80q0-149-105.5-254.5T480-640q-149 0-254.5 105.5T120-280H40Zm160 0q0-116 82-198t198-82q116 0 198 82t82 198h-80q0-83-58.5-141.5T480-480q-83 0-141.5 58.5T280-280h-80Z"/></svg>`;
 };
+
+
+const openSmartFeatures = (hour: number) => {
+  const event = findEventAtHour(hour)
+  if (!event) return
+
+  if (showSmartFeatures.value && smartFeaturesEvent.value?.id === event.id) {
+    showSmartFeatures.value = false
+    smartFeaturesEvent.value = null
+  } else {
+    smartFeaturesEvent.value = event
+    showSmartFeatures.value = true
+  }
+}
+
+const closeSmartFeatures = () => {
+  showSmartFeatures.value = false
+  smartFeaturesEvent.value = null
+}
 
 // == Event logic == //
 // Map to keep track of pending saves for debouncing
@@ -863,14 +890,14 @@ margin: 0;
 padding: 0.1rem;
 }
 
-.alarm {
-background: transparent;
-border: none;
-cursor: pointer;
-padding: 0.2rem;
-display: flex;
-align-items: center;
-justify-content: center;
+.hour-wrapper button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .alarm.in-the-past {
@@ -886,28 +913,10 @@ justify-content: center;
 }
 
 .delete-btn {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 0.2rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   color: var(--color-text);
 }
 
-.delete-btn:hover {
-  color: #dc3545;
-}
-
 .expand {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 0.2rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   margin-left: auto;
 }
 </style>
