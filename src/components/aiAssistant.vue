@@ -326,6 +326,7 @@ const acceptSuggestion = async (messageIndex: number) => {
       await handleUpdateEvent(suggestion, message);
     } else {
       await createNewEvent(suggestion);
+      message.eventAccepted = true;
     }
     try {
       await invoke('trigger_sync');
