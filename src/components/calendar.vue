@@ -135,7 +135,7 @@ const isToday = (date: CalendarDay) => {
          date.date.getFullYear() === today.getFullYear()
 }
 
-// utility function -> check if hour is in the past
+// Utility function -> check if hour is in the past
 const isInPast = (hour: number): boolean => {
   const currently = new Date()
   // If it's a future date, nothing is in the past
@@ -164,7 +164,7 @@ const isInPast = (hour: number): boolean => {
   return false
 }
 
-// utility function -> check if hour is the current hour
+// Utility function -> check if hour is the current hour
 const isNow = (hour: number): boolean => {
   if (currentDate.value.getDate() === now.getDate() && 
       currentDate.value.getMonth() === now.getMonth() && 
@@ -176,32 +176,7 @@ const isNow = (hour: number): boolean => {
   return false
 }
 
-// utility function -> choose year for calendar
-const changeYear = async (newYear: number) => {
-  if (newYear && !isNaN(Number(newYear))) {
-    currentYear.value = Number(newYear)
-    currentDate.value.setFullYear(currentYear.value)
-    renderCalendar()
-    showYearPicker.value = false
-  }
-}
-
-watch(showYearPicker, (val) => {
-  if (val) {
-    setTimeout(() => {
-      const list = document.getElementById('year-picker-dropdown')
-      if (list) {
-        const index = yearsList.indexOf(currentYear.value)
-        const item = list.querySelector('li')
-        const itemHeight = item ? item.offsetHeight : 32 // fallback height
-        // Scroll so the selected year is at the top
-        list.scrollTop = (index - 1) * itemHeight
-      }
-    }, 0)
-  }
-})
-
-// utility function -> toggle expand state for a specific hour
+// Utility function -> toggle expand state for a specific hour
 const toggleExpand = (hour: number) => {
   expand.value[hour] = !expand.value[hour]
 }
@@ -218,24 +193,24 @@ const findEventAtHour = (hour: number, date: Date = currentDate.value): Calendar
   })
 }
 
-//  utility function -> Get event description for a specific hour
+//  Utility function -> Get event description for a specific hour
 const getEventDescription = (hour: number) => {
   const existingEvent = findEventAtHour(hour)
   return existingEvent ? existingEvent.description : ''
 }
 
-// utility function -> Check if alarm is on for a specific hour
+// Utility function -> Check if alarm is on for a specific hour
 const isAlarmOn = (hour: number): boolean => {
   const existingEvent = findEventAtHour(hour)
   return existingEvent ? existingEvent.alarm : false
 }
 
-// utility function -> Check if there is an event at a specific hour for frontend display
+// Utility function -> Check if there is an event at a specific hour for frontend display
 const hasEventAtHour = (hour: number) => {
   return !!findEventAtHour(hour)
 }
 
-// utility function -> Get events for specific date
+// Utility function -> Get events for specific date
 const getEventsForDate = (date: CalendarDay) => {
   if (!date.date) return []
   return events.value.filter(event => {
@@ -246,7 +221,7 @@ const getEventsForDate = (date: CalendarDay) => {
   })
 }
 
-// utility function -> format text with linkify
+// Utility function -> format text with linkify
 const formatLinkedText = (text: string): string => {
   if (!text) return '';
   
@@ -258,7 +233,7 @@ const formatLinkedText = (text: string): string => {
   });
 }
 
-// Utility function to get weather description for a date string
+// Utility function -> get weather description for a date string
 const getWeatherDescription = (dateStr: string | Date): string => {
   if (weather.value === 'no data') return '';
 
@@ -279,6 +254,7 @@ const getWeatherDescription = (dateStr: string | Date): string => {
   return weather.value[key]?.weather || '';
 };
 
+// Utility function -> get weather icon based on description
 const weatherIcon = (desc: string) => {
   if (!desc) return '';
   const lowerDesc = desc.toLowerCase();
@@ -310,7 +286,7 @@ const weatherIcon = (desc: string) => {
   return `<svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M40-280q0-91 34.5-171T169-591q60-60 140-94.5T480-720q91 0 171 34.5T791-591q60 60 94.5 140T920-280h-80q0-149-105.5-254.5T480-640q-149 0-254.5 105.5T120-280H40Zm160 0q0-116 82-198t198-82q116 0 198 82t82 198h-80q0-83-58.5-141.5T480-480q-83 0-141.5 58.5T280-280h-80Z"/></svg>`;
 };
 
-
+// Utility function -> open smart features for an event at a specific hour
 const openSmartFeatures = (hour: number) => {
   const event = findEventAtHour(hour)
   if (!event) return
@@ -361,7 +337,7 @@ const saveEvent = (event: CalendarEvent) => {
   pendingSaves.set(event.id, timeout)
 }
 
-// Helper function to generate a unique key for each hour and date
+// Helper function -> generate a unique key for each hour and date
 const getHourKey = (hour: number, date: Date = currentDate.value): string => {
   return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}-${hour}`;
 };
@@ -388,7 +364,7 @@ const startEditing = (hour: number) => {
   }, 0);
 };
 
-// Update the event description function
+// Function to update event description on input change
 const updateEventDescription = async (event: Event, hour: number) => {
   const target = event.target as HTMLTextAreaElement;
   const value = target.value;
@@ -445,7 +421,7 @@ const updateEventDescription = async (event: Event, hour: number) => {
   }
 };
 
-// Function to handle blur event on hour input //
+// Function to handle blur event on hour input
 const handleBlur = (hour: number) => {
   const key = getHourKey(hour);
   const value = hourInputs.value[key]?.trim() || '';
@@ -458,7 +434,7 @@ const handleBlur = (hour: number) => {
   activeEditor.value = null;
 };
 
-// Function to delete an event at a specific hour //
+// Function to delete an event at a specific hour
 const deleteEvent = async (hour: number) => {
   const existingEvent = findEventAtHour(hour);
   if (existingEvent) {
@@ -569,6 +545,32 @@ const selectDate = (date: CalendarDay) => {
     }
   }
 }
+
+// function to change year for calendar
+const changeYear = async (newYear: number) => {
+  if (newYear && !isNaN(Number(newYear))) {
+    currentYear.value = Number(newYear)
+    currentDate.value.setFullYear(currentYear.value)
+    renderCalendar()
+    showYearPicker.value = false
+  }
+}
+
+// helper utility -> check if year picker is open and scroll to the selected year
+watch(showYearPicker, (val) => {
+  if (val) {
+    setTimeout(() => {
+      const list = document.getElementById('year-picker-dropdown')
+      if (list) {
+        const index = yearsList.indexOf(currentYear.value)
+        const item = list.querySelector('li')
+        const itemHeight = item ? item.offsetHeight : 32
+        // Scroll so the selected year is at the top
+        list.scrollTop = (index - 1) * itemHeight
+      }
+    }, 0)
+  }
+})
 
 // render calendar function
 const renderCalendar = () => {

@@ -11,7 +11,7 @@
         Clear Chat
       </button>
     </div>
-
+    <!-- Chat -->
     <section id="chat-container" ref="chatContainer">
       <div v-for="(message, index) in chatHistory" :key="index" :class="['message', message.sender === 'user' ? 'user-message' : 'assistant-message']">
         <div class="message-timestamp">{{ formatTimestamp(message.timestamp) }}</div>
@@ -41,7 +41,7 @@
         <span></span>
       </div>
     </section>
-
+    <!-- Suggestions -->
     <section id="suggestions-area">
       <button class="scroll-btn left" @click="scrollSuggestions('left')" aria-label="Scroll left">
         <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M624-96 240-480l384-384 68 68-316 316 316 316-68 68Z"/></svg>
@@ -136,6 +136,8 @@ const conflictData = ref<{
   messageIndex: -1
 });
 
+// == Utility functions == //
+// Utility function -> clear chat history
 const clearChat = () => {
   chatHistory.value = [{
     content: "Hello! I'm your Calendar AssistanT, You can call me CAT. How can I help you manage your schedule today?",
@@ -144,7 +146,7 @@ const clearChat = () => {
   }];
 };
 
-// Scroll to bottom of chat
+// Utility function -> scroll to bottom of chat
 const scrollToBottom = async () => {
   await nextTick();
   if (chatContainer.value) {
@@ -162,6 +164,7 @@ const formatTimestamp = (timestamp: string) => {
   });
 };
 
+// Utility function -> use suggestion text from click event or first li
 const useSuggestion = (event?: MouseEvent) => {
   // If called from click, event will be present
   let suggestionText = '';
@@ -177,6 +180,7 @@ const useSuggestion = (event?: MouseEvent) => {
   userInput.value = suggestionText;
 };
 
+// arrows to scroll suggestions
 const scrollSuggestions = (direction: 'left' | 'right') => {
   const ul = suggestionsList.value;
   if (!ul) return;
@@ -188,6 +192,8 @@ const scrollSuggestions = (direction: 'left' | 'right') => {
   }
 };
 
+
+// == Main AI tool logic == //
 // Process user query and get AI response
 const processQuery = async (message: string) => {
   try {
@@ -211,6 +217,7 @@ const processQuery = async (message: string) => {
   }
 };
 
+// Send message to AI handler
 const sendMessage = async () => {
   if (!userInput.value.trim() || isProcessing.value) return;
   const message = userInput.value.trim();
@@ -241,7 +248,7 @@ const sendMessage = async () => {
   }
 };
 
-// Unified handler for AI responses
+// Unified handler for AI responses filters what suggestion component to use based on action_taken
 const handleAIResponse = async (aiResponse: any) => {
   const baseMessage = {
     content: aiResponse.response_text,
@@ -250,6 +257,7 @@ const handleAIResponse = async (aiResponse: any) => {
   };
 
   switch (aiResponse.action_taken) {
+    // handle create event tool use
     case 'create_event':
       if (aiResponse.extracted_events && aiResponse.extracted_events.length > 0) {
         const suggestion = aiResponse.extracted_events[0];
@@ -277,6 +285,7 @@ const handleAIResponse = async (aiResponse: any) => {
       }
       break;
 
+    // handle update event tool use
     case 'update_event':
       if (aiResponse.extracted_events && aiResponse.extracted_events.length > 0) {
         const event = aiResponse.extracted_events[0];
@@ -297,6 +306,7 @@ const handleAIResponse = async (aiResponse: any) => {
       }
       break;
 
+    // handle delete event tool use
     case 'delete_event':
       if (aiResponse.extracted_events && aiResponse.extracted_events.length > 0) {
         const event = aiResponse.extracted_events[0];
@@ -352,7 +362,7 @@ const checkForConflicts = async (suggestion: EventSuggestion) => {
   }
 };
 
-// Accept suggestion handler (unified for update/move)
+// Accept suggestion handler executeing accepted event suggestion
 const acceptSuggestion = async (messageIndex: number) => {
   const message = chatHistory.value[messageIndex];
   if (!message || !message.eventSuggestion) return;
