@@ -437,6 +437,13 @@ const handleBlur = (hour: number) => {
 // Function to delete an event at a specific hour
 const deleteEvent = async (hour: number) => {
   const existingEvent = findEventAtHour(hour);
+
+  // If smart features are open for this event, close them
+  if (showSmartFeatures.value) {
+    showSmartFeatures.value = false
+    smartFeaturesEvent.value = null
+  }
+
   if (existingEvent) {
     // Clear any pending saves for this event first
     const existingTimeout = pendingSaves.get(existingEvent.id);
