@@ -1,7 +1,7 @@
 <template>
-  <section class="ai-assistant">
+  <section id="ai-assistant">
     <!-- Chat clear button -->
-    <div class="chat-header">
+    <div id="chat-header">
       <h2>Calendar Assistant</h2>
       <button @click="clearChat" class="clear-btn" title="Clear conversation">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16">
@@ -12,7 +12,7 @@
       </button>
     </div>
 
-    <section class="chat-container" ref="chatContainer">
+    <section id="chat-container" ref="chatContainer">
       <div v-for="(message, index) in chatHistory" :key="index" :class="['message', message.sender === 'user' ? 'user-message' : 'assistant-message']">
         <div class="message-timestamp">{{ formatTimestamp(message.timestamp) }}</div>
         <DeleteSuggestion
@@ -41,15 +41,25 @@
         <span></span>
       </div>
     </section>
+
+    <section id="suggestions-area">
+      <button class="scroll-btn left" @click="scrollSuggestions('left')" aria-label="Scroll left">
+        <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M624-96 240-480l384-384 68 68-316 316 316 316-68 68Z"/></svg>
+      </button>
+      <ul ref="suggestionsList">
+        <li @click="useSuggestion($event)">shedule an event at:</li>
+        <li @click="useSuggestion($event)">delete an event at:</li>
+        <li @click="useSuggestion($event)">move event at:</li>
+        <li @click="useSuggestion($event)">change the description of an event at:</li>
+        <li @click="useSuggestion($event)">what kind of a cat are you?</li>
+      </ul>
+      <button class="scroll-btn right" @click="scrollSuggestions('right')" aria-label="Scroll right">
+       <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="m288-96-68-68 316-316-316-316 68-68 384 384L288-96Z"/></svg>
+      </button>
+    </section>
     
-    <section class="input-area">
-      <input 
-        type="text" 
-        v-model="userInput" 
-        @keyup.enter="sendMessage"
-        placeholder="Ask me to create events, check your schedule, etc."
-        :disabled="isProcessing"
-      />
+    <section id="input-area">
+      <input  type="text" v-model="userInput" @keyup.enter="sendMessage" placeholder="Ask me to create events, check your schedule, etc." :disabled="isProcessing"/>
       <button @click="sendMessage" :disabled="isProcessing || !userInput.trim()">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
           <path fill="none" d="M0 0h24v24H0z"/>
@@ -110,6 +120,7 @@ const userInput = ref('');
 const isProcessing = ref(false);
 const isTyping = ref(false);
 const chatContainer = ref<HTMLElement | null>(null);
+const suggestionsList = ref<HTMLElement | null>(null);
 
 // Conflict dialog state
 const showConflictDialog = ref(false);
@@ -151,6 +162,33 @@ const formatTimestamp = (timestamp: string) => {
   });
 };
 
+const useSuggestion = (event?: MouseEvent) => {
+  // If called from click, event will be present
+  let suggestionText = '';
+  if (event && event.target instanceof HTMLElement) {
+    suggestionText = event.target.innerText;
+  } else {
+    // fallback: get first li
+    const suggestion = document.querySelector('#suggestions-area li');
+    if (suggestion) {
+      suggestionText = suggestion.textContent || '';
+    }
+  }
+  userInput.value = suggestionText;
+};
+
+const scrollSuggestions = (direction: 'left' | 'right') => {
+  const ul = suggestionsList.value;
+  if (!ul) return;
+  const scrollAmount = 120;
+  if (direction === 'left') {
+    ul.scrollBy({ left: -scrollAmount, behavior: 'smooth' });
+  } else {
+    ul.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+  }
+};
+
+// Process user query and get AI response
 const processQuery = async (message: string) => {
   try {
     const response = await invoke<string>('process_ai_message', { 
@@ -541,7 +579,7 @@ watch(chatHistory, () => {
 </script>
 
 <style scoped>
-.ai-assistant {
+#ai-assistant {
   display: flex;
   flex-direction: column;
   height: 90vh;
@@ -551,13 +589,12 @@ watch(chatHistory, () => {
   border-radius: 8px;
 }
 
-.chat-container {
+#chat-container {
   flex: 1;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  margin-bottom: 1rem;
   padding: 1rem;
   background-color: rgba(0, 0, 0, 0.05);
   border-radius: 8px;
@@ -585,16 +622,115 @@ watch(chatHistory, () => {
 
 .assistant-message {
   align-self: flex-start;
-  background-color: rgba(0, 0, 0, 0.1);
+  background-color: var(--color-main);
 }
 
-.input-area {
+#suggestions-area {
+  position: relative;
+  display: flex;
+  align-items: center;
+  background-color: rgba(0, 0, 0, 0.05);
+  border-radius: 8px;
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+  max-width: 100%;
+  height: 3rem;
+  overflow: hidden;
+}
+
+#suggestions-area ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 0.5rem;
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  flex: 1;
+}
+
+#suggestions-area ul li{
+  background-color: var(--color-theme);
+  color: var(--color-text);
+  padding: 0.1rem;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  border-radius: 10px;
+  cursor: pointer;
+  text-wrap: nowrap;
+}
+
+#suggestions-area ul li:hover{
+  background-color: var(--color-text);
+  color: var(--color-theme);
+  transition: background-color 0.2s, color 0.2s;
+}
+
+#suggestions-area ul::-webkit-scrollbar {
+  display: none;
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
+}
+
+#suggestions-area ul::-webkit-scrollbar-thumb {
+  display: none;
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
+}
+
+.scroll-btn {
+  background: transparent;
+  color: var(--color-text);
+  border: none;
+  border-radius: 10px;
+  width: 1.5rem;
+  height: 2.5rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  margin: 0 0.25rem;
+  padding: 0;
+  z-index: 1;
+}
+
+.scroll-btn:hover {
+  background-color: var(--color-theme);
+  color: var(--color-text);
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.scroll-btn:hover svg {
+  fill: var(--color-text);
+}
+
+.scroll-btn.left {
+  order: 0;
+}
+
+.scroll-btn.right {
+  order: 2;
+}
+
+#suggestions-area ul {
+  order: 1;
+  min-width: 0;
+  width: 100%;
+  touch-action: pan-x;
+}
+
+#input-area {
   display: flex;
   gap: 0.5rem;
   margin-top: auto;
 }
 
-.input-area input {
+#input-area input {
   flex: 1;
   padding: 0.75rem;
   border-radius: 8px;
@@ -603,7 +739,7 @@ watch(chatHistory, () => {
   color: var(--color-text);
 }
 
-.input-area button {
+#input-area button {
   padding: 0.5rem;
   border-radius: 8px;
   border: none;
@@ -615,7 +751,7 @@ watch(chatHistory, () => {
   justify-content: center;
 }
 
-.input-area button:disabled {
+#input-area button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -721,7 +857,7 @@ watch(chatHistory, () => {
   }
 }
 
-.chat-header {
+#chat-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -732,7 +868,7 @@ watch(chatHistory, () => {
   color: var(--color-dark);
 }
 
-.chat-header h2 {
+#chat-header h2 {
   margin: 0;
   font-size: 1.2rem;
 }

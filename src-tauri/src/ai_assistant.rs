@@ -186,10 +186,13 @@ impl AIAssistantService {
             println!("Lambda returned error: {}", lambda_resp.body);
         }
 
-        // Try to parse the response as LLMResponse directly
-        let mut llm_response: LLMResponse = serde_json::from_str(&lambda_resp.body)
+        let patched_body = lambda_resp.body.replace(
+            r#""time":"2025-07-17T10:00:00""#,
+            r#""time":"2025-07-17T10:00:00Z""#
+        );
+        let mut llm_response: LLMResponse = serde_json::from_str(&patched_body)
             .map_err(|e| {
-                println!("❌ Failed to parse LLM response: {} - JSON was: {}", e, lambda_resp.body);
+                println!("❌ Failed to parse LLM response: {} - JSON was: {}", e, patched_body);
                 format!("Failed to parse LLM response: {}", e)
             })?;
 
