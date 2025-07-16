@@ -2,7 +2,14 @@
   <section id="calendar">
     <section id="calendar-container">
       <section id="calendar-header">
-        <h2>{{ currentMonth }} {{ currentYear }}</h2>
+        <h2>{{ currentMonth }} <button @click="showYearPicker = !showYearPicker">{{ currentYear }}</button>
+          <ul v-if="showYearPicker" id="year-picker-dropdown">
+            <li v-for="year in yearsList" :key="year">
+              <button @click="changeYear(year)" >{{ year }}</button>
+            </li>
+          </ul>
+        </h2>
+        <button v-if="currentDate.getMonth() !== (new Date()).getMonth() || currentDate.getFullYear() !== (new Date()).getFullYear()" @click="currentDate = new Date(); renderCalendar();"> Back to current month</button>
         <button @click="previousMonth"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M480-528 296-344l-56-56 240-240 240 240-56 56-184-184Z"/></svg></button>
         <button @click="nextMonth"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M480-344 240-584l56-56 184 184 184-184 56 56-240 240Z"/></svg></button>
       </section>
@@ -66,7 +73,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import linkifyStr from 'linkify-string'
@@ -107,6 +114,8 @@ const cleanupInterval = 3600000 // 1 hour in milliseconds
 const currentDate = ref(new Date())
 const currentMonth = ref(currentDate.value.toLocaleString('default', { month: 'long' }))
 const currentYear = ref(currentDate.value.getFullYear())
+const showYearPicker = ref(false)
+const yearsList = Array.from({ length: 21 }, (_, i) => currentYear.value - 10 + i)
 const events = ref<CalendarEvent[]>([])
 const activeCell = ref<string | null>(null)
 const calendarDays = ref<CalendarDay[]>([])
@@ -166,6 +175,31 @@ const isNow = (hour: number): boolean => {
 
   return false
 }
+
+// utility function -> choose year for calendar
+const changeYear = async (newYear: number) => {
+  if (newYear && !isNaN(Number(newYear))) {
+    currentYear.value = Number(newYear)
+    currentDate.value.setFullYear(currentYear.value)
+    renderCalendar()
+    showYearPicker.value = false
+  }
+}
+
+watch(showYearPicker, (val) => {
+  if (val) {
+    setTimeout(() => {
+      const list = document.getElementById('year-picker-dropdown')
+      if (list) {
+        const index = yearsList.indexOf(currentYear.value)
+        const item = list.querySelector('li')
+        const itemHeight = item ? item.offsetHeight : 32 // fallback height
+        // Scroll so the selected year is at the top
+        list.scrollTop = (index - 1) * itemHeight
+      }
+    }, 0)
+  }
+})
 
 // utility function -> toggle expand state for a specific hour
 const toggleExpand = (hour: number) => {
@@ -666,7 +700,7 @@ onMounted(async () => {
 }
 
 #calendar::-webkit-scrollbar {
-  display: none; /* Hide scrollbar for WebKit browsers */
+  display: none;
   width: 0 !important;
   height: 0 !important;
   background: transparent !important;
@@ -690,6 +724,65 @@ onMounted(async () => {
   gap: 0.5rem;
   margin-bottom: 1rem;
   width: 100%;
+}
+
+#calendar-header h2 {
+  position: relative;
+  color: var(--color-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.1rem;
+}
+
+#calendar-header h2 button {
+  font-size: 1.5rem;
+  color: var(--color-text);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+#year-picker-dropdown {
+  position: absolute;
+  top: -30px;
+  left: 40%;
+  background: var(--color-shadow);
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+  z-index: 10;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+#year-picker-dropdown::-webkit-scrollbar {
+  display: none;
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
+}
+
+#year-picker-dropdown ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+#calendar-header h2 #year-picker-dropdown li button {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  width: 100%;
+  text-align: center;
+  padding: 0.2rem;
+  cursor: pointer;
+  color: var(--color-text);
+}
+
+#calendar-header h2 #year-picker-dropdown li button:hover {
+  background: var(--color-theme);
+  color: var(--color-dark);
 }
 
 #calendar-header button {
