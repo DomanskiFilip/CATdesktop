@@ -24,7 +24,7 @@
 import { ref, onMounted, watch } from 'vue'
 
 const props = defineProps<{ event: any }>()
-const routeReady = ref(false)
+const routeReady = ref(true)
 const mode = ref('car')
 
 // Placeholder for LLM integration and Google Maps API

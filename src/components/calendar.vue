@@ -31,9 +31,10 @@
     <section id="schedule-container">
       <h3> {{ currentDate.toLocaleDateString('default', { month: 'long', day: 'numeric', year: 'numeric' }) }} Schedule </h3>
       <section id="day-schedule-container">
-        <span v-for="hour in Array.from({ length: 24 }, (_, i) => (i + 1) % 24)" 
+        <span v-for="hour in Array.from({ length: 24 }, (_, i) => i)" 
           :key="hour" 
-          class="hour">
+          class="hour"
+          :class="{ 'current-hour': isNow(hour) }">
           <span class="hour-wrapper">
             <span :class="{ 'event-time': hasEventAtHour(hour) }">
               {{ hour < 10 ? '0' + hour : hour }}:00
@@ -48,10 +49,11 @@
              <button class="smart-features-btn" @click="openSmartFeatures(hour)" title="Smart Features" v-if="hasEventAtHour(hour) && !isInPast(hour) && !isNow(hour)">
                <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M323-160q-11 0-20.5-5.5T288-181l-78-139h58l40 80h92v-40h-68l-40-80H188l-57-100q-2-5-3.5-10t-1.5-10q0-4 5-20l57-100h104l40-80h68v-40h-92l-40 80h-58l78-139q5-10 14.5-15.5T323-800h97q17 0 28.5 11.5T460-760v160h-60l-40 40h100v120h-88l-40-80h-92l-40 40h108l40 80h112v200q0 17-11.5 28.5T420-160h-97Zm217 0q-17 0-28.5-11.5T500-200v-200h112l40-80h108l-40-40h-92l-40 80h-88v-120h100l-40-40h-60v-160q0-17 11.5-28.5T540-800h97q11 0 20.5 5.5T672-779l78 139h-58l-40-80h-92v40h68l40 80h104l57 100q2 5 3.5 10t1.5 10q0 4-5 20l-57 100H668l-40 80h-68v40h92l40-80h58l-78 139q-5 10-14.5 15.5T637-160h-97Z"/></svg>
             </button>
-             <button class="expand" @click="toggleExpand(hour)" title="expand/collapse">
+             <button v-if="!isNow(hour)" class="expand" @click="toggleExpand(hour)" title="expand/collapse">
               <svg v-if="!expand[hour]" xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M480-344 240-584l56-56 184 184 184-184 56 56-240 240Z"/></svg>
               <svg v-else xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M480-528 296-344l-56-56 240-240 240 240-56 56-184-184Z"/></svg>
              </button>
+              
           </span>
           <!-- Hidden textarea for editing (shows when clicking the display div) -->
           <textarea v-show="activeEditor === `editor-${getHourKey(hour)}`" 
@@ -65,6 +67,7 @@
           </textarea>
           <!-- Display div with linked text (shows when not editing) -->
           <div v-show="activeEditor !== `editor-${getHourKey(hour)}`" :class="{ 'link-display': true, 'in-the-past': isInPast(hour), 'has-event': hasEventAtHour(hour), 'expand': expand[hour] }" v-html="formatLinkedText(hourInputs[getHourKey(hour)] || getEventDescription(hour))" @click="startEditing(hour)"></div>
+          <span v-if="isNow(hour)" class="current-hour-marker">PRESENT</span>
         </span>
       </section>
     </section>
@@ -136,32 +139,38 @@ const isToday = (date: CalendarDay) => {
          date.date.getFullYear() === today.getFullYear()
 }
 
-// Utility function -> check if hour is in the past
+function getLogicHourAndDate(hour: number) {
+  if (hour === 24) {
+    // 24:00 is 00:00 of the next day
+    const nextDay = new Date(currentDate.value)
+    nextDay.setDate(nextDay.getDate() + 1)
+    return { logicHour: 0, logicDate: nextDay }
+  }
+  return { logicHour: hour, logicDate: currentDate.value }
+}
+
+// Example usage in isInPast:
 const isInPast = (hour: number): boolean => {
   const currently = new Date()
+  const { logicHour, logicDate } = getLogicHourAndDate(hour)
+
   // If it's a future date, nothing is in the past
-  if (currentDate.value.getTime() > currently.setHours(23,59,59,999)) {
+  if (logicDate.getTime() > currently.setHours(23,59,59,999)) {
     return false
   }
-  
   // If it's a past date, everything is in the past
-  if (currentDate.value.getTime() < currently.setHours(0,0,0,0)) {
+  if (logicDate.getTime() < currently.setHours(0,0,0,0)) {
     return true
   }
-  
   // If it's today, compare hours
-  if (hour === 0) {
-    return false
+  if (
+    logicDate.getDate() === currently.getDate() &&
+    logicDate.getMonth() === currently.getMonth() &&
+    logicDate.getFullYear() === currently.getFullYear()
+  ) {
+    const currentHour = currently.getHours()
+    return logicHour < currentHour
   }
-
-  // If it's today, compare hours
-  if (currentDate.value.getDate() === currently.getDate() && 
-      currentDate.value.getMonth() === currently.getMonth() && 
-      currentDate.value.getFullYear() === currently.getFullYear()) {
-    const currentHour = new Date().getHours()
-    return hour < currentHour
-  }
-  
   return false
 }
 
@@ -935,6 +944,7 @@ margin-bottom: 1rem;
 }
 
 .hour {
+  position: relative;
   width: 100%;
   display: flex;
   flex-direction: column;
@@ -1029,6 +1039,34 @@ padding: 0.1rem;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.current-hour {
+  background: var(--color-theme);
+  border-radius: 8px;
+  box-shadow: 0 0 0.5px var(--color-theme);
+  position: relative;
+}
+
+.current-hour-marker {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0.01px;
+  z-index: 20;
+  color: var(--color-dark);
+  font-weight: bold;
+  background: var(--color-theme);
+  border-bottom-left-radius: 4px;
+  border-bottom-right-radius: 4px;
+  padding-bottom: 0.67rem;
+  pointer-events: none;
+  width: 100%;
+  text-align: center;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  cursor: default;
 }
 
 .alarm.in-the-past {
