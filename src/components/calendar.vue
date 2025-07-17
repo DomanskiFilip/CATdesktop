@@ -68,12 +68,12 @@
         </span>
       </section>
     </section>
-    <smartFeatures v-if="showSmartFeatures" :event="smartFeaturesEvent" @close="closeSmartFeatures"/>
+    <smartFeatures v-if="showSmartFeatures" ref="smartFeaturesRef" :event="smartFeaturesEvent" @close="closeSmartFeatures"/>
    </section>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import linkifyStr from 'linkify-string'
@@ -125,6 +125,7 @@ const activeEditor = ref<string | null>(null)
 const weather = ref<Record<string, DailyWeather> | 'no data'>('no data')
 const showSmartFeatures = ref(false)
 const smartFeaturesEvent = ref<CalendarEvent | null>(null)
+const smartFeaturesRef = ref<InstanceType<typeof smartFeatures> | null>(null)
 
 // == Utility functions == //
 // utility function -> check if its current day
@@ -576,6 +577,17 @@ watch(showYearPicker, (val) => {
         list.scrollTop = (index - 1) * itemHeight
       }
     }, 0)
+  }
+})
+
+// helper utility -> scroll to smart features when they are shown
+watch(showSmartFeatures, async (val) => {
+  if (val) {
+    await nextTick()
+    const el = smartFeaturesRef.value?.$el || document.querySelector('.smart-features-root') // fallback if needed
+    if (el && el.scrollIntoView) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' })
+    }
   }
 })
 
