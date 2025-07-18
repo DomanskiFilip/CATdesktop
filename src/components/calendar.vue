@@ -151,28 +151,38 @@ function getLogicHourAndDate(hour: number) {
 
 // Example usage in isInPast:
 const isInPast = (hour: number): boolean => {
-  const currently = new Date()
-  const { logicHour, logicDate } = getLogicHourAndDate(hour)
+  const currently = new Date();
+  const { logicHour, logicDate } = getLogicHourAndDate(hour);
 
-  // If it's a future date, nothing is in the past
-  if (logicDate.getTime() > currently.setHours(23,59,59,999)) {
-    return false
+  // If the date is in the future, nothing is in the past
+  if (
+    logicDate.getFullYear() > currently.getFullYear() ||
+    (logicDate.getFullYear() === currently.getFullYear() && logicDate.getMonth() > currently.getMonth()) ||
+    (logicDate.getFullYear() === currently.getFullYear() && logicDate.getMonth() === currently.getMonth() && logicDate.getDate() > currently.getDate())
+  ) {
+    return false;
   }
-  // If it's a past date, everything is in the past
-  if (logicDate.getTime() < currently.setHours(0,0,0,0)) {
-    return true
+
+  // If the date is in the past, everything is in the past
+  if (
+    logicDate.getFullYear() < currently.getFullYear() ||
+    (logicDate.getFullYear() === currently.getFullYear() && logicDate.getMonth() < currently.getMonth()) ||
+    (logicDate.getFullYear() === currently.getFullYear() && logicDate.getMonth() === currently.getMonth() && logicDate.getDate() < currently.getDate())
+  ) {
+    return true;
   }
+
   // If it's today, compare hours
   if (
-    logicDate.getDate() === currently.getDate() &&
+    logicDate.getFullYear() === currently.getFullYear() &&
     logicDate.getMonth() === currently.getMonth() &&
-    logicDate.getFullYear() === currently.getFullYear()
+    logicDate.getDate() === currently.getDate()
   ) {
-    const currentHour = currently.getHours()
-    return logicHour < currentHour
+    return logicHour < currently.getHours();
   }
-  return false
-}
+
+  return false;
+};
 
 // Utility function -> check if hour is the current hour
 const isNow = (hour: number): boolean => {
@@ -1046,6 +1056,7 @@ padding: 0.1rem;
   border-radius: 8px;
   box-shadow: 0 0 0.5px var(--color-theme);
   position: relative;
+  margin-top: 0.5rem;
 }
 
 .current-hour-marker {

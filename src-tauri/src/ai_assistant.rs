@@ -1,12 +1,16 @@
+use crate::logout_user;
+use crate::ConversationMessage;
+use crate::database_utils::{ CalendarEvent, get_events };
+use crate::user_utils::{ get_current_user_id, clear_current_user_id };
+use crate::token_utils::{ read_tokens_from_file, clear_tokens };
+use crate::api_utils::{ AppConfig, get_device_info };
+use crate::{ UserLocation, get_weekly_weather };
+use crate::auto_login::auto_login_lambda;
 use serde::{ Deserialize, Serialize };
 use chrono::{ Utc, DateTime, TimeZone };
 use tauri::{ AppHandle, Manager };
 use rand::Rng;
-use crate::ConversationMessage;
-use crate::database_utils::{ CalendarEvent, get_events };
-use crate::user_utils::get_current_user_id;
-use crate::api_utils::AppConfig;
-use crate::{ UserLocation, get_weekly_weather };
+
 
 #[derive(Deserialize)]
 struct LambdaResponse {
@@ -158,18 +162,25 @@ impl AIAssistantService {
     }
 
     async fn invoke_lambda_endpoint(&self, prompt: serde_json::Value, app_handle: &AppHandle) -> Result<LLMResponse, String> {
-        let _user_id = get_current_user_id(app_handle)
-            .map_err(|_| "User is not logged in.".to_string())?;
+        let user_id = get_current_user_id(&app_handle);
+        let device_info = get_device_info();
 
         let config = AppConfig::new()?;
         let url = format!("{}/llm", config.lambda_base_url);
+        let api_key = config.api_key.clone();
 
         let client = reqwest::Client::new();
+        let mut prompt_with_token = prompt.clone();
+        if let Ok((access_token, _)) = read_tokens_from_file(app_handle) {
+            prompt_with_token["access_token"] = serde_json::json!(access_token);
+            prompt_with_token["deviceInfo"] = device_info;
+            prompt_with_token["email"] = serde_json::json!(user_id);
+        }
         let resp = client
             .post(&url)
             .header("Content-Type", "application/json")
-            .header("x-api-key", config.api_key)
-            .json(&prompt)
+            .header("x-api-key", &api_key)
+            .json(&prompt_with_token)
             .send()
             .await
             .map_err(|e| format!("Failed to call Lambda: {}", e))?;
@@ -177,11 +188,50 @@ impl AIAssistantService {
         let text = resp.text().await
             .map_err(|e| format!("Failed to read Lambda response: {}", e))?;
 
-        println!("🔍 Raw Lambda response: {}", text);
-
-        let lambda_resp: LambdaResponse = serde_json::from_str(&text)
+        // Parse Lambda response for status_code
+        let mut lambda_resp: LambdaResponse = serde_json::from_str(&text)
             .map_err(|e| format!("Failed to parse Lambda response: {}", e))?;
-        
+      
+        println!("🔍 Raw Lambda response: {}", lambda_resp.body);
+
+        // If access token is rejected (status_code 401), try auto-login
+        if lambda_resp.status_code == 401 {
+            // Try auto-login to refresh tokens
+            if auto_login_lambda(app_handle).await.unwrap_or(false) {
+                // Wait briefly to ensure token file is written
+                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                // Retry with new tokens
+                if let Ok((access_token, _refresh_token)) = read_tokens_from_file(app_handle) {
+                    prompt_with_token["access_token"] = serde_json::json!(access_token);
+                    let retry_resp = client
+                        .post(&url)
+                        .header("Content-Type", "application/json")
+                        .header("x-api-key", &api_key)
+                        .json(&prompt_with_token)
+                        .send()
+                        .await
+                        .map_err(|e| format!("Failed to call Lambda after auto-login: {}", e))?;
+                    let retry_text = retry_resp.text().await
+                        .map_err(|e| format!("Failed to read Lambda response after auto-login: {}", e))?;
+                    lambda_resp = serde_json::from_str(&retry_text)
+                        .map_err(|e| format!("Failed to parse Lambda response after auto-login: {}", e))?;
+                    // If still unauthorized, force logout
+                    if lambda_resp.status_code == 401 {
+                        let _ = logout_user(app_handle.clone()).await;
+                        return Err("Session expired. Please log in again.".to_string());
+                    }
+                } else {
+                    // Could not read tokens after auto-login, force logout
+                    let _ = logout_user(app_handle.clone()).await;
+                    return Err("Could not read tokens after auto-login, force logout".to_string());
+                }
+            } else {
+                // Auto-login failed, force logout
+                let _ = logout_user(app_handle.clone()).await;
+                return Err("Session expired. Please log in again.".to_string());
+            }
+        }
+
         if lambda_resp.status_code == 500 {
             println!("Lambda returned error: {}", lambda_resp.body);
         }

@@ -1,6 +1,10 @@
 use crate::database_utils::{ CalendarEvent, get_db_connection, save_event };
-use crate::api_utils::{ AppConfig };
+use crate::api_utils::{ AppConfig, get_device_info };
 use crate::user_utils::get_current_user_id;
+use crate::token_utils::{read_tokens_from_file, clear_tokens};
+use crate::user_utils::clear_current_user_id;
+use crate::auto_login::auto_login_lambda;
+use crate::logout_user;
 use std::time::Duration;
 use tokio::time;
 use tauri::AppHandle;
@@ -148,9 +152,10 @@ impl DbSyncService {
             println!("No unsynced events found, skipping sync to DynamoDB.");
             return Ok(());
         }
+        println!("Events to sync: {:?}", events); // <--- Add this line
 
         // Batch send unsynced events to DynamoDB
-        match self.send_to_dynamodb(&events).await {
+        match self.send_to_dynamodb(app_handle_arc, &events).await {
             Ok(_) => {
                 // Mark events as synced in a new connection
                 let conn = get_db_connection(app_handle_arc)
@@ -170,7 +175,7 @@ impl DbSyncService {
         }
 
         let sync_url = format!("{}/get-events", self.config.lambda_base_url);
-        
+
         // Get user ID
         let user_id = match get_current_user_id(&app_handle_arc) {
             Ok(id) => id,
@@ -179,14 +184,20 @@ impl DbSyncService {
                 return Ok(());
             }
         };
+        let device_info = get_device_info();
 
-        let payload = json!({
-          "body": json!({
+        // --- Add access token to payload ---
+        let mut payload = json!({
+            "body": json!({
+                "email": user_id
+            }).to_string(),
+            "deviceInfo": device_info,
             "email": user_id
-            }).to_string()
         });
-
-        let response = self.client
+        if let Ok((access_token, _)) = read_tokens_from_file(app_handle_arc) {
+            payload["access_token"] = serde_json::json!(access_token);
+        }
+        let mut response = self.client
             .post(&sync_url)
             .header("Content-Type", "application/json")
             .header("x-api-key", &self.config.api_key)
@@ -195,19 +206,51 @@ impl DbSyncService {
             .await
             .map_err(|e| format!("Request failed: {}", e))?;
 
-        let status = response.status();
-        let text = response.text().await.map_err(|e| e.to_string())?;
-        
-        // Check for Sandbox.Timedout error in the raw response
-        if text.contains("\"errorType\":\"Sandbox.Timedout\"") {
-              println!("Server timeout, please try again.");
-              return Ok(());
-          }
+        let mut status = response.status();
+        let mut text = response.text().await.map_err(|e| e.to_string())?;
+        let mut lambda_response: Option<serde_json::Value> = serde_json::from_str(&text).ok();
 
-        // Parse the Lambda response to get status_code and body
-        if let Ok(lambda_response) = serde_json::from_str::<serde_json::Value>(&text) {
+        // If 401, try auto-login and retry once
+        if let Some(ref resp) = lambda_response {
+            if resp.get("status_code").and_then(|v| v.as_u64()) == Some(401) {
+                if auto_login_lambda(app_handle_arc).await.unwrap_or(false) {
+                    // Wait briefly to ensure token file is written
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    // Retry with new token (always read from file)
+                    if let Ok((access_token, _)) = read_tokens_from_file(app_handle_arc) {
+                        payload["access_token"] = serde_json::json!(access_token);
+                        let retry_response = self.client
+                            .post(&sync_url)
+                            .header("Content-Type", "application/json")
+                            .header("x-api-key", &self.config.api_key)
+                            .json(&payload)
+                            .send()
+                            .await
+                            .map_err(|e| format!("Request failed after auto-login: {}", e))?;
+                        status = retry_response.status();
+                        text = retry_response.text().await.map_err(|e| e.to_string())?;
+                        lambda_response = serde_json::from_str::<serde_json::Value>(&text).ok();
+                        // If still 401, force logout
+                        if let Some(ref resp2) = lambda_response {
+                            if resp2.get("status_code").and_then(|v| v.as_u64()) == Some(401) {
+                                let _ = logout_user(app_handle_arc.as_ref().clone()).await;
+                                return Err("Session expired. Please log in again.".to_string());
+                            }
+                        }
+                    } else {
+                        // Could not read tokens after auto-login
+                        let _ = logout_user(app_handle_arc.as_ref().clone()).await;
+                        return Err("Could not read tokens after auto-login".to_string());
+                    }
+                } else {
+                    let _ = logout_user(app_handle_arc.as_ref().clone()).await;
+                    return Err("Session expired. Please log in again.".to_string());
+                }
+            }
+        }
+
+        if let Some(lambda_response) = lambda_response {
             if let Some(status_code) = lambda_response.get("status_code").and_then(|v| v.as_u64()) {
-                // Check Lambda status code, not just HTTP status
                 if status_code != 200 {
                     if let Some(body) = lambda_response.get("body").and_then(|v| v.as_str()) {
                         return Err(format!("Failed to get events: {}", body));
@@ -215,12 +258,9 @@ impl DbSyncService {
                         return Err(format!("Failed to get events: status code {}", status_code));
                     }
                 }
-                
-                // Successfully synced events
                 if let Some(body) = lambda_response.get("body").and_then(|v| v.as_str()) {
                     if let Ok(body_json) = serde_json::from_str::<serde_json::Value>(body) {
                         if let Some(events_array) = body_json.get("events").and_then(|v| v.as_array()) {
-                            println!("Retrieved events: {}", events_array.len());
                             self.merge_remote_events(app_handle_arc, events_array)
                                 .await
                                 .map_err(|e| format!("Failed to merge remote events: {}", e))?;
@@ -232,7 +272,7 @@ impl DbSyncService {
                 return Ok(());
             }
         }
-        
+
         if !status.is_success() {
             return Err(format!("Failed to get events: {}", text));
         }
@@ -241,73 +281,118 @@ impl DbSyncService {
 
 
     // Helper method -> send events to DynamoDB //
-    async fn send_to_dynamodb(&self, events: &[CalendarEvent]) -> Result<(), String> {
-    // Prepare batch payload
-    let payload = json!({
-        "body": json!({
-          "events": events.iter().map(|event| json!({
-              "id": event.id,
-              "email": event.user_id,
-              "description": event.description,
-              "time": event.time.to_rfc3339(),
-              "alarm": event.alarm,
-              "synced_google": event.synced_google,
-              "deleted": event.deleted,
-              "recurrence": event.recurrence.clone().unwrap_or_else(|| "none".to_string()) 
-          })).collect::<Vec<_>>()
-        }).to_string()
-    });
-
-    // Use lambda endpoint from config
-    let sync_url = format!("{}/sync-events", self.config.lambda_base_url);
-    
-    let response = self.client
-        .post(&sync_url)
-        .header("Content-Type", "application/json")
-        .header("x-api-key", &self.config.api_key)
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
-
-    let status = response.status();
-    let text = response.text().await.map_err(|e| e.to_string())?;
-    
-    if text.contains("\"errorType\":\"Sandbox.Timedout\"") {
-            println!("Server timeout, please try again.");
-            return Ok(());
+    async fn send_to_dynamodb(&self, app_handle_arc: &Arc<AppHandle>, events: &[CalendarEvent]) -> Result<(), String> {
+        // Get user ID
+        let user_id = match get_current_user_id(&app_handle_arc) {
+            Ok(id) => id,
+            Err(e) => {
+                println!("Failed to get user ID: {}", e);
+                return Ok(());
+            }
+        };
+        let device_info = get_device_info();  
+      
+        // Prepare batch payload
+        let mut payload = json!({
+            "body": json!({
+                "events": events.iter().map(|event| json!({
+                    "id": event.id,
+                    "email": event.user_id,
+                    "description": event.description,
+                    "time": event.time.to_rfc3339(),
+                    "alarm": event.alarm,
+                    "synced_google": event.synced_google,
+                    "deleted": event.deleted,
+                    "recurrence": event.recurrence.clone().unwrap_or_else(|| "none".to_string()) 
+                })).collect::<Vec<_>>()
+            }).to_string(),
+            "deviceInfo": device_info,
+            "email": user_id
+        });
+        if let Ok((access_token, _)) = read_tokens_from_file(app_handle_arc) {
+            payload["access_token"] = serde_json::json!(access_token);
         }
+        // Use lambda endpoint from config
+        let sync_url = format!("{}/sync-events", self.config.lambda_base_url);
 
-    // Parse the Lambda response to get status_code and body
-    if let Ok(lambda_response) = serde_json::from_str::<serde_json::Value>(&text) {
-        if let Some(status_code) = lambda_response.get("status_code").and_then(|v| v.as_u64()) {
-            // Check Lambda status code, not just HTTP status
-            if status_code != 200 {
-                if let Some(body) = lambda_response.get("body").and_then(|v| v.as_str()) {
-                    return Err(format!("Failed to sync events: {}", body));
+        let mut response = self.client
+            .post(&sync_url)
+            .header("Content-Type", "application/json")
+            .header("x-api-key", &self.config.api_key)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| format!("Request failed: {}", e))?;
+
+        let mut status = response.status();
+        let mut text = response.text().await.map_err(|e| e.to_string())?;
+        let mut lambda_response: Option<serde_json::Value> = serde_json::from_str(&text).ok();
+
+        // If 401, try auto-login and retry once
+        if let Some(ref resp) = lambda_response {
+            if resp.get("status_code").and_then(|v| v.as_u64()) == Some(401) {
+                if auto_login_lambda(app_handle_arc).await.unwrap_or(false) {
+                    // Wait briefly to ensure token file is written
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    // Retry with new token (always read from file)
+                    if let Ok((access_token, _)) = read_tokens_from_file(app_handle_arc) {
+                      println!("New access token after auto-login: {}", access_token);
+                        payload["access_token"] = serde_json::json!(access_token);
+                        let retry_response = self.client
+                            .post(&sync_url)
+                            .header("Content-Type", "application/json")
+                            .header("x-api-key", &self.config.api_key)
+                            .json(&payload)
+                            .send()
+                            .await
+                            .map_err(|e| format!("Request failed after auto-login: {}", e))?;
+                        status = retry_response.status();
+                        text = retry_response.text().await.map_err(|e| e.to_string())?;
+                        lambda_response = serde_json::from_str::<serde_json::Value>(&text).ok();
+                        // If still 401, force logout
+                        if let Some(ref resp2) = lambda_response {
+                            if resp2.get("status_code").and_then(|v| v.as_u64()) == Some(401) {
+                                let _ = logout_user(app_handle_arc.as_ref().clone()).await;
+                                return Err("Session expired. Please log in again.".to_string());
+                            }
+                        }
+                    } else {
+                        // Could not read tokens after auto-login
+                        let _ = logout_user(app_handle_arc.as_ref().clone()).await;
+                        return Err("Could not read tokens after auto-login".to_string());
+                    }
                 } else {
-                    return Err(format!("Failed to sync events: status code {}", status_code));
+                    let _ = logout_user(app_handle_arc.as_ref().clone()).await;
+                    return Err("Session expired. Please log in again.".to_string());
                 }
             }
-            
-            // Successfully synced events
-            if let Some(body) = lambda_response.get("body").and_then(|v| v.as_str()) {
-                if let Ok(body_json) = serde_json::from_str::<serde_json::Value>(body) {
-                    if let Some(msg) = body_json.get("message").and_then(|v| v.as_str()) {
-                        println!("{}", msg);
+        }
+
+        if let Some(lambda_response) = lambda_response {
+            if let Some(status_code) = lambda_response.get("status_code").and_then(|v| v.as_u64()) {
+                if status_code != 200 {
+                    if let Some(body) = lambda_response.get("body").and_then(|v| v.as_str()) {
+                        return Err(format!("Failed to sync events: {}", body));
+                    } else {
+                        return Err(format!("Failed to sync events: status code {}", status_code));
                     }
                 }
+                if let Some(body) = lambda_response.get("body").and_then(|v| v.as_str()) {
+                    if let Ok(body_json) = serde_json::from_str::<serde_json::Value>(body) {
+                        if let Some(msg) = body_json.get("message").and_then(|v| v.as_str()) {
+                            println!("{}", msg);
+                        }
+                    }
+                }
+                return Ok(());
             }
-            return Ok(());
         }
+
+        if !status.is_success() {
+            return Err(format!("Failed to sync events: {}", text));
+        }
+        Ok(())
     }
-    
-    // If we couldn't parse the Lambda response format, fall back to HTTP status check
-    if !status.is_success() {
-        return Err(format!("Failed to sync events: {}", text));
-    }
-    Ok(())
-  }
 
     // Helper method -> mark events synced //
     fn mark_events_synced(&self, conn: &rusqlite::Connection, events: &[CalendarEvent]) -> Result<(), String> {

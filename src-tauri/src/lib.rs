@@ -146,6 +146,8 @@ async fn logout_user(app_handle: tauri::AppHandle) -> Result<bool, String> {
         }
     });
     
+    // emit ("auto-login-completed", false) to notify the frontend that auto-login is no longer valid
+    let _ = app_handle_arc.emit("auto-login-completed", false);
     Ok(true)
 }
 
