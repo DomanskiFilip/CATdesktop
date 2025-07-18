@@ -16,14 +16,15 @@
   border-left: 3px solid var(--color-error);
 }
 
-.loader {
-  border: 6px solid #f3f3f3;
+#loader {
+  border: 6px solid var(--color-text);
   border-top: 6px solid var(--color-theme);
   border-radius: 50%;
   width: 30px;
   height: 30px;
   animation: spin 1s linear infinite;
-  margin-bottom: 1rem;
+  margin: 10px auto;
+  display: block;
 }
 
 @keyframes spin {

@@ -4,7 +4,7 @@
     <input v-model="email" type="text" :class="{ 'input-error': emailError }" placeholder="Email" />
     <input v-model="password" type="password" :class="{ 'input-error': passwordError }" placeholder="Password" />
     <button type="submit">Login</button>
-    <div v-if="loadingOn && !error" class="loader"></div>
+    <span v-if="loadingOn && !error" id="loader"></span>
     <span v-if="loadingOn && !error">Logging in..</span>
     <p v-if="error" class="error">{{ error }}</p>
   </form>

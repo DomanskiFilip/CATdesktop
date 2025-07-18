@@ -38,7 +38,6 @@ pub async fn register_user_lambda(email: String, password: String) -> Result<Str
         .send()
         .await
         .map_err(|e| e.to_string())?;
-    let _status = response.status();
     let text = response.text().await.map_err(|e| e.to_string())?;
 
     // Parse Lambda response
@@ -55,13 +54,11 @@ pub async fn register_user_lambda(email: String, password: String) -> Result<Str
         });
         return Err(frontend_response.to_string());
     }
-    
-    let body: Body = serde_json::from_str(&lambda_resp.body).map_err(|e| e.to_string())?;
 
     // Pass status and message to frontend as JSON string
     let frontend_response = serde_json::json!({
         "status": "ok",
-        "message": body.message,
+        "message": &lambda_resp.body,
     });
     
     Ok(frontend_response.to_string())

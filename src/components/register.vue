@@ -5,6 +5,8 @@
     <input v-model="password" type="password" :class="{ 'input-error': passwordError }" placeholder="Password" />
     <input v-model="confirmPassword" type="password" :class="{ 'input-error': confirmPasswordError }" placeholder="Confirm Password" />
     <button type="submit">Register</button>
+    <span v-if="loadingOn && !error" id="loader"></span>
+    <span v-if="loadingOn && !error">Logging in..</span>
     <p v-if="error" class="error">{{ error }}</p>
   </form>
 </template>
@@ -21,6 +23,7 @@ const passwordError = ref(false)
 const confirmPassword = ref('')
 const confirmPasswordError = ref(false)
 const error = ref('')
+const loadingOn = ref(false)
 
 // Function to handle registration
 function register() {
@@ -28,23 +31,27 @@ function register() {
   emailError.value = false
   passwordError.value = false
   confirmPasswordError.value = false
+  loadingOn.value = true
 
   // validation checks
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value)) {
     error.value = 'Please enter a valid email address.'
     emailError.value = true
+    loadingOn.value = false
     return
   }
 
   if (!password.value) {
     error.value = 'Please enter password.'
     passwordError.value = true
+    loadingOn.value = false
     return
   }
 
   if (password.value.length < 8 || !/\d/.test(password.value) && password.value !== password.value.toLowerCase()) {
       error.value = 'Password must be at least 8 characters long, contain at least one upper letter and a number.'
       passwordError.value = true
+      loadingOn.value = false
       return
   }
 
@@ -52,6 +59,7 @@ function register() {
     error.value = 'Passwords do not match.'
     passwordError.value = true
     confirmPasswordError.value = true
+    loadingOn.value = false
     return
   }
 
@@ -66,6 +74,7 @@ function register() {
         respObj = JSON.parse(response)
       } catch (e) {
         error.value = 'Unexpected response from server.'
+        loadingOn.value = false
         return
       }
     }
@@ -76,6 +85,7 @@ function register() {
       email.value = ''
       password.value = ''
       confirmPassword.value = ''
+      loadingOn.value = false
     }
   })
   .catch((err) => {
@@ -89,6 +99,7 @@ function register() {
       }
     }
     error.value = msg
+    loadingOn.value = false
   })
 }
 </script>
