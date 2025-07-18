@@ -15,3 +15,18 @@
   border-radius: 4px;
   border-left: 3px solid var(--color-error);
 }
+
+.loader {
+  border: 6px solid #f3f3f3;
+  border-top: 6px solid var(--color-theme);
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  animation: spin 1s linear infinite;
+  margin-bottom: 1rem;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg);}
+  100% { transform: rotate(360deg);}
+}

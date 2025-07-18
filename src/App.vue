@@ -203,6 +203,7 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+/* loading styles */
 #loading-screen {
   display: flex;
   flex-direction: column;
@@ -215,21 +216,6 @@ onMounted(async () => {
   position: fixed;
   top: 0;
   left: 0;
-}
-
-.loader {
-  border: 6px solid #f3f3f3;
-  border-top: 6px solid var(--color-theme);
-  border-radius: 50%;
-  width: 40px;
-  height: 40px;
-  animation: spin 1s linear infinite;
-  margin-bottom: 1rem;
-}
-
-@keyframes spin {
-  0% { transform: rotate(0deg);}
-  100% { transform: rotate(360deg);}
 }
 
 .loading-shrink-enter-active,
@@ -247,6 +233,7 @@ onMounted(async () => {
   opacity: 1;
 }
 
+/* main page styles */
 #main-page {
   display: flex;
   flex-direction: row;

@@ -4,6 +4,8 @@
     <input v-model="email" type="text" :class="{ 'input-error': emailError }" placeholder="Email" />
     <input v-model="password" type="password" :class="{ 'input-error': passwordError }" placeholder="Password" />
     <button type="submit">Login</button>
+    <div v-if="loadingOn && !error" class="loader"></div>
+    <span v-if="loadingOn && !error">Logging in..</span>
     <p v-if="error" class="error">{{ error }}</p>
   </form>
 </template>
@@ -18,6 +20,7 @@ const emailError = ref(false)
 const password = ref('')
 const passwordError = ref(false)
 const error = ref('')
+const loadingOn = ref(false)
 
 const emit = defineEmits(['updateLoggedIn']);
 
@@ -26,17 +29,20 @@ function login() {
   error.value = ''
   emailError.value = false
   passwordError.value = false
+  loadingOn.value = true
 
   // validation checks
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value)) {
     error.value = 'Please enter a valid email address.'
     emailError.value = true
+    loadingOn.value = false
     return
   }
 
   if (!password.value) {
     error.value = 'Please enter password.'
     passwordError.value = true
+    loadingOn.value = false
     return
   }
 
@@ -49,6 +55,7 @@ function login() {
         respObj = JSON.parse(response);
       } catch (e) {
         error.value = 'Unexpected response from server.';
+        loadingOn.value = false
         return;
       }
     }
@@ -56,7 +63,8 @@ function login() {
     if (respObj.status === 'ok') {
       error.value = 'Log in successful!';
       emit('updateLoggedIn', true)
-    } 
+    }
+    loadingOn.value = false
   })
   .catch((err) => {
     let msg = 'An error during login occurred'
@@ -69,6 +77,7 @@ function login() {
       }
     }
     error.value = msg
+    loadingOn.value = false
   });
 }
 </script>
