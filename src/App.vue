@@ -1,6 +1,34 @@
 <template>
   <titleBar />
-  <section v-if="loggedIn" id="main-page">
+  <!-- loading screen -->
+  <transition name="loading-shrink">
+  <section v-if="isLoading" id="loading-screen">
+    <div class="loader"></div>
+    <span>Loading...</span>
+  </section>
+  </transition>
+    <!-- login/register page -->
+  <section v-if="!loggedIn" id="login-register-page">
+    <Login v-if="showLogin" @updateLoggedIn="loggedIn = $event"/>
+    <register v-else />
+    <div>
+      <span v-if="showLogin">
+        do not have an account? &rarr; 
+        <button @click="showLogin = false">
+          Register
+        </button>
+      </span>
+      <span v-else>
+        already have an account? &rarr; 
+        <button @click="showLogin = true">
+          Login
+        </button>
+      </span>
+    </div>
+  </section>
+
+  <!-- main page -->
+  <section v-if="loggedIn && !isLoading" id="main-page">
     <section id="side-bar">
       <button @click="moreInfo(ismoreInfoVisible)">
         <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)">
@@ -52,28 +80,7 @@
       </section>
     </section>
   </section>
-  
-  <!-- login/register page -->
-  <section v-else id="login-register-page">
-    <Login v-if="showLogin" @updateLoggedIn="loggedIn = $event"/>
-    <register v-else />
-    <div>
-      <span v-if="showLogin">
-        do not have an account? &rarr; 
-        <button @click="showLogin = false">
-          Register
-        </button>
-      </span>
-      <span v-else>
-        already have an account? &rarr; 
-        <button @click="showLogin = true">
-          Login
-        </button>
-      </span>
-    </div>
-  </section>
-  
-  
+
 </template>
 
 <script setup lang="ts">
@@ -89,6 +96,7 @@ import themes from './components/themes.vue'
 import calendar from './components/calendar.vue'
 import aiAssistant from './components/aiAssistant.vue'
 
+const isLoading = ref(true)
 const showLogin = ref(true)
 const loggedIn = ref(false)
 const activeSection = ref('section1')
@@ -171,9 +179,8 @@ onMounted(async () => {
   // Listen for backend auto-login events
   await listen('auto-login-completed', (event) => {
     const loginResult = event.payload as boolean;
-    console.log('Auto-login event received:', loginResult);
     loggedIn.value = loginResult;
-    
+    isLoading.value = false;
     if (!loginResult) {
       console.log('Auto-login failed - tokens may be expired or invalid');
     }
@@ -190,11 +197,56 @@ onMounted(async () => {
         loggedIn.value = false;
       }
     }
+    isLoading.value = false; 
   }, 5000); // Give auto-login time to complete
 });
 </script>
 
 <style scoped>
+#loading-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  width: 100vw;
+  background: var(--color-main);
+  z-index: 9999;
+  position: fixed;
+  top: 0;
+  left: 0;
+}
+
+.loader {
+  border: 6px solid #f3f3f3;
+  border-top: 6px solid var(--color-theme);
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+  margin-bottom: 1rem;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg);}
+  100% { transform: rotate(360deg);}
+}
+
+.loading-shrink-enter-active,
+.loading-shrink-leave-active {
+  transition: transform 1s cubic-bezier(.68,-0.55,.27,1.55), opacity 0.5s;
+}
+.loading-shrink-enter-from,
+.loading-shrink-leave-to {
+  transform: scale(0.8);
+  opacity: 0;
+}
+.loading-shrink-enter-to,
+.loading-shrink-leave-from {
+  transform: scale(1);
+  opacity: 1;
+}
+
 #main-page {
   display: flex;
   flex-direction: row;
