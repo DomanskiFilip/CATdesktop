@@ -82,16 +82,19 @@ async fn login_user(app_handle: tauri::AppHandle, email: String, password: Strin
             eprintln!("Failed to initialize database after login: {}", e);
         }
         
-        // Start notification service and database sync service asynchronously
-        let app_handle_ref1 = Arc::clone(&app_handle_arc);
-        tauri::async_runtime::spawn(async move {
-            if let Err(e) = start_notification_service(app_handle_ref1, true).await {
-                eprintln!("Failed to start notification service after login: {}", e);
-            } else {
-                println!("Notification service started successfully after login.");
-            }
-        });
-        
+        let notifications_on = app_handle_arc.state::<AppConfigState>().notification_service;
+        if notifications_on == true {
+          // Start notification service and database sync service asynchronously
+          let app_handle_ref1 = Arc::clone(&app_handle_arc);
+          tauri::async_runtime::spawn(async move {
+              if let Err(e) = start_notification_service(app_handle_ref1, true).await {
+                  eprintln!("Failed to start notification service after login: {}", e);
+              } else {
+                  println!("Notification service started successfully after login.");
+              }
+          });
+        }
+
         let app_handle_ref2 = Arc::clone(&app_handle_arc);
         tauri::async_runtime::spawn(async move {
             if let Err(e) = start_database_sync_service(app_handle_ref2, true).await {
@@ -229,6 +232,20 @@ async fn set_user_coordinates(state: State<'_, Mutex<UserLocation>>, latitude: f
     loc.latitude = latitude;
     loc.longitude = longitude;
     Ok(())
+}
+
+#[tauri::command]
+async fn set_notification_service(app_handle: tauri::AppHandle, enabled: bool, lead_minutes: Option<u32>) -> Result<(), String> {
+    user_utils::set_notification_service(app_handle, enabled, lead_minutes)
+        .await.map_err(|e| format!("Failed to set notification service: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn set_notification_lead_time(app_handle: tauri::AppHandle, lead_minutes: u32) -> Result<(), String> {
+    user_utils::set_notification_lead_time(app_handle, lead_minutes)
+        .await
+        .map_err(|e| format!("Failed to set notification lead time: {}", e))
 }
 
 // ai assistant comands //
@@ -493,6 +510,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             delete_all_events,
             get_weekly_weather,
             set_user_coordinates,
+            set_notification_service,
+            set_notification_lead_time,
         ])
         .setup(|app| {
           // Request notification permissions on macOS

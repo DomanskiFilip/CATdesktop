@@ -1,14 +1,14 @@
 use crate::database_utils:: { CalendarEvent, get_db_connection };
-use crate::user_utils::get_current_user_id;
+use crate::user_utils::{ get_current_user_id, UserSettings };
 use notify_rust::Notification;
-use tauri::{AppHandle, Manager};
-use chrono::{DateTime, Local, Duration};
+use tauri::{ AppHandle, Manager };
+use chrono::{ DateTime, Local, Duration };
 use std::collections::HashMap;
-use tokio::time::{sleep, Duration as TokioDuration};
+use tokio::time::{ sleep, Duration as TokioDuration };
 use tokio::task::JoinHandle;
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
-use rrule::{RRuleSet, Tz};
+use rrule::{ RRuleSet, Tz };
 use std::str::FromStr;
 
 pub struct NotificationService {
@@ -92,7 +92,13 @@ impl NotificationService {
       // Calculate delays
       let event_time = event.time;
       let now = chrono::Local::now();
-      let warning_delay = (event_time - Duration::minutes(15)) - now;
+      let lead_minutes = std::fs::read_to_string("settings.json")
+        .ok()
+        .and_then(|content| serde_json::from_str::<UserSettings>(&content).ok())
+        .map(|s| s.notification_lead_minutes)
+        .unwrap_or(15);
+
+      let warning_delay = (event_time - Duration::minutes(lead_minutes as i64)) - now;
       let event_delay = event_time - now;
       
       // Check if the event is in the past
@@ -105,7 +111,7 @@ impl NotificationService {
       
       // Schedule 15-minute warning notification
       if warning_delay.num_seconds() > 0 {
-          println!("Scheduling 15-minute warning in {} minutes", warning_delay.num_minutes());
+          println!("Scheduling {}-minute warning in {} minutes", lead_minutes, warning_delay.num_minutes());
           
           let event_id_clone = event_id.clone();
           let description_clone = description.clone();

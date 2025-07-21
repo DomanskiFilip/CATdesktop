@@ -3,7 +3,7 @@
   <!-- loading screen -->
   <transition name="loading-shrink">
   <section v-if="isLoading" id="loading-screen">
-    <div class="loader"></div>
+    <div id="loader"></div>
     <span>Loading...</span>
   </section>
   </transition>
@@ -71,12 +71,9 @@
         <h2>SETTINGS:</h2>
         <hr>
         <themes />
-        <h2>CONNECT WITH GOOGLE:</h2>
-        <hr>
-        <googleOauth />
-        <h2>LOCATION:</h2>
-        <hr>
+        <notifications />
         <location @updateCoordinates="handleLocationUpdate" @updateLocationName="handleLocationNameUpdate" />
+        <oauth />
       </section>
     </section>
   </section>
@@ -88,13 +85,14 @@ import { ref, watch, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, emit } from '@tauri-apps/api/event'
 import titleBar from './components/titleBar.vue'
-import googleOauth from './components/googleOauth.vue'
+import oauth from './components/Oauth.vue'
 import location from './components/location.vue'
 import Login from './components/login.vue'
 import register from './components/register.vue'
 import themes from './components/themes.vue'
 import calendar from './components/calendar.vue'
 import aiAssistant from './components/aiAssistant.vue'
+import notifications from './components/notifications.vue'
 
 const isLoading = ref(true)
 const showLogin = ref(true)

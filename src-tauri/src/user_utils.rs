@@ -1,4 +1,7 @@
 use crate::encryption_utils::get_encryption_key;
+use crate::NotificationServiceState;
+use tokio::sync::Mutex;
+use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 use std::path::PathBuf;
 use std::fs;
@@ -6,6 +9,13 @@ use aes_gcm::{Aes256Gcm, Key, Nonce};
 use aes_gcm::aead::Aead; 
 use aes_gcm::KeyInit; 
 use rand::RngCore;
+use serde::{Serialize, Deserialize};
+
+#[derive(Serialize, Deserialize)]
+pub struct UserSettings {
+    pub notification_service: bool,
+    pub notification_lead_minutes: u32,
+}
 
 // Helper function -> to get the user file path //
 fn get_user_file_path(app_handle: &AppHandle) -> Result<PathBuf, String> {
@@ -95,5 +105,63 @@ pub fn clear_current_user_id(app_handle: &AppHandle) -> Result<(), String> {
     }
     
     println!("User ID cleared successfully");
+    Ok(())
+}
+
+// Function to set the notification service and lead time //
+pub async fn set_notification_service(app_handle: AppHandle, enabled: bool, lead_minutes: Option<u32>) -> Result<(), String> {
+    let lead = lead_minutes.unwrap_or(15); // default to 15 if not provided
+    let settings = UserSettings { 
+        notification_service: enabled,
+        notification_lead_minutes: lead,
+    };
+    std::fs::write("settings.json", serde_json::to_string(&settings).unwrap()).unwrap();
+    println!("Notification service set to: {}, lead: {} min", enabled, lead);
+
+    let notification_state = app_handle.state::<NotificationServiceState>();
+
+    if enabled {
+        let mut service_guard = notification_state.lock().await;
+        if service_guard.is_none() {
+            let service = crate::notification_service::NotificationService::new();
+            let app_handle_arc = Arc::new(app_handle.clone());
+            service.start(app_handle_arc, true).await;
+            *service_guard = Some(service);
+        }
+    } else {
+        let mut service_opt = {
+            let mut service_guard = notification_state.lock().await;
+            service_guard.take()
+        };
+        if let Some(mut service) = service_opt {
+            service.stop().await;
+        }
+    }
+
+    Ok(())
+}
+
+// Function to set the notification lead time //
+pub async fn set_notification_lead_time(app_handle: AppHandle, lead_minutes: u32) -> Result<(), String> {
+    // Read current settings
+    let mut settings: UserSettings = std::fs::read_to_string("settings.json")
+        .ok()
+        .and_then(|content| serde_json::from_str(&content).ok())
+        .unwrap_or(UserSettings {
+            notification_service: true,
+            notification_lead_minutes: 15,
+        });
+    settings.notification_lead_minutes = lead_minutes;
+    std::fs::write("settings.json", serde_json::to_string(&settings).unwrap()).unwrap();
+    println!("Notification lead time set to: {} min", lead_minutes);
+
+    // Reschedule notifications if service is running
+    let app_handle_cloned = app_handle.clone();
+    let notification_state = app_handle_cloned.state::<NotificationServiceState>();
+    let mut service_guard = notification_state.lock().await;
+    if let Some(service) = service_guard.as_mut() {
+        // Reschedule all notifications
+        crate::notification_service::NotificationService::check_and_schedule_all_notifications(&Arc::new(app_handle), true).await.ok();
+    }
     Ok(())
 }

@@ -1,4 +1,5 @@
 <template>
+  <h2>connect your account:</h2>
   <section>
     <button v-if="!loggedIn" @click="checkOAuthAndLoad" :disabled="authenticating">
       login with <img src="@/assets/google-2025-g-logo.webp" alt="Google Logo" class="google-logo"/>
@@ -85,11 +86,18 @@ async function checkOAuthAndLoad() {
 </script>
 
 <style scoped>
+h2 {
+  color: var(--color-text);
+  font-size: 1.2rem;
+  margin-left: 0.5rem;
+}
+
 section {
   display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: 1rem;
+  margin-left: 0.5rem;
 }
 button {
   margin: 1rem;

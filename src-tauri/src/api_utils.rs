@@ -1,5 +1,7 @@
+use crate::user_utils::UserSettings;
 use dotenvy::dotenv;
 use std::env;
+use std::fs;
 use mac_address::get_mac_address;
 use serde_json::Value;
 use std::sync::Arc;
@@ -9,6 +11,7 @@ pub struct AppConfig {
     pub lambda_base_url: String,
     pub enable_database_sync: bool,
     pub enable_google_sync: bool,
+    pub notification_service: bool,
 }
 
 impl AppConfig {
@@ -19,14 +22,23 @@ impl AppConfig {
         let lambda_base_url = env::var("LAMBDA_BASE_URL")
             .unwrap_or_else(|_| "https://ywaixwivt3.execute-api.eu-west-2.amazonaws.com/prod".to_string());
         
-        let enable_database_sync = true;
+        let enable_database_sync = false;
         let enable_google_sync = false;
+        let notification_service = match fs::read_to_string("settings.json") {
+            Ok(content) => {
+                serde_json::from_str::<UserSettings>(&content)
+                    .map(|s| s.notification_service)
+                    .unwrap_or(true)
+            },
+            Err(_) => true, // default
+        };
 
         Ok(Self {
             api_key,
             lambda_base_url,
             enable_database_sync,
             enable_google_sync,
+            notification_service,
         })
     }
 }
