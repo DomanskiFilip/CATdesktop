@@ -71,7 +71,7 @@
         </span>
       </section>
     </section>
-    <smartFeatures v-if="showSmartFeatures" ref="smartFeaturesRef" :event="smartFeaturesEvent" @close="closeSmartFeatures"/>
+    <SmartFeatures v-if="showSmartFeatures" ref="smartFeaturesRef" :event="smartFeaturesEvent" :coordinates="currentCoordinates" @close="closeSmartFeatures"/>
    </section>
 </template>
 
@@ -80,7 +80,11 @@ import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import linkifyStr from 'linkify-string'
-import smartFeatures from './smartFeatures.vue'
+import SmartFeatures from './SmartFeatures.vue'
+
+const props = defineProps<{ 
+  currentCoordinates: { lat: number, lng: number } | null
+}>()
 
 // interface for calendar days
 interface CalendarDay {
@@ -128,7 +132,7 @@ const activeEditor = ref<string | null>(null)
 const weather = ref<Record<string, DailyWeather> | 'no data'>('no data')
 const showSmartFeatures = ref(false)
 const smartFeaturesEvent = ref<CalendarEvent | null>(null)
-const smartFeaturesRef = ref<InstanceType<typeof smartFeatures> | null>(null)
+const smartFeaturesRef = ref<InstanceType<typeof SmartFeatures> | null>(null)
 
 // == Utility functions == //
 // utility function -> check if its current day

@@ -84,9 +84,9 @@
 import { ref, onMounted, nextTick, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { emit as tauriEmit } from '@tauri-apps/api/event'
-import DeleteSuggestion from './deleteSuggestion.vue'
-import EventSuggestion from './eventSuggestion.vue'
-import ConflictMessage from './conflictMessage.vue'
+import DeleteSuggestion from './DeleteSuggestion.vue'
+import EventSuggestion from './EventSuggestion.vue'
+import ConflictMessage from './ConflictMessage.vue'
 
 interface EventSuggestion {
   target_event_id?: string;

@@ -24,6 +24,7 @@
   },
   "devDependencies": {
     "@tsconfig/node22": "^22.0.1",
+    "@types/google.maps": "^3.58.1",
     "@types/lodash": "^4.17.17",
     "@types/node": "^22.15.31",
     "@vitejs/plugin-vue": "^5.2.3",

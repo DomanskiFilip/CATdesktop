@@ -1,16 +1,16 @@
 <template>
-  <titleBar />
+  <TitleBar />
   <!-- loading screen -->
-  <transition name="loading-shrink">
+  <Transition name="loading-shrink">
   <section v-if="isLoading" id="loading-screen">
     <div id="loader"></div>
     <span>Loading...</span>
   </section>
-  </transition>
+  </Transition>
     <!-- login/register page -->
   <section v-if="!loggedIn" id="login-register-page">
     <Login v-if="showLogin" @updateLoggedIn="loggedIn = $event"/>
-    <register v-else />
+    <Register v-else />
     <div>
       <span v-if="showLogin">
         do not have an account? &rarr; 
@@ -61,19 +61,19 @@
     <section id="main-content">
       <section v-show="activeSection === 'section1'" class="content-section">
         <div id="theme-background-element"></div> <!-- background visual element -->
-        <calendar />
+        <Calendar :currentCoordinates="currentCoordinates" />
       </section>
       <section v-show="activeSection === 'section2'" class="content-section">
-        <aiAssistant />
+        <AiAssistant />
       </section>
       <section v-show="activeSection === 'section3'" class="content-section">
         <div id="theme-background-element"></div> <!-- background visual element -->
         <h2>SETTINGS:</h2>
         <hr>
-        <themes />
-        <notifications />
-        <location @updateCoordinates="handleLocationUpdate" @updateLocationName="handleLocationNameUpdate" />
-        <oauth />
+        <Themes />
+        <Notifications />
+        <Location @updateCoordinates="handleLocationUpdate" @updateLocationName="handleLocationNameUpdate" />
+        <Oauth />
       </section>
     </section>
   </section>
@@ -84,22 +84,22 @@
 import { ref, watch, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, emit } from '@tauri-apps/api/event'
-import titleBar from './components/titleBar.vue'
-import oauth from './components/Oauth.vue'
-import location from './components/location.vue'
-import Login from './components/login.vue'
-import register from './components/register.vue'
-import themes from './components/themes.vue'
-import calendar from './components/calendar.vue'
-import aiAssistant from './components/aiAssistant.vue'
-import notifications from './components/notifications.vue'
+import TitleBar from './components/TitleBar.vue'
+import Oauth from './components/Oauth.vue'
+import Location from './components/Location.vue'
+import Login from './components/Login.vue'
+import Register from './components/Register.vue'
+import Themes from './components/Themes.vue'
+import Calendar from './components/Calendar.vue'
+import AiAssistant from './components/AiAssistant.vue'
+import Notifications from './components/Notifications.vue'
 
 const isLoading = ref(true)
 const showLogin = ref(true)
 const loggedIn = ref(false)
 const activeSection = ref('section1')
 const ismoreInfoVisible = ref(false)
-const currentCoordinates = ref(null)
+const currentCoordinates = ref<{ lat: number, lng: number } | null>(null)
 const currentLocationName = ref('')
 
 // Function to log out the user
@@ -154,7 +154,7 @@ const moreInfo = (isVisible: boolean) => {
 }
 
 // Function to handle location updates from the location component
-const handleLocationUpdate = async (coordinates: any) => {
+const handleLocationUpdate = async (coordinates: { lat: number, lng: number } | null) => {
   currentCoordinates.value = coordinates
   if (coordinates) {
     // Emit location change event to notify calendar component

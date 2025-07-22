@@ -1,42 +1,248 @@
 <template>
-  <section class="smart-features-container">
-    <button id="close" @click="$emit('close')"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/></svg></button>
-    <h3>Smart Features for Event</h3>
-    <div v-if="event">
-      <h2>Description: {{ event.description }}</h2>
-      <h2>Time: {{ event.time }}</h2>
-      <!-- LLM and Google Maps integration will go here -->
-      <!-- After LLM response, show Google Map with route -->
-      <span v-if="routeReady">
+  <section id="smart-features-container">
+    <section id="smart-features-header">
+      <div v-if="event">
+        <h2>Smart Features for Event:</h2>
+        <h2>Description: {{ event.description }}</h2>
+        <h2>Time: {{ event.time }}</h2>
+      </div>
+      <button id="close" @click="$emit('close')"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/></svg></button>
+    </section>
+    <span v-if="!aiResponce" id="loader"></span>
+    <section v-if="aiResponce" id="ai-responce-container">
+      <MiniAiChat :clarifyingQuestion="clarifyingQuestion" @answered="handleMiniAnswer" />
+    </section>
+    <span v-if="!routeReady" id="loader"></span>
+    <section v-if="routeReady" id="map-container">
+      <section id="button-container">
         <button @click="setMode('car')"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M240-200v40q0 17-11.5 28.5T200-120h-40q-17 0-28.5-11.5T120-160v-320l84-240q6-18 21.5-29t34.5-11h440q19 0 34.5 11t21.5 29l84 240v320q0 17-11.5 28.5T800-120h-40q-17 0-28.5-11.5T720-160v-40H240Zm-8-360h496l-42-120H274l-42 120Zm-32 80v200-200Zm100 160q25 0 42.5-17.5T360-380q0-25-17.5-42.5T300-440q-25 0-42.5 17.5T240-380q0 25 17.5 42.5T300-320Zm360 0q25 0 42.5-17.5T720-380q0-25-17.5-42.5T660-440q-25 0-42.5 17.5T600-380q0 25 17.5 42.5T660-320Zm-460 40h560v-200H200v200Z"/></svg></button>
         <button @click="setMode('transit')"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M240-120q-17 0-28.5-11.5T200-160v-82q-18-20-29-44.5T160-340v-380q0-83 77-121.5T480-880q172 0 246 37t74 123v380q0 29-11 53.5T760-242v82q0 17-11.5 28.5T720-120h-40q-17 0-28.5-11.5T640-160v-40H320v40q0 17-11.5 28.5T280-120h-40Zm242-640h224-448 224Zm158 280H240h480-80Zm-400-80h480v-120H240v120Zm100 240q25 0 42.5-17.5T400-380q0-25-17.5-42.5T340-440q-25 0-42.5 17.5T280-380q0 25 17.5 42.5T340-320Zm280 0q25 0 42.5-17.5T680-380q0-25-17.5-42.5T620-440q-25 0-42.5 17.5T560-380q0 25 17.5 42.5T620-320ZM258-760h448q-15-17-64.5-28.5T482-800q-107 0-156.5 12.5T258-760Zm62 480h320q33 0 56.5-23.5T720-360v-120H240v120q0 33 23.5 56.5T320-280Z"/></svg></button>
-        <span id="google-map">
-          <!-- Placeholder for Google Maps iframe -->
-          <iframe v-show="mode === 'car'" id="google-map-car" src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3153.123456789012!2d-122.419415684681!3d37.774929279759!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x8085809c8b8b8b8b%3A0x8b8b8b8b8b8b8b8b!2sSan%20Francisco%2C%20CA%2094105%2C%20USA!5e0!3m2!1sen!2sin!4v1616161616161" allowfullscreen="false" loading="lazy"></iframe>
-          <iframe v-show="mode === 'transit'"  id="google-map-transit" src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3153.123456789012!2d-122.419415684681!3d37.774929279759!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x8085809c8b8b8b8b%3A0x8b8b8b8b8b8b8b8b!2sSan%20Francisco%2C%20CA%2094105%2C%20USA!5e0!3m2!1sen!2sin!4v1616161616161" allowfullscreen="false" loading="lazy"></iframe>
-        </span>
-      </span>
-    </div>
+        <form @submit.prevent="submitManualOrigin">
+          <input v-model="manualOrigin" type="text" placeholder="Enter start location" class="location-input"/>
+          <input v-model="manualDestination" type="text" placeholder="Enter end location" class="location-input"/>
+        </form>
+        <button @click="manualOrigin = ''; useManualOrigin = false; manualDestination = ''; useManualDestination = false"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/></svg></button>
+      </section>
+      <!-- Google Maps Map -->
+      <div v-show="mode === 'car' || mode === 'transit'" :key="mode + '-' + (useManualOrigin ? manualOrigin : (props.coordinates ? props.coordinates.lat + ',' + props.coordinates.lng : ''))" id="google-map"></div>
+      <div v-if="mode === 'transit' && transitSteps.length" class="transit-steps" ref="transitStepsRef">
+        <h3>Transit Steps:</h3>
+        <ul>
+          <li v-for="(step, idx) in transitSteps" :key="idx">
+            <span v-if="step.travel_mode === 'WALKING'">
+              <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-theme)"><path d="M552-96v-213l-76-75-32 160-252-51 14-70 181 36 52-263-79 34v106h-72v-154l185-78q9-4 18.5-6t19.5-2q27 0 48.5 12.5T595-623l14 23q30 51 68 73.5t91 22.5v72q-57 0-106.5-25T577-528l-23 120 70 70v242h-72Zm24-600q-35 0-59.5-24.5T492-780q0-35 24.5-59.5T576-864q35 0 59.5 24.5T660-780q0 35-24.5 59.5T576-696Z"/></svg>
+              <span class="steps-color">Walk:</span> {{ step.html_instructions ? step.html_instructions.replace(/<[^>]+>/g, '') : '' }}
+              ({{ step.distance?.text || '' }}, {{ step.duration?.text || '' }})
+            </span>
+            <span v-else-if="step.travel_mode === 'TRANSIT' && step.transit">
+              <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-theme)"><path d="M240-120q-17 0-28.5-11.5T200-160v-82q-18-20-29-44.5T160-340v-380q0-83 77-121.5T480-880q172 0 246 37t74 123v380q0 29-11 53.5T760-242v82q0 17-11.5 28.5T720-120h-40q-17 0-28.5-11.5T640-160v-40H320v40q0 17-11.5 28.5T280-120h-40Zm242-640h224-448 224Zm158 280H240h480-80Zm-400-80h480v-120H240v120Zm100 240q25 0 42.5-17.5T400-380q0-25-17.5-42.5T340-440q-25 0-42.5 17.5T280-380q0 25 17.5 42.5T340-320Zm280 0q25 0 42.5-17.5T680-380q0-25-17.5-42.5T620-440q-25 0-42.5 17.5T560-380q0 25 17.5 42.5T620-320ZM258-760h448q-15-17-64.5-28.5T482-800q-107 0-156.5 12.5T258-760Zm62 480h320q33 0 56.5-23.5T720-360v-120H240v120q0 33 23.5 56.5T320-280Z"/></svg>
+              <span class="steps-color">Take:</span> {{ step.transit.headsign || 'Transit' }}
+              <span class="steps-color">from</span> {{ step.transit.departure_stop?.name || '' }} to {{ step.transit.arrival_stop?.name || '' }}
+              ({{ step.distance?.text || '' }}, {{ step.duration?.text || '' }})
+              <template v-if="step.transit.line">
+                <span class="steps-color">— Line:</span> {{ step.transit.line.short_name || step.transit.line.name || '' }}
+                <span v-if="step.transit.line.vehicle">({{ step.transit.line.vehicle?.name }})</span>
+              </template>
+              <template v-if="step.transit.departure_time && step.transit.arrival_time">
+                <br>
+                <span class="steps-color">Departs:</span> {{ step.transit.departure_time.text }},
+                <span class="steps-color">Arrives:</span> {{ step.transit.arrival_time.text }}
+              </template>
+            </span>
+          </li>
+        </ul>
+      </div>
+    </section>
   </section>
 </template>
 
+<reference types="google.maps" />
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, nextTick } from 'vue'
+import MiniAiChat from './MiniAiChat.vue';
 
-const props = defineProps<{ event: any }>()
+const props = defineProps<{ 
+  event: any,
+  coordinates: { lat: number, lng: number } | null
+}>()
+
+// State variables
 const routeReady = ref(true)
+const aiResponce = ref(true)
 const mode = ref('car')
+const manualOrigin = ref('')
+const useManualOrigin = ref(false)
+const manualDestination = ref('')
+const useManualDestination = ref(false)
+const transitSteps = ref<any[]>([])
+const transitStepsRef = ref<HTMLElement | null>(null)
+const clarifyingQuestion = ref('What is the destination address for this event?')
+const eventTimestamp = props.event?.time ? new Date(props.event.time) : new Date();
+const apiKey = import.meta.env.VITE_GOOGLE_MAPS_EMBED_API_KEY
 
-// Placeholder for LLM integration and Google Maps API
+// set the mode of the map
 const setMode = (newMode: string) => {
   mode.value = newMode
 }
 
-// TODO: After LLM response, set routeReady.value = true and show map
+// Handle the response from MiniAiChat
+const handleMiniAnswer = (answer: string) => {
+  aiResponce.value = true
+}
+
+// Submit manual origin input
+function submitManualOrigin() {
+  useManualOrigin.value = !!manualOrigin.value.trim()
+}
+
+// Load Google Maps API script
+function loadGoogleMapsApi(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (window.google && window.google.maps) {
+      resolve()
+      return
+    }
+    const existingScript = document.getElementById('google-maps-script')
+    if (existingScript) {
+      existingScript.addEventListener('load', () => resolve())
+      return
+    }
+    const script = document.createElement('script')
+    script.id = 'google-maps-script'
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places`
+    script.async = true
+    script.defer = true
+    script.onload = () => resolve()
+    script.onerror = reject
+    document.head.appendChild(script)
+  })
+}
+
+// Initialize Google Maps variables
+let map: google.maps.Map | null = null
+let directionsRenderer: google.maps.DirectionsRenderer | null = null
+let directionsService: google.maps.DirectionsService | null = null
+
+// Render the Google Map with directions
+const renderMap = async () => {
+  await nextTick()
+  if (!window.google || !document.getElementById('google-map')) return
+
+  if (!map) {
+    map = new window.google.maps.Map(document.getElementById('google-map') as HTMLElement, {
+      zoom: 13,
+      center: { lat: 51.5033, lng: -0.1195 }, // London Eye as fallback
+      mapTypeControl: false,
+      streetViewControl: false,
+      fullscreenControl: false,
+      zoomControl: false,
+    })
+  }
+
+  if (directionsRenderer) {
+    directionsRenderer.set('directions', null)
+  }
+
+  if (!directionsRenderer) {
+    directionsRenderer = new window.google.maps.DirectionsRenderer({
+      map,
+      suppressMarkers: false,
+      suppressInfoWindows: false,
+      suppressPolylines: false,
+      suppressBicyclingLayer: true,  
+      polylineOptions: { strokeColor: '#0078d7', strokeWeight: 5 },
+    })
+  } else {
+    directionsRenderer.setMap(map)
+  }
+
+  if (!directionsService) {
+    directionsService = new window.google.maps.DirectionsService()
+  }
+
+  // Build origin and destination
+  const origin = useManualOrigin.value && manualOrigin.value.trim()
+    ? manualOrigin.value.trim()
+    : props.coordinates
+      ? { lat: props.coordinates.lat, lng: props.coordinates.lng }
+      : { lat: 51.5033, lng: -0.1195 }
+  const destination =
+  useManualDestination.value && manualDestination.value.trim()
+    ? manualDestination.value.trim()
+    : 'London Eye, London'
+  const travelMode = mode.value === 'car' ? 'DRIVING' : 'TRANSIT'
+
+  directionsService.route(
+    {
+      origin,
+      destination,
+      travelMode: google.maps.TravelMode[travelMode],
+      provideRouteAlternatives: false,
+      ...(travelMode === 'TRANSIT' && {
+        transitOptions: {
+          departureTime: eventTimestamp,
+        }
+      }),
+    },
+    (result, status) => {
+      if (status === 'OK' && result) {
+        directionsRenderer!.setDirections(result)
+        // Extract transit steps if needed
+        if (travelMode === 'TRANSIT') {
+          const steps = result.routes[0].legs[0].steps
+          transitSteps.value = steps
+          console.log('Transit Steps:', steps)
+        } else {
+          transitSteps.value = []
+        }
+      } else {
+        transitSteps.value = []
+      }
+    }
+  )
+}
+
+// Watch for manual origin changes
+watch(manualOrigin, (val) => {
+  useManualOrigin.value = !!val.trim()
+})
+
+// Watch for manual destination changes
+watch(manualDestination, (val) => {
+  useManualDestination.value = !!val.trim()
+})
+
+// Watch for mode changes to trigger map re-rendering
+watch([mode, transitSteps], async ([newMode, steps]) => {
+  if (newMode === 'transit' && steps.length) {
+    await nextTick()
+    transitStepsRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+})
+
+// Re-render map when mode or manual inputs change
+watch(
+  [mode, manualOrigin, useManualOrigin, manualDestination, useManualDestination, () => props.coordinates],
+  () => {
+    map = null
+    directionsRenderer = null
+    directionsService = null
+    renderMap()
+  }
+)
+
+// Initial map rendering
+onMounted(async () => {
+  await loadGoogleMapsApi()
+  map = null
+  directionsRenderer = null
+  directionsService = null
+  renderMap()
+})
 </script>
 
 <style scoped>
-.smart-features-container {
+#smart-features-container {
   width: 200%;
   margin: 0 auto;
   background: var(--color-shadow);
@@ -49,6 +255,24 @@ const setMode = (newMode: string) => {
   align-items: center;
 }
 
+#smart-features-header {
+  display: flex;
+  width: 100%;
+}
+
+#smart-features-header div {
+  color: var(--color-text);
+  margin: 0.5rem 0;
+  font-size: 0.7rem;
+  display: flex;
+  gap: 0.5rem;
+}
+
+#smart-features-header div h2:first-of-type {
+  font-weight: bold;
+  color: var(--color-theme);
+}
+
 #close {
   background: transparent;
   border: none;
@@ -58,11 +282,97 @@ const setMode = (newMode: string) => {
   margin-left: auto;
 }
 
-#google-map {
-  width: 400px;
-  height: 300px;
+#ai-responce-container {
+  width: 60%;
+  display: flex;
+  justify-content: center;
   margin-top: 1rem;
+  margin-bottom: 1rem;
+}
+
+#map-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+#button-container {
+  display: flex;
+  justify-content: flex-start;
+  gap: 0.1rem;
+  width: 80%;
+}
+
+#button-container button {
+  background: transparent;
+  border: 1px solid var(--color-theme);
+  border-radius: 4px;
+  border-bottom-right-radius: 0;
+  border-bottom-left-radius: 0;
+  padding: 0.3rem;
+  cursor: pointer;
+  color: var(--color-text);
+}
+
+#button-container button:active {
+  background: var(--color-theme);
+  color: var(--color-background);
+}
+
+#button-container form {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+}
+
+.location-input {
+  padding: 0.65rem;
+  border: 1px solid var(--color-theme);
+  border-radius: 4px;
+  border-bottom-right-radius: 0;
+  border-bottom-left-radius: 0;
+  background-color: var(--color-shadow);
+  color: var(--color-text);
+}
+
+#google-map {
+  width: 80%;
+  height: 300px;
   border-radius: 8px;
-  border: none;
+  border-top-left-radius: 0;
+  background: transparent;
+  border: 2px solid var(--color-theme);
+}
+
+.transit-steps {
+  width: 80%;
+  background: transparent;
+  color: var(--color-text);
+  padding: 1rem;
+  font-size: 0.95rem;
+}
+
+.transit-steps ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.transit-steps li {
+  display: flex;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.transit-steps li svg {
+  vertical-align: middle;
+  display: inline-block;
+  position: relative;
+  top: -1px;
+}
+
+.steps-color {
+  color: var(--color-theme);
 }
 </style>
