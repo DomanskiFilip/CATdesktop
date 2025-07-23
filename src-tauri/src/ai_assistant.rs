@@ -7,9 +7,10 @@ use crate::api_utils::{ AppConfig, get_device_info };
 use crate::{ UserLocation, get_weekly_weather };
 use crate::auto_login::auto_login_lambda;
 use serde::{ Deserialize, Serialize };
-use chrono::{ Utc, DateTime, TimeZone };
+use chrono::{ Local, Utc, DateTime, TimeZone, NaiveDateTime };
 use tauri::{ AppHandle, Manager };
 use rand::Rng;
+use serde::Deserializer;
 
 
 #[derive(Deserialize)]
@@ -29,11 +30,33 @@ pub struct LLMResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtractedEvent {
     pub target_event_id: Option<String>,
-    pub description: String,
-    pub time: Option<DateTime<Utc>>,
+    pub description: Option<String>,
+    #[serde(deserialize_with = "deserialize_event_time")]
+    pub time: Option<DateTime<Local>>,
     pub alarm: bool,
     pub recurrence: Option<String>,
 }
+
+// Custom deserializer for ExtractedEvent.time
+fn deserialize_event_time<'de, D>(deserializer: D) -> Result<Option<DateTime<Local>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: Option<String> = Option::deserialize(deserializer)?;
+    if let Some(time_str) = s {
+        // Try RFC3339 first
+        if let Ok(dt) = DateTime::parse_from_rfc3339(&time_str) {
+            return Ok(Some(dt.with_timezone(&Local)));
+        }
+        // Try naive local time (e.g., "2025-07-23T20:00:00")
+        if let Ok(naive) = NaiveDateTime::parse_from_str(&time_str, "%Y-%m-%dT%H:%M:%S") {
+            // Assume naive time is local
+            return Ok(Some(Local.from_local_datetime(&naive).unwrap()));
+        }
+    }
+    Ok(None)
+}
+
 
 pub struct AIAssistantService;
 
@@ -236,27 +259,38 @@ impl AIAssistantService {
             println!("Lambda returned error: {}", lambda_resp.body);
         }
 
-        let patched_body = lambda_resp.body.replace(
-            r#""time":"2025-07-17T10:00:00""#,
-            r#""time":"2025-07-17T10:00:00Z""#
-        );
-        let mut llm_response: LLMResponse = serde_json::from_str(&patched_body)
+        println!("🔍 Raw Lambda response: {}", lambda_resp.body);
+
+        let sanitized_body = lambda_resp.body
+            .replace('\n', "")
+            .replace('\r', "")
+            .replace('\t', "")
+            .replace('\u{a0}', "")
+            .trim()
+            .to_string();
+
+        if !sanitized_body.ends_with('}') {
+            println!("❌ Lambda response appears truncated: {}", sanitized_body);
+            return Err("Received incomplete response from AI. Please try again.".to_string());
+        }
+
+        println!("🔍 Patched Lambda response for parsing: {}", sanitized_body);
+
+        // If body is a JSON string literal, parse it first
+        let mut llm_response: LLMResponse = serde_json::from_str(&sanitized_body)
             .map_err(|e| {
-                println!("❌ Failed to parse LLM response: {} - JSON was: {}", e, patched_body);
+                println!("❌ Failed to parse LLM response: {} - JSON was: {}", e, sanitized_body);
                 format!("Failed to parse LLM response: {}", e)
             })?;
 
-        // treat AI times as local times, not UTC
-        if let Some(ref mut events) = llm_response.extracted_events {
+        // Patch: Ensure every extracted event has a non-empty description
+        if let Some(events) = &mut llm_response.extracted_events {
             for event in events.iter_mut() {
-                if let Some(utc_time) = event.time {
-                    // Convert the UTC time to a naive datetime and then treat it as local
-                    let naive_time = utc_time.naive_utc();
-                    let local_time = chrono::Local.from_local_datetime(&naive_time).unwrap();
-                    event.time = Some(local_time.with_timezone(&Utc));
+                if event.description.as_ref().map(|d| d.trim().is_empty()).unwrap_or(true) {
+                    event.description = Some("Untitled Event".to_string());
                 }
             }
-        }    
+        }
 
         Ok(llm_response)
     }
