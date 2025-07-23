@@ -15,6 +15,7 @@ mod login;
 mod register;
 mod auto_login;
 mod ai_assistant;
+mod ai_enrichment;
 
 
 use tauri::{AppHandle, Manager, Emitter, State};
@@ -29,6 +30,8 @@ use crate::notification_service::NotificationService;
 use crate::database_sync_service::DbSyncService;
 use crate::google_sync_service::GoogleSyncService;
 use crate::weather_service::get_weekly_weather;
+use crate::ai_enrichment::AIEnrichmentService;
+use crate::database_utils::CalendarEvent;
 
 pub type AppConfigState = Arc<crate::api_utils::AppConfig>;
 pub type NotificationServiceState = Arc<Mutex<Option<NotificationService>>>;
@@ -276,6 +279,27 @@ async fn process_ai_message(app_handle: AppHandle, query: String, conversation_h
     }
 }
 
+
+// Tauri command to enrich calendar event
+#[tauri::command]
+async fn enrich_event(app_handle: AppHandle, event_json: String) -> Result<String, String> {
+    let event: CalendarEvent = serde_json::from_str(&event_json)
+        .map_err(|e| format!("Failed to parse event: {}", e))?;
+    let service = AIEnrichmentService::new();
+    let response = service.enrich_event(&app_handle, event).await?;
+    serde_json::to_string(&response).map_err(|e| format!("Failed to serialize response: {}", e))
+}
+
+// Tauri command to handle AI enrichment follow-up
+#[tauri::command]
+async fn enrichment_followup(app_handle: AppHandle, event_json: String, user_additional_info: String, clarification_history: Option<String>,) -> Result<String, String> {
+    let event: CalendarEvent = serde_json::from_str(&event_json)
+        .map_err(|e| format!("Failed to parse event: {}", e))?;
+    let service = AIEnrichmentService::new();
+    let response = service.enrichment_followup(&app_handle, event, user_additional_info, clarification_history).await?;
+    serde_json::to_string(&response).map_err(|e| format!("Failed to serialize response: {}", e))
+}
+
 #[tauri::command]
 async fn save_event_from_ai(event_json: String, app_handle: AppHandle) -> Result<(), String> {
     let event: crate::database_utils::CalendarEvent = serde_json::from_str(&event_json)
@@ -505,6 +529,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             run_oauth2_flow,
             schedule_event_notification,
             process_ai_message,
+            enrich_event,
+            enrichment_followup,
             save_event_from_ai,
             reject_event_suggestion,
             delete_all_events,

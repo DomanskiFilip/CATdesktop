@@ -8,11 +8,11 @@
       </div>
       <button id="close" @click="$emit('close')"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/></svg></button>
     </section>
-    <span v-if="!aiResponce" id="loader"></span>
-    <section v-if="aiResponce" id="ai-responce-container">
-      <MiniAiChat :clarifyingQuestion="clarifyingQuestion" @answered="handleMiniAnswer" />
+    <span v-if="!aiResponceState" id="loader"></span>
+    <section v-if="aiResponceState && aiResponce" id="ai-responce-container">
+      <p>{{ aiResponce?.response_text }}</p>
+      <MiniAiChat v-if="aiResponce.info_needed && aiResponce.info_needed.length > 0" :clarifyingQuestion="clarifyingQuestion" @answered="handleMiniAnswer" />
     </section>
-    <span v-if="!routeReady" id="loader"></span>
     <section v-if="routeReady" id="map-container">
       <section id="button-container">
         <button @click="setMode('car')"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M240-200v40q0 17-11.5 28.5T200-120h-40q-17 0-28.5-11.5T120-160v-320l84-240q6-18 21.5-29t34.5-11h440q19 0 34.5 11t21.5 29l84 240v320q0 17-11.5 28.5T800-120h-40q-17 0-28.5-11.5T720-160v-40H240Zm-8-360h496l-42-120H274l-42 120Zm-32 80v200-200Zm100 160q25 0 42.5-17.5T360-380q0-25-17.5-42.5T300-440q-25 0-42.5 17.5T240-380q0 25 17.5 42.5T300-320Zm360 0q25 0 42.5-17.5T720-380q0-25-17.5-42.5T660-440q-25 0-42.5 17.5T600-380q0 25 17.5 42.5T660-320Zm-460 40h560v-200H200v200Z"/></svg></button>
@@ -24,7 +24,7 @@
         <button @click="manualOrigin = ''; useManualOrigin = false; manualDestination = ''; useManualDestination = false"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/></svg></button>
       </section>
       <!-- Google Maps Map -->
-      <div v-show="mode === 'car' || mode === 'transit'" :key="mode + '-' + (useManualOrigin ? manualOrigin : (props.coordinates ? props.coordinates.lat + ',' + props.coordinates.lng : ''))" id="google-map"></div>
+      <div v-show="mode === 'car' || mode === 'transit'" :key="mode + '-' + (useManualOrigin ? manualOrigin : (destinationLocation ? destinationLocation : (props.coordinates ? props.coordinates.lat + ',' + props.coordinates.lng : '')))" id="google-map"></div>
       <div v-if="mode === 'transit' && transitSteps.length" class="transit-steps" ref="transitStepsRef">
         <h3>Transit Steps:</h3>
         <ul>
@@ -59,6 +59,7 @@
 <reference types="google.maps" />
 <script setup lang="ts">
 import { ref, onMounted, watch, nextTick } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import MiniAiChat from './MiniAiChat.vue';
 
 const props = defineProps<{ 
@@ -67,8 +68,10 @@ const props = defineProps<{
 }>()
 
 // State variables
-const routeReady = ref(true)
-const aiResponce = ref(true)
+const routeReady = ref(false)
+const aiResponceState = ref(false)
+const aiResponce = ref<any>(null)
+const aiError = ref<string | null>(null)
 const mode = ref('car')
 const manualOrigin = ref('')
 const useManualOrigin = ref(false)
@@ -76,9 +79,11 @@ const manualDestination = ref('')
 const useManualDestination = ref(false)
 const transitSteps = ref<any[]>([])
 const transitStepsRef = ref<HTMLElement | null>(null)
-const clarifyingQuestion = ref('What is the destination address for this event?')
-const eventTimestamp = props.event?.time ? new Date(props.event.time) : new Date();
+const clarifyingQuestion = ref('')
+const destinationLocation = ref<string | null>(null)
+const eventTimestamp = props.event?.time ? new Date(props.event.time) : new Date()
 const apiKey = import.meta.env.VITE_GOOGLE_MAPS_EMBED_API_KEY
+const clarificationHistory = ref<string[]>([])
 
 // set the mode of the map
 const setMode = (newMode: string) => {
@@ -86,8 +91,27 @@ const setMode = (newMode: string) => {
 }
 
 // Handle the response from MiniAiChat
-const handleMiniAnswer = (answer: string) => {
-  aiResponce.value = true
+const handleMiniAnswer = async (answer: string) => {
+  aiResponceState.value = false
+  try {
+    const response = await invoke('enrichment_followup', {
+      eventJson: JSON.stringify(props.event),
+      userAdditionalInfo: answer,
+      clarificationHistory: JSON.stringify(clarificationHistory.value)
+    })
+    aiResponce.value = JSON.parse(response as string)
+    clarifyingQuestion.value = Array.isArray(aiResponce.value.info_needed) && aiResponce.value.info_needed.length > 0
+      ? `Please provide: ${aiResponce.value.info_needed.join(', ')}`
+      : ''
+    // Update destination if location is present
+    destinationLocation.value = aiResponce.value.location || null
+    routeReady.value = !!destinationLocation.value
+    aiResponceState.value = true
+  } catch (err) {
+    aiError.value = 'Failed to enrich event (followup)'
+    console.error(err)
+    aiResponceState.value = true
+  }
 }
 
 // Submit manual origin input
@@ -131,7 +155,7 @@ const renderMap = async () => {
   if (!map) {
     map = new window.google.maps.Map(document.getElementById('google-map') as HTMLElement, {
       zoom: 13,
-      center: { lat: 51.5033, lng: -0.1195 }, // London Eye as fallback
+      center: { lat: 51.5033, lng: -0.1195 },
       mapTypeControl: false,
       streetViewControl: false,
       fullscreenControl: false,
@@ -167,9 +191,11 @@ const renderMap = async () => {
       ? { lat: props.coordinates.lat, lng: props.coordinates.lng }
       : { lat: 51.5033, lng: -0.1195 }
   const destination =
-  useManualDestination.value && manualDestination.value.trim()
-    ? manualDestination.value.trim()
-    : 'London Eye, London'
+    useManualDestination.value && manualDestination.value.trim()
+      ? manualDestination.value.trim()
+      : destinationLocation.value // Use AI location if available
+        ? destinationLocation.value
+        : 'London Eye, London'
   const travelMode = mode.value === 'car' ? 'DRIVING' : 'TRANSIT'
 
   directionsService.route(
@@ -187,11 +213,9 @@ const renderMap = async () => {
     (result, status) => {
       if (status === 'OK' && result) {
         directionsRenderer!.setDirections(result)
-        // Extract transit steps if needed
         if (travelMode === 'TRANSIT') {
           const steps = result.routes[0].legs[0].steps
           transitSteps.value = steps
-          console.log('Transit Steps:', steps)
         } else {
           transitSteps.value = []
         }
@@ -212,6 +236,38 @@ watch(manualDestination, (val) => {
   useManualDestination.value = !!val.trim()
 })
 
+watch(
+  () => props.event,
+  async (newEvent) => {
+    if (!newEvent) return
+    clarificationHistory.value = []
+    aiResponceState.value = false
+    try {
+      const response = await invoke('enrich_event', {
+        eventJson: JSON.stringify(newEvent)
+      })
+      aiResponce.value = JSON.parse(response as string)
+      clarifyingQuestion.value = Array.isArray(aiResponce.value.info_needed) && aiResponce.value.info_needed.length > 0
+        ? `Please provide: ${aiResponce.value.info_needed.join(', ')}`
+        : ''
+      destinationLocation.value = aiResponce.value.location || null
+      routeReady.value = !!destinationLocation.value
+      aiResponceState.value = true
+
+      // Scroll to smart features after response is loaded
+      await nextTick()
+      const container = document.getElementById('smart-features-container')
+      if (container) {
+        container.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+    } catch (err) {
+      aiError.value = 'Failed to enrich event'
+      console.error(err)
+      aiResponceState.value = true
+    }
+  }
+)
+
 // Watch for mode changes to trigger map re-rendering
 watch([mode, transitSteps], async ([newMode, steps]) => {
   if (newMode === 'transit' && steps.length) {
@@ -222,12 +278,21 @@ watch([mode, transitSteps], async ([newMode, steps]) => {
 
 // Re-render map when mode or manual inputs change
 watch(
-  [mode, manualOrigin, useManualOrigin, manualDestination, useManualDestination, () => props.coordinates],
+  [mode, manualOrigin, useManualOrigin, manualDestination, useManualDestination, () => props.coordinates, destinationLocation],
   () => {
     map = null
     directionsRenderer = null
     directionsService = null
     renderMap()
+    // Scroll to map after rendering if map is shown
+    nextTick(() => {
+      if (routeReady.value) {
+        const mapEl = document.getElementById('google-map')
+        if (mapEl) {
+          mapEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }
+      }
+    })
   }
 )
 
@@ -238,6 +303,30 @@ onMounted(async () => {
   directionsRenderer = null
   directionsService = null
   renderMap()
+  aiResponceState.value = false
+  try {
+    const response = await invoke('enrich_event', {
+      eventJson: JSON.stringify(props.event)
+    })
+    aiResponce.value = JSON.parse(response as string)
+    clarifyingQuestion.value = Array.isArray(aiResponce.value.info_needed) && aiResponce.value.info_needed.length > 0
+      ? `Please provide: ${aiResponce.value.info_needed.join(', ')}`
+      : ''
+    destinationLocation.value = aiResponce.value.location || null
+    routeReady.value = !!destinationLocation.value
+    aiResponceState.value = true
+
+    // Scroll to smart features after response is loaded
+    await nextTick()
+    const container = document.getElementById('smart-features-container')
+    if (container) {
+      container.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  } catch (err) {
+    aiError.value = 'Failed to enrich event'
+    console.error(err)
+    aiResponceState.value = true
+  }
 })
 </script>
 
@@ -285,6 +374,8 @@ onMounted(async () => {
 #ai-responce-container {
   width: 60%;
   display: flex;
+  flex-direction: column;
+  gap: 1rem;
   justify-content: center;
   margin-top: 1rem;
   margin-bottom: 1rem;

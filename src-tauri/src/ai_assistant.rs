@@ -13,9 +13,9 @@ use rand::Rng;
 
 
 #[derive(Deserialize)]
-struct LambdaResponse {
-    status_code: u16,
-    body: String,
+pub struct LambdaResponse {
+    pub status_code: u16,
+    pub body: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
