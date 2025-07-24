@@ -23,10 +23,15 @@
 <script setup lang="ts">
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-const appWindow = getCurrentWindow();
-const minimizeWindow = () => appWindow.minimize()
-const maximizeWindow = async () => appWindow.toggleMaximize()
-const closeWindow = () => appWindow.close()
+let appWindow: ReturnType<typeof getCurrentWindow> | null = null;
+const isTauri = typeof window !== 'undefined' && '__TAURI__' in window;
+
+if (isTauri) {
+  appWindow = getCurrentWindow();
+}
+const minimizeWindow = () => { if (appWindow) appWindow.minimize(); }
+const maximizeWindow = () => { if (appWindow) appWindow.toggleMaximize(); }
+const closeWindow = () => { if (appWindow) appWindow.close(); }
 </script>
 
 <style scoped>

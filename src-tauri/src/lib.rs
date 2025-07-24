@@ -1,5 +1,3 @@
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub mod window;
 mod api_utils;
 mod token_utils;
 mod theme_utils;
@@ -19,10 +17,13 @@ mod ai_enrichment;
 
 
 use tauri::{AppHandle, Manager, Emitter, State};
+#[cfg(not(target_os = "android"))]
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
+#[cfg(not(target_os = "android"))]
 use tauri::menu::{Menu, MenuItem};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+#[cfg(not(target_os = "android"))]
 use auto_launch::AutoLaunchBuilder;
 use std::env;
 use serde::{Serialize, Deserialize};
@@ -208,6 +209,7 @@ fn get_oauth_timeout() -> u64 {
 }
 
 // Setup auto-launch command
+#[cfg(not(target_os = "android"))]
 #[tauri::command]
 async fn setup_auto_launch() -> Result<(), String> {
     // Only enable auto-launch in release builds
@@ -467,6 +469,7 @@ async fn trigger_sync(app_handle: tauri::AppHandle) -> Result<(), String> {
 }
 
 // Create system tray
+#[cfg(not(target_os = "android"))]
 fn create_system_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
@@ -504,6 +507,7 @@ fn create_system_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 }
 
 // Main function to run the Tauri application
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let app_config = Arc::new(crate::api_utils::AppConfig::new()?);
 
@@ -550,11 +554,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             database_utils::init_db(&app.handle()).map_err(|e| e.to_string())?;
 
             // Create system tray
+            #[cfg(not(target_os = "android"))]
             create_system_tray(&app.handle())?;
 
-            //put window always on top
-            crate::window::set_always_on_top(&app.handle(), true);
-            
             // Initialize notification service state
             app.manage(Arc::new(Mutex::new(None::<NotificationService>)) as NotificationServiceState);
             
@@ -592,13 +594,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
               });
             }
             tauri::RunEvent::WindowEvent { label, event, .. } => {
-                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                    // Hide the window instead of closing it
-                    if let Some(window) = app_handle.get_webview_window(&label) {
-                        let _ = window.hide();
-                    }
-                    api.prevent_close();
-                }
+              #[cfg(not(target_os = "android"))]
+              {
+                  if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                      // Hide the window instead of closing it
+                      if let Some(window) = app_handle.get_webview_window(&label) {
+                          let _ = window.hide();
+                      }
+                      api.prevent_close();
+                  }
+              }
             }
             _ => {}
         });

@@ -1,5 +1,6 @@
 use crate::database_utils:: { CalendarEvent, get_db_connection };
 use crate::user_utils::{ get_current_user_id, UserSettings };
+#[cfg(not(target_os = "android"))]
 use notify_rust::Notification;
 use tauri::{ AppHandle, Manager };
 use chrono::{ DateTime, Local, Duration };
@@ -118,7 +119,7 @@ impl NotificationService {
           
           let warning_task = tokio::spawn(async move {
               sleep(TokioDuration::from_secs(warning_delay.num_seconds() as u64)).await;
-              
+              #[cfg(not(target_os = "android"))]
               if let Err(e) = Notification::new()
                   .summary("Calendar AssistanT - Event Reminder")
                   .body(&format!("Upcoming event in 15 minutes: {}", description_clone))
@@ -145,7 +146,7 @@ impl NotificationService {
           
           let event_task = tokio::spawn(async move {
               sleep(TokioDuration::from_secs(event_delay.num_seconds() as u64)).await;
-              
+              #[cfg(not(target_os = "android"))]
               if let Err(e) = Notification::new()
                   .summary("Calendar AssistanT - Event Now")
                   .body(&format!("Event now: {}", description_clone))

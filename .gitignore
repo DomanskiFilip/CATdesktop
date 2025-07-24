@@ -39,3 +39,8 @@ src-tauri/gen/schemas
 access_token.txt
 tokens.enc
 client_secret_*.json
+
+# Exclude build artifacts
+build/
+gen/
+gen/android
