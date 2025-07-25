@@ -1,3 +1,4 @@
+#[cfg(not(target_os = "android"))]
 use crate::encryption_utils::get_encryption_key;
 use aes_gcm::{Aes256Gcm, Key, Nonce};
 use aes_gcm::aead::Aead;
@@ -27,6 +28,7 @@ fn generate_nonce() -> [u8; 12] {
 }
 
 // Function to save access and refresh tokens to a file with encryption //
+#[cfg(not(target_os = "android"))]
 pub fn save_tokens_to_file(app_handle: &AppHandle, access_token: &str, refresh_token: &str) -> Result<(), String> {
     // Generate a key from an environment variable or other secure source
     let key = get_encryption_key()?;
@@ -63,7 +65,13 @@ pub fn save_tokens_to_file(app_handle: &AppHandle, access_token: &str, refresh_t
     Ok(())
 }
 
+#[cfg(target_os = "android")]
+pub fn save_tokens_to_file(_app_handle: &AppHandle, _access_token: &str, _refresh_token: &str) -> Result<(), String> {
+    Err("save_tokens_to_file is not implemented for Android".to_string())
+}
+
 // Function to read access and refresh tokens from a file with decryption //
+#[cfg(not(target_os = "android"))]
 pub fn read_tokens_from_file(app_handle: &AppHandle) -> Result<(String, String), String> {
     // Retrieve and decode the encryption key
     let key = get_encryption_key()?;
@@ -95,6 +103,11 @@ pub fn read_tokens_from_file(app_handle: &AppHandle) -> Result<(String, String),
         access_token,
         refresh_token,
     ))
+}
+
+#[cfg(target_os = "android")]
+pub fn read_tokens_from_file(_app_handle: &AppHandle) -> Result<(String, String), String> {
+    Err("read_tokens_from_file is not implemented for Android".to_string())
 }
 
 // Function to clear tokens from the file //

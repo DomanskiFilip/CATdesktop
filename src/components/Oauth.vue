@@ -107,7 +107,14 @@ button {
   cursor: pointer;
   display: flex;
   align-items: center;
+  background-color: var(--color-shadow);
+  border: none;
 }
+
+button:hover {
+  box-shadow: 0 0 10px var(--color-theme);
+}
+
 #endpoint {
   display: flex;
   flex-direction: column;

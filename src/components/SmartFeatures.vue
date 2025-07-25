@@ -82,7 +82,7 @@ const transitStepsRef = ref<HTMLElement | null>(null)
 const clarifyingQuestion = ref('')
 const destinationLocation = ref<string | null>(null)
 const eventTimestamp = props.event?.time ? new Date(props.event.time) : new Date()
-const apiKey = import.meta.env.VITE_GOOGLE_MAPS_EMBED_API_KEY
+const apiKey = "AIzaSyCq_gPC_WgOecqVQ0JJKo221BRlHuasJ-4";
 const clarificationHistory = ref<string[]>([])
 
 // set the mode of the map
@@ -408,7 +408,7 @@ onMounted(async () => {
 
 #button-container button:active {
   background: var(--color-theme);
-  color: var(--color-background);
+  color: var(--color-main);
 }
 
 #button-container form {

@@ -25,11 +25,10 @@ impl AIEnrichmentService {
         Self
     }
 
-    async fn get_context(&self, app_handle: &AppHandle, event: &CalendarEvent,) -> Result<(String, serde_json::Value, String, String, String, String), String> {
+    async fn get_context(&self, app_handle: &AppHandle, event: &CalendarEvent,) -> Result<(String, serde_json::Value, String, String, String), String> {
         let user_id = get_current_user_id(app_handle)?;
         let device_info = get_device_info();
         let config = AppConfig::new()?;
-        let api_key = config.api_key.clone();
         let current_time = Utc::now().to_rfc3339();
 
         // fetch weather for event date
@@ -45,15 +44,14 @@ impl AIEnrichmentService {
                 .unwrap_or_else(|| "No weather data available.".to_string())
         };
 
-        Ok((user_id, device_info, config.lambda_base_url, api_key, current_time, weather))
+        Ok((user_id, device_info, config.lambda_base_url, current_time, weather))
     }
 
-    async fn send_lambda_request(&self, url: &str, api_key: &str, payload: &serde_json::Value,) -> Result<EnrichmentResponse, String> {
+    async fn send_lambda_request(&self, url: &str, payload: &serde_json::Value,) -> Result<EnrichmentResponse, String> {
         let client = reqwest::Client::new();
         let resp = client
             .post(url)
             .header("Content-Type", "application/json")
-            .header("x-api-key", api_key)
             .json(payload)
             .send()
             .await
@@ -74,7 +72,7 @@ impl AIEnrichmentService {
     }
 
     pub async fn enrich_event(&self, app_handle: &AppHandle, event: CalendarEvent) -> Result<EnrichmentResponse, String> {
-        let (user_id, device_info, lambda_base_url, api_key, current_time, weather) =
+        let (user_id, device_info, lambda_base_url, current_time, weather) =
             self.get_context(app_handle, &event).await?;
 
         let mut payload = serde_json::json!({
@@ -92,11 +90,11 @@ impl AIEnrichmentService {
         }
 
         let url = format!("{}/llm", lambda_base_url);
-        self.send_lambda_request(&url, &api_key, &payload).await
+        self.send_lambda_request(&url, &payload).await
     }
 
     pub async fn enrichment_followup(&self, app_handle: &AppHandle, event: CalendarEvent, user_additional_info: String, clarification_history: Option<String>,) -> Result<EnrichmentResponse, String> {
-        let (user_id, device_info, lambda_base_url, api_key, current_time, weather) =
+        let (user_id, device_info, lambda_base_url, current_time, weather) =
             self.get_context(app_handle, &event).await?;
 
         let mut payload = serde_json::json!({
@@ -116,6 +114,6 @@ impl AIEnrichmentService {
         }
 
         let url = format!("{}/llm", lambda_base_url);
-        self.send_lambda_request(&url, &api_key, &payload).await
+        self.send_lambda_request(&url, &payload).await
     }
 }

@@ -1,6 +1,7 @@
 use crate::token_utils::{read_tokens_from_file, save_tokens_to_file};
 use crate::api_utils::{AppConfig, get_device_info};
 use crate::user_utils::save_current_user_id;
+#[cfg(not(target_os = "android"))]
 use crate::encryption_utils::load_user_encryption_key;
 use reqwest::Client;
 use serde::Deserialize;
@@ -49,7 +50,6 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
     let mut response = client
         .post(&url)
         .header("Content-Type", "application/json")
-        .header("x-api-key", &config.api_key)
         .body(payload.to_string())
         .send()
         .await
@@ -70,9 +70,12 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
                   save_current_user_id(app_handle, email)?;
 
                   // Load the user's encryption key for decryption
-                  match load_user_encryption_key(app_handle, email) {
-                      Ok(_) => println!("Successfully loaded user encryption key"),
-                      Err(e) => eprintln!("Failed to load user encryption key: {}", e),
+                  #[cfg(not(target_os = "android"))]
+                  {
+                    match load_user_encryption_key(app_handle, email) {
+                        Ok(_) => println!("Successfully loaded user encryption key"),
+                        Err(e) => eprintln!("Failed to load user encryption key: {}", e),
+                    }
                   }
               } else {
                   return Err("Failed to extract email from response body".to_string());
@@ -96,7 +99,6 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
                 response = client
                     .post(&url)
                     .header("Content-Type", "application/json")
-                    .header("x-api-key", &config.api_key)
                     .body(payload.to_string())
                     .send()
                     .await

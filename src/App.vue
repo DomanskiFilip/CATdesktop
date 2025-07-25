@@ -1,5 +1,5 @@
 <template>
-  <TitleBar />
+  <TitleBar v-if="!isMobile" />
   <!-- loading screen -->
   <Transition name="loading-shrink">
   <section v-if="isLoading" id="loading-screen">
@@ -81,7 +81,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, emit } from '@tauri-apps/api/event'
 import TitleBar from './components/TitleBar.vue'
@@ -94,6 +94,8 @@ import Calendar from './components/Calendar.vue'
 import AiAssistant from './components/AiAssistant.vue'
 import Notifications from './components/Notifications.vue'
 
+
+const isMobile = computed(() => /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent))
 const isLoading = ref(true)
 const showLogin = ref(true)
 const loggedIn = ref(false)

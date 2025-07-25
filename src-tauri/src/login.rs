@@ -39,7 +39,6 @@ pub async fn login_user_lambda(app_handle: &AppHandle, email: String, password: 
     let response = client
         .post(url)
         .header("Content-Type", "application/json")
-        .header("x-api-key", config.api_key)
         .body(payload.to_string())
         .send()
         .await

@@ -190,7 +190,6 @@ impl AIAssistantService {
 
         let config = AppConfig::new()?;
         let url = format!("{}/llm", config.lambda_base_url);
-        let api_key = config.api_key.clone();
 
         let client = reqwest::Client::new();
         let mut prompt_with_token = prompt.clone();
@@ -202,7 +201,6 @@ impl AIAssistantService {
         let resp = client
             .post(&url)
             .header("Content-Type", "application/json")
-            .header("x-api-key", &api_key)
             .json(&prompt_with_token)
             .send()
             .await
@@ -229,7 +227,6 @@ impl AIAssistantService {
                     let retry_resp = client
                         .post(&url)
                         .header("Content-Type", "application/json")
-                        .header("x-api-key", &api_key)
                         .json(&prompt_with_token)
                         .send()
                         .await

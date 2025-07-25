@@ -33,7 +33,6 @@ pub async fn register_user_lambda(email: String, password: String) -> Result<Str
     let response = client
         .post(url)
         .header("Content-Type", "application/json")
-        .header("x-api-key", config.api_key)
         .body(payload.to_string())
         .send()
         .await

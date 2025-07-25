@@ -8,17 +8,19 @@ use oauth2::{
     AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge,
     RedirectUrl, Scope, TokenResponse, TokenUrl, basic::BasicClient
 };
+#[cfg(not(target_os = "android"))]
 use open;
 use std::io::Write;
 use std::fs;
 use crate::user_utils::get_current_user_id;
 use serde::{Deserialize, Serialize};
 
+#[allow(dead_code)]
 #[derive(Deserialize)]
 struct Installed {
-    _client_id: String,
+    client_id: String,
     client_secret: String,
-    _redirect_uris: Vec<String>,
+    redirect_uris: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -31,13 +33,14 @@ pub struct GoogleTokenExtraFields {
     pub id_token: Option<String>,
 }
 
+#[cfg(not(target_os = "android"))]
 pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String, String> {
+
     let client_id = ClientId::new("99017034100-stfl2943ef0lnp7c36upsqrstaub49ns.apps.googleusercontent.com".to_string());
     let secret_json = fs::read_to_string("google_client.json").map_err(|e| e.to_string())?;
     let secret: GoogleSecret = serde_json::from_str(&secret_json).map_err(|e| e.to_string())?;
     let client_secret = ClientSecret::new(secret.installed.client_secret);
-    let redirect_url = RedirectUrl::new("http://127.0.0.1:1420".to_string()).unwrap();
-
+    let redirect_url = RedirectUrl::new("http://127.0.0.1:1425".to_string()).unwrap();
     let auth_url = AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string()).unwrap();
     let token_url = TokenUrl::new("https://oauth2.googleapis.com/token".to_string()).unwrap();
 
@@ -56,9 +59,9 @@ pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String,
         .url();
 
    open::that(auth_url.as_str()).map_err(|e| e.to_string())?;
-
+   
     // Listen for the redirect with the code
-    let listener = TcpListener::bind("127.0.0.1:1420").map_err(|e| e.to_string())?;
+    let listener = TcpListener::bind("127.0.0.1:1425").map_err(|e| e.to_string())?;
     let code: String;
     let start_time = Instant::now();
     'outer: loop {
@@ -126,4 +129,9 @@ pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String,
     println!("Google OAuth tokens saved for user: {}", user_id);
 
     Ok(access_token)
+}
+
+#[cfg(target_os = "android")]
+pub async fn oauth2_flow(_app_handle: &AppHandle, _timeout: u64) -> Result<String, String> {
+    Err("Google OAuth is not supported on Android in this build.".to_string())
 }

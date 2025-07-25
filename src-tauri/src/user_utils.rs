@@ -1,4 +1,4 @@
-use crate::encryption_utils::get_encryption_key;
+use crate::encryption_utils::{encrypt_user_data, decrypt_user_data, create_user_encryption_key};
 use crate::NotificationServiceState;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
@@ -29,69 +29,85 @@ fn get_user_file_path(app_handle: &AppHandle) -> Result<PathBuf, String> {
 
 // Function to save the current user ID to a file with encryption //
 pub fn save_current_user_id(app_handle: &AppHandle, user_id: &str) -> Result<(), String> {
-    // Get encryption key
-    let key = get_encryption_key()?;
-    let key = Key::<aes_gcm::aes::Aes256>::from_slice(&key);
-    let cipher = Aes256Gcm::new(key);
+    // Use a global key for user_id encryption
+    #[cfg(not(target_os = "android"))]
+    {
+        use crate::encryption_utils::get_encryption_key;
+        use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
+        use chacha20poly1305::aead::{Aead, KeyInit};
+        use rand::RngCore;
 
-    // Generate a random nonce
-    let mut nonce = [0u8; 12];
-    rand::rng().fill_bytes(&mut nonce);
-    let nonce_slice = Nonce::from_slice(&nonce);
+        let key = get_encryption_key().map_err(|e| format!("Key error: {}", e))?;
+        let key = Key::from_slice(&key);
+        let cipher = ChaCha20Poly1305::new(key);
 
-    // Encrypt the user ID
-    let encrypted_data = cipher
-        .encrypt(nonce_slice, user_id.as_bytes())
-        .map_err(|e| format!("Encryption failed: {}", e))?;
+        let mut nonce_bytes = [0u8; 12];
+        rand::thread_rng().fill_bytes(&mut nonce_bytes);
+        let nonce = Nonce::from_slice(&nonce_bytes);
 
-    // Prepend the nonce to the encrypted data
-    let mut file_data = nonce.to_vec();
-    file_data.extend_from_slice(&encrypted_data);
+        let encrypted = cipher.encrypt(nonce, user_id.as_bytes())
+            .map_err(|e| format!("Encryption failed: {}", e))?;
 
-    // Save to file
-    let file_path = get_user_file_path(app_handle)?;
-    fs::write(file_path, file_data)
-        .map_err(|e| format!("Failed to write user file: {}", e))?;
+        let mut encrypted_data = Vec::with_capacity(nonce_bytes.len() + encrypted.len());
+        encrypted_data.extend_from_slice(&nonce_bytes);
+        encrypted_data.extend_from_slice(&encrypted);
 
-    println!("User ID saved successfully");
-    Ok(())
+        let file_path = get_user_file_path(app_handle)?;
+        fs::write(file_path, encrypted_data)
+            .map_err(|e| format!("Failed to write user file: {}", e))
+    }
+
+    #[cfg(target_os = "android")]
+    {
+        use crate::encryption_utils::{create_user_encryption_key, encrypt_user_data};
+        create_user_encryption_key(app_handle, "GLOBAL_USER_ID")?;
+        let encrypted_data = encrypt_user_data(app_handle, "GLOBAL_USER_ID", user_id.as_bytes())?;
+        let file_path = get_user_file_path(app_handle)?;
+        fs::write(file_path, encrypted_data)
+            .map_err(|e| format!("Failed to write user file: {}", e))
+    }
 }
 
 // Function to get the current user ID from the encrypted file //
 pub fn get_current_user_id(app_handle: &AppHandle) -> Result<String, String> {
     let file_path = get_user_file_path(app_handle)?;
-    
+
     if !file_path.exists() {
         return Err("No user is currently logged in".to_string());
     }
-    
-    // Get encryption key
-    let key = get_encryption_key()?;
-    let key = Key::<aes_gcm::aes::Aes256>::from_slice(&key);
-    let cipher = Aes256Gcm::new(key);
 
-    // Read file data
-    let file_data = fs::read(&file_path)
+    let encrypted_data = fs::read(&file_path)
         .map_err(|e| format!("Failed to read user file: {}", e))?;
 
-    // Extract nonce and encrypted data
-    if file_data.len() <= 12 {
-        return Err("Invalid user file format".to_string());
+    // Use a global key for user_id encryption/decryption
+    #[cfg(not(target_os = "android"))]
+    {
+        use crate::encryption_utils::get_encryption_key;
+        use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
+        use chacha20poly1305::aead::{Aead, KeyInit};
+
+        let key = get_encryption_key().map_err(|e| format!("Key error: {}", e))?;
+        let key = Key::from_slice(&key);
+        let cipher = ChaCha20Poly1305::new(key);
+
+        if encrypted_data.len() < 12 {
+            return Err("Encrypted data is too short".to_string());
+        }
+        let (nonce_bytes, ciphertext) = encrypted_data.split_at(12);
+        let nonce = Nonce::from_slice(nonce_bytes);
+
+        let user_id_bytes = cipher.decrypt(nonce, ciphertext)
+            .map_err(|e| format!("Decryption failed: {}", e))?;
+        String::from_utf8(user_id_bytes).map_err(|e| format!("UTF-8 error: {}", e))
     }
-    
-    let (nonce, encrypted_data) = file_data.split_at(12);
-    let nonce_slice = Nonce::from_slice(nonce);
 
-    // Decrypt
-    let decrypted_data = cipher
-        .decrypt(nonce_slice, encrypted_data)
-        .map_err(|e| format!("Decryption failed: {}", e))?;
-
-    // Convert to string
-    let user_id = String::from_utf8(decrypted_data)
-        .map_err(|e| format!("Invalid UTF-8 in user ID: {}", e))?;
-
-    Ok(user_id)
+    #[cfg(target_os = "android")]
+    {
+        // On Android, use the Keystore-based global key
+        use crate::encryption_utils::decrypt_user_data;
+        let user_id_bytes = decrypt_user_data(app_handle, "GLOBAL_USER_ID", &encrypted_data)?;
+        String::from_utf8(user_id_bytes).map_err(|e| format!("UTF-8 error: {}", e))
+    }
 }
 
 // Function to clear the current user ID by removing the encrypted file //

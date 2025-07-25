@@ -199,7 +199,6 @@ impl DbSyncService {
         let response = self.client
             .post(&sync_url)
             .header("Content-Type", "application/json")
-            .header("x-api-key", &self.config.api_key)
             .json(&payload)
             .send()
             .await
@@ -221,7 +220,6 @@ impl DbSyncService {
                         let retry_response = self.client
                             .post(&sync_url)
                             .header("Content-Type", "application/json")
-                            .header("x-api-key", &self.config.api_key)
                             .json(&payload)
                             .send()
                             .await
@@ -317,7 +315,6 @@ impl DbSyncService {
         let response = self.client
             .post(&sync_url)
             .header("Content-Type", "application/json")
-            .header("x-api-key", &self.config.api_key)
             .json(&payload)
             .send()
             .await
@@ -340,7 +337,6 @@ impl DbSyncService {
                         let retry_response = self.client
                             .post(&sync_url)
                             .header("Content-Type", "application/json")
-                            .header("x-api-key", &self.config.api_key)
                             .json(&payload)
                             .send()
                             .await
