@@ -1,8 +1,7 @@
 use crate::database_utils::{ CalendarEvent, get_db_connection, save_event };
 use crate::api_utils::{ AppConfig, get_device_info };
 use crate::user_utils::get_current_user_id;
-use crate::token_utils::{read_tokens_from_file, clear_tokens};
-use crate::user_utils::clear_current_user_id;
+use crate::token_utils::{ read_tokens_from_file };
 use crate::auto_login::auto_login_lambda;
 use crate::logout_user;
 use std::time::Duration;
@@ -197,7 +196,7 @@ impl DbSyncService {
         if let Ok((access_token, _)) = read_tokens_from_file(app_handle_arc) {
             payload["access_token"] = serde_json::json!(access_token);
         }
-        let mut response = self.client
+        let response = self.client
             .post(&sync_url)
             .header("Content-Type", "application/json")
             .header("x-api-key", &self.config.api_key)
@@ -315,7 +314,7 @@ impl DbSyncService {
         // Use lambda endpoint from config
         let sync_url = format!("{}/sync-events", self.config.lambda_base_url);
 
-        let mut response = self.client
+        let response = self.client
             .post(&sync_url)
             .header("Content-Type", "application/json")
             .header("x-api-key", &self.config.api_key)

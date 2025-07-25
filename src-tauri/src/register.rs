@@ -13,7 +13,7 @@ struct LambdaResponse {
 #[derive(Deserialize)]
 struct Body {
     _status: String,
-    message: String,
+    _message: String,
 }
 
 // Function to register a user using AWS Lambda //

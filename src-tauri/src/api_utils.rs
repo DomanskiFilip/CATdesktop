@@ -4,7 +4,6 @@ use std::env;
 use std::fs;
 use mac_address::get_mac_address;
 use serde_json::Value;
-use std::sync::Arc;
 
 pub struct AppConfig {
     pub api_key: String,
@@ -56,5 +55,3 @@ pub fn get_device_info() -> Value {
         "mac_address": mac_address
     })
 }
-
-pub type SharedAppConfig = Arc<AppConfig>;

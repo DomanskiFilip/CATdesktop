@@ -1,8 +1,8 @@
 use crate::logout_user;
 use crate::ConversationMessage;
 use crate::database_utils::{ CalendarEvent, get_events };
-use crate::user_utils::{ get_current_user_id, clear_current_user_id };
-use crate::token_utils::{ read_tokens_from_file, clear_tokens };
+use crate::user_utils::{ get_current_user_id };
+use crate::token_utils::{ read_tokens_from_file };
 use crate::api_utils::{ AppConfig, get_device_info };
 use crate::{ UserLocation, get_weekly_weather };
 use crate::auto_login::auto_login_lambda;

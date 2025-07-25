@@ -3,7 +3,7 @@ use crate::user_utils::{ get_current_user_id, UserSettings };
 #[cfg(not(target_os = "android"))]
 use notify_rust::Notification;
 use tauri::{ AppHandle, Manager };
-use chrono::{ DateTime, Local, Duration };
+use chrono::{ Local, Duration };
 use std::collections::HashMap;
 use tokio::time::{ sleep, Duration as TokioDuration };
 use tokio::task::JoinHandle;
@@ -114,15 +114,15 @@ impl NotificationService {
       if warning_delay.num_seconds() > 0 {
           println!("Scheduling {}-minute warning in {} minutes", lead_minutes, warning_delay.num_minutes());
           
-          let event_id_clone = event_id.clone();
-          let description_clone = description.clone();
+          let _event_id_clone = event_id.clone();
+          let _description_clone = description.clone();
           
           let warning_task = tokio::spawn(async move {
               sleep(TokioDuration::from_secs(warning_delay.num_seconds() as u64)).await;
               #[cfg(not(target_os = "android"))]
               if let Err(e) = Notification::new()
                   .summary("Calendar AssistanT - Event Reminder")
-                  .body(&format!("Upcoming event in 15 minutes: {}", description_clone))
+                  .body(&format!("Upcoming event in 15 minutes: {}", _description_clone))
                   .appname("Calendar AssistanT")
                   .icon("icons/icon.png")
                   .timeout(0)
@@ -141,15 +141,15 @@ impl NotificationService {
       if event_delay.num_seconds() > 0 {
           println!("Scheduling event notification in {} minutes", event_delay.num_minutes());
           
-          let event_id_clone = event_id.clone();
-          let description_clone = description.clone();
+          let _event_id_clone = event_id.clone();
+          let _description_clone = description.clone();
           
           let event_task = tokio::spawn(async move {
               sleep(TokioDuration::from_secs(event_delay.num_seconds() as u64)).await;
               #[cfg(not(target_os = "android"))]
               if let Err(e) = Notification::new()
                   .summary("Calendar AssistanT - Event Now")
-                  .body(&format!("Event now: {}", description_clone))
+                  .body(&format!("Event now: {}", _description_clone))
                   .appname("Calendar AssistanT")
                   .icon("icons/icon.png")
                   .timeout(0)

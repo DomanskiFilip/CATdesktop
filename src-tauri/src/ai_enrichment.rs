@@ -1,12 +1,12 @@
 use crate::ai_assistant::LambdaResponse;
 use crate::database_utils::CalendarEvent;
 use crate::user_utils::get_current_user_id;
-use crate::api_utils::{AppConfig, get_device_info};
+use crate::api_utils::{ AppConfig, get_device_info };
 use crate::token_utils::read_tokens_from_file;
 use crate::get_weekly_weather;
 use tauri::{ AppHandle, Manager };
-use serde::{Deserialize, Serialize};
-use chrono::{Utc, DateTime};
+use serde::{ Deserialize, Serialize };
+use chrono::{ Utc };
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EnrichmentResponse {

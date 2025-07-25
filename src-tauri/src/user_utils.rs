@@ -1,6 +1,5 @@
 use crate::encryption_utils::get_encryption_key;
 use crate::NotificationServiceState;
-use tokio::sync::Mutex;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 use std::path::PathBuf;
@@ -129,7 +128,7 @@ pub async fn set_notification_service(app_handle: AppHandle, enabled: bool, lead
             *service_guard = Some(service);
         }
     } else {
-        let mut service_opt = {
+        let service_opt = {
             let mut service_guard = notification_state.lock().await;
             service_guard.take()
         };
@@ -159,7 +158,7 @@ pub async fn set_notification_lead_time(app_handle: AppHandle, lead_minutes: u32
     let app_handle_cloned = app_handle.clone();
     let notification_state = app_handle_cloned.state::<NotificationServiceState>();
     let mut service_guard = notification_state.lock().await;
-    if let Some(service) = service_guard.as_mut() {
+    if let Some(_service) = service_guard.as_mut() {
         // Reschedule all notifications
         crate::notification_service::NotificationService::check_and_schedule_all_notifications(&Arc::new(app_handle), true).await.ok();
     }

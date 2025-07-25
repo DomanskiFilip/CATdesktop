@@ -16,9 +16,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
 struct Installed {
-    client_id: String,
+    _client_id: String,
     client_secret: String,
-    redirect_uris: Vec<String>,
+    _redirect_uris: Vec<String>,
 }
 
 #[derive(Deserialize)]

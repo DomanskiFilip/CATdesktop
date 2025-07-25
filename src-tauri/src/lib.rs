@@ -211,6 +211,7 @@ fn get_oauth_timeout() -> u64 {
 // Setup auto-launch command
 #[cfg(not(target_os = "android"))]
 #[tauri::command]
+#[allow(dead_code)]
 async fn setup_auto_launch() -> Result<(), String> {
     // Only enable auto-launch in release builds
     if cfg!(debug_assertions) {
@@ -508,7 +509,13 @@ fn create_system_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 
 // Main function to run the Tauri application
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+pub fn run() {
+    if let Err(e) = run_impl() {
+        eprintln!("Application error: {}", e);
+    }
+}
+
+pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
     let app_config = Arc::new(crate::api_utils::AppConfig::new()?);
 
     tauri::Builder::default()

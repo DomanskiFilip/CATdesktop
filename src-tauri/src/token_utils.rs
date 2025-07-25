@@ -58,16 +58,7 @@ pub fn save_tokens_to_file(app_handle: &AppHandle, access_token: &str, refresh_t
     fs::write(file_path, file_data).map_err(|e| format!("Failed to write file: {}", e))?;
 
     // Add a short sleep to ensure file is written before next read (for race condition mitigation)
-    #[cfg(feature = "tokio")]
-    {
-        // If using tokio, yield to allow file system to flush
-        tokio::task::yield_now();
-    }
-    #[cfg(not(feature = "tokio"))]
-    {
-        // Otherwise, sleep for a short time
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
+    std::thread::sleep(std::time::Duration::from_millis(100));
 
     Ok(())
 }
