@@ -15,7 +15,10 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@impierce/tauri-plugin-keystore": "^2.1.0-alpha.1",
     "@tauri-apps/api": "^2.7.0",
+    "@tauri-apps/plugin-biometric": "^2.3.0",
+    "@tauri-apps/plugin-os": "^2.3.0",
     "@vue/tsconfig": "^0.7.0",
     "date-fns": "^4.1.0",
     "internal-ip": "^8.0.0",

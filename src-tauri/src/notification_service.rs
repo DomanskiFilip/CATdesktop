@@ -1,30 +1,30 @@
-use crate::database_utils:: { CalendarEvent, get_db_connection };
-use crate::user_utils::{ get_current_user_id, UserSettings };
+use crate::database_utils::{get_db_connection, CalendarEvent};
+use crate::user_utils::{get_current_user_id, UserSettings};
+use chrono::{Duration, Local};
 #[cfg(not(target_os = "android"))]
 use notify_rust::Notification;
-use tauri::{ AppHandle, Manager };
-use chrono::{ Local, Duration };
+use rrule::{RRuleSet, Tz};
 use std::collections::HashMap;
-use tokio::time::{ sleep, Duration as TokioDuration };
-use tokio::task::JoinHandle;
-use std::sync::Arc;
-use tokio::sync::Mutex as TokioMutex;
-use rrule::{ RRuleSet, Tz };
 use std::str::FromStr;
+use std::sync::Arc;
+use tauri::{AppHandle, Manager};
+use tokio::sync::Mutex as TokioMutex;
+use tokio::task::JoinHandle;
+use tokio::time::{sleep, Duration as TokioDuration};
 
 pub struct NotificationService {
-  scheduled_tasks: HashMap<String, JoinHandle<()>>,
+    scheduled_tasks: HashMap<String, JoinHandle<()>>,
 }
 
 impl NotificationService {
-  pub fn new() -> Self {
-      Self {
-          scheduled_tasks: HashMap::new(),
-      }
-  }
+    pub fn new() -> Self {
+        Self {
+            scheduled_tasks: HashMap::new(),
+        }
+    }
 
-  // Stop service and cancel all scheduled tasks //
-  pub async fn stop(&mut self) {
+    // Stop service and cancel all scheduled tasks //
+    pub async fn stop(&mut self) {
         println!("Stopping notification service and cancelling all scheduled tasks...");
         for (task_id, task) in self.scheduled_tasks.drain() {
             println!("Cancelling task: {}", task_id);
@@ -32,152 +32,178 @@ impl NotificationService {
         }
     }
 
-  // Start the notification service //
-  pub async fn start(&self, app_handle_arc: Arc<AppHandle>, user_logged_in: bool) {
-    println!("Starting notification service...");
+    // Start the notification service //
+    pub async fn start(&self, app_handle_arc: Arc<AppHandle>, user_logged_in: bool) {
+        println!("Starting notification service...");
 
-    // Schedule notifications for existing events immediately
-    if let Err(e) = Self::check_and_schedule_all_notifications(&app_handle_arc, user_logged_in).await {
-        eprintln!("Error scheduling existing notifications: {}", e);
+        // Schedule notifications for existing events immediately
+        if let Err(e) =
+            Self::check_and_schedule_all_notifications(&app_handle_arc, user_logged_in).await
+        {
+            eprintln!("Error scheduling existing notifications: {}", e);
+        }
+
+        // Start periodic checking
+        let app_handle_ref1 = Arc::clone(&app_handle_arc);
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(TokioDuration::from_secs(300)); // 5 minutes
+
+            loop {
+                interval.tick().await;
+                if let Err(e) =
+                    Self::check_and_schedule_all_notifications(&app_handle_ref1, user_logged_in)
+                        .await
+                {
+                    eprintln!("Error checking notifications: {}", e);
+                }
+            }
+        });
     }
 
-    // Start periodic checking
-    let app_handle_ref1 = Arc::clone(&app_handle_arc);
-
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(TokioDuration::from_secs(300)); // 5 minutes
-        
-        loop {
-            interval.tick().await;
-            if let Err(e) = Self::check_and_schedule_all_notifications(&app_handle_ref1, user_logged_in).await {
-                eprintln!("Error checking notifications: {}", e);
-            }
+    // Helper method for schedule_event_notifications -> Remove notifications for an event //
+    pub async fn remove_event_notifications(
+        &mut self,
+        event_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Cancel warning task
+        if let Some(task) = self
+            .scheduled_tasks
+            .remove(&format!("{}_warning", event_id))
+        {
+            task.abort();
         }
-    });
-}
 
+        // Cancel event task
+        if let Some(task) = self.scheduled_tasks.remove(&format!("{}_event", event_id)) {
+            task.abort();
+        }
 
-  // Helper method for schedule_event_notifications -> Remove notifications for an event //
-  pub async fn remove_event_notifications(&mut self, event_id: &str) -> Result<(), Box<dyn std::error::Error>> {
-      
-      // Cancel warning task
-      if let Some(task) = self.scheduled_tasks.remove(&format!("{}_warning", event_id)) {
-          task.abort();
-      }
-      
-      // Cancel event task
-      if let Some(task) = self.scheduled_tasks.remove(&format!("{}_event", event_id)) {
-          task.abort();
-      }
-      
-      Ok(())
-  }
+        Ok(())
+    }
 
-  // Helper method for check_and_schedule_all_notifications -> schedule notifications for a single event //
-  pub async fn schedule_event_notifications(&mut self, event: &CalendarEvent) -> Result<(), Box<dyn std::error::Error>> {
-      println!("Scheduling notifications for event!");
-      
-      // Check if the event has an alarm set
-      if !event.alarm {
-          return Ok(());
-      }
+    // Helper method for check_and_schedule_all_notifications -> schedule notifications for a single event //
+    pub async fn schedule_event_notifications(
+        &mut self,
+        event: &CalendarEvent,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        println!("Scheduling notifications for event!");
 
-      // Remove existing notifications for this event first
-      self.remove_event_notifications(&event.id).await?;
+        // Check if the event has an alarm set
+        if !event.alarm {
+            return Ok(());
+        }
 
-      // Handle recurrence if present
-      if let Some(recurrence) = &event.recurrence {
-          return Box::pin(self.schedule_recurring_event_notifications(event, recurrence)).await;
-      }
+        // Remove existing notifications for this event first
+        self.remove_event_notifications(&event.id).await?;
 
-      // Calculate delays
-      let event_time = event.time;
-      let now = chrono::Local::now();
-      let lead_minutes = std::fs::read_to_string("settings.json")
-        .ok()
-        .and_then(|content| serde_json::from_str::<UserSettings>(&content).ok())
-        .map(|s| s.notification_lead_minutes)
-        .unwrap_or(15);
+        // Handle recurrence if present
+        if let Some(recurrence) = &event.recurrence {
+            return Box::pin(self.schedule_recurring_event_notifications(event, recurrence)).await;
+        }
 
-      let warning_delay = (event_time - Duration::minutes(lead_minutes as i64)) - now;
-      let event_delay = event_time - now;
-      
-      // Check if the event is in the past
-      if event_delay.num_seconds() <= 0 {
-          return Ok(());
-      }
-      
-      let event_id = event.id.clone();
-      let description = event.description.clone();
-      
-      // Schedule 15-minute warning notification
-      if warning_delay.num_seconds() > 0 {
-          println!("Scheduling {}-minute warning in {} minutes", lead_minutes, warning_delay.num_minutes());
-          
-          let _event_id_clone = event_id.clone();
-          let _description_clone = description.clone();
-          
-          let warning_task = tokio::spawn(async move {
-              sleep(TokioDuration::from_secs(warning_delay.num_seconds() as u64)).await;
-              #[cfg(not(target_os = "android"))]
-              if let Err(e) = Notification::new()
-                  .summary("Calendar AssistanT - Event Reminder")
-                  .body(&format!("Upcoming event in 15 minutes: {}", _description_clone))
-                  .appname("Calendar AssistanT")
-                  .icon("icons/icon.png")
-                  .timeout(0)
-                  .show()
-              {
-                  eprintln!("Failed to show warning notification: {}", e);
-              } else {
-                  println!("✅ Warning notification shown successfully");
-              }
-          });
-          
-          self.scheduled_tasks.insert(format!("{}_warning", event_id), warning_task);
-      }
-      
-      // Schedule event time notification
-      if event_delay.num_seconds() > 0 {
-          println!("Scheduling event notification in {} minutes", event_delay.num_minutes());
-          
-          let _event_id_clone = event_id.clone();
-          let _description_clone = description.clone();
-          
-          let event_task = tokio::spawn(async move {
-              sleep(TokioDuration::from_secs(event_delay.num_seconds() as u64)).await;
-              #[cfg(not(target_os = "android"))]
-              if let Err(e) = Notification::new()
-                  .summary("Calendar AssistanT - Event Now")
-                  .body(&format!("Event now: {}", _description_clone))
-                  .appname("Calendar AssistanT")
-                  .icon("icons/icon.png")
-                  .timeout(0)
-                  .show()
-              {
-                  eprintln!("Failed to show event notification: {}", e);
-              } else {
-                  println!("✅ Event notification shown successfully");
-              }
-          });
-          
-          self.scheduled_tasks.insert(format!("{}_event", event_id), event_task);
-      }
-      
-      println!("Total scheduled tasks: {}", self.scheduled_tasks.len());
-      Ok(())
-  }
+        // Calculate delays
+        let event_time = event.time;
+        let now = chrono::Local::now();
+        let lead_minutes = std::fs::read_to_string("settings.json")
+            .ok()
+            .and_then(|content| serde_json::from_str::<UserSettings>(&content).ok())
+            .map(|s| s.notification_lead_minutes)
+            .unwrap_or(15);
 
+        let warning_delay = (event_time - Duration::minutes(lead_minutes as i64)) - now;
+        let event_delay = event_time - now;
 
-  // Method to check database and schedule notifications for all upcoming events //
-  pub async fn check_and_schedule_all_notifications(app_handle_arc: &Arc<AppHandle>, user_logged_in: bool) -> Result<(), String> {
-      println!("Checking for upcoming events to schedule notifications...");
+        // Check if the event is in the past
+        if event_delay.num_seconds() <= 0 {
+            return Ok(());
+        }
 
-      // Verify user is actually logged in before proceeding
-      if !user_logged_in {
-          println!("User not logged in, skipping notification scheduling.");
-          return Ok(());
-      }
+        let event_id = event.id.clone();
+        let description = event.description.clone();
+
+        // Schedule 15-minute warning notification
+        if warning_delay.num_seconds() > 0 {
+            println!(
+                "Scheduling {}-minute warning in {} minutes",
+                lead_minutes,
+                warning_delay.num_minutes()
+            );
+
+            let _event_id_clone = event_id.clone();
+            let _description_clone = description.clone();
+
+            let warning_task = tokio::spawn(async move {
+                sleep(TokioDuration::from_secs(warning_delay.num_seconds() as u64)).await;
+                #[cfg(not(target_os = "android"))]
+                if let Err(e) = Notification::new()
+                    .summary("Calendar AssistanT - Event Reminder")
+                    .body(&format!(
+                        "Upcoming event in 15 minutes: {}",
+                        _description_clone
+                    ))
+                    .appname("Calendar AssistanT")
+                    .icon("icons/icon.png")
+                    .timeout(0)
+                    .show()
+                {
+                    eprintln!("Failed to show warning notification: {}", e);
+                } else {
+                    println!("✅ Warning notification shown successfully");
+                }
+            });
+
+            self.scheduled_tasks
+                .insert(format!("{}_warning", event_id), warning_task);
+        }
+
+        // Schedule event time notification
+        if event_delay.num_seconds() > 0 {
+            println!(
+                "Scheduling event notification in {} minutes",
+                event_delay.num_minutes()
+            );
+
+            let _event_id_clone = event_id.clone();
+            let _description_clone = description.clone();
+
+            let event_task = tokio::spawn(async move {
+                sleep(TokioDuration::from_secs(event_delay.num_seconds() as u64)).await;
+                #[cfg(not(target_os = "android"))]
+                if let Err(e) = Notification::new()
+                    .summary("Calendar AssistanT - Event Now")
+                    .body(&format!("Event now: {}", _description_clone))
+                    .appname("Calendar AssistanT")
+                    .icon("icons/icon.png")
+                    .timeout(0)
+                    .show()
+                {
+                    eprintln!("Failed to show event notification: {}", e);
+                } else {
+                    println!("✅ Event notification shown successfully");
+                }
+            });
+
+            self.scheduled_tasks
+                .insert(format!("{}_event", event_id), event_task);
+        }
+
+        println!("Total scheduled tasks: {}", self.scheduled_tasks.len());
+        Ok(())
+    }
+
+    // Method to check database and schedule notifications for all upcoming events //
+    pub async fn check_and_schedule_all_notifications(
+        app_handle_arc: &Arc<AppHandle>,
+        user_logged_in: bool,
+    ) -> Result<(), String> {
+        println!("Checking for upcoming events to schedule notifications...");
+
+        // Verify user is actually logged in before proceeding
+        if !user_logged_in {
+            println!("User not logged in, skipping notification scheduling.");
+            return Ok(());
+        }
 
         // Get user ID
         let user_id = match get_current_user_id(app_handle_arc) {
@@ -187,10 +213,10 @@ impl NotificationService {
                 return Ok(());
             }
         };
-        
+
         // Get events using a blocking task to avoid Send issues
         let events = {
-            let app_handle_ref1= Arc::clone(app_handle_arc);
+            let app_handle_ref1 = Arc::clone(app_handle_arc);
             tokio::task::spawn_blocking(move || -> Result<Vec<CalendarEvent>, String> {
                 let conn = get_db_connection(&app_handle_ref1)
                     .map_err(|e| e.to_string())?;
@@ -218,21 +244,29 @@ impl NotificationService {
         println!("Found {} events with alarms in next 24 hours", events.len());
 
         // Access the notification service and schedule each event
-        if let Some(service_state) = app_handle_arc.try_state::<Arc<TokioMutex<Option<NotificationService>>>>() {
-          let lock_future = service_state.lock();
-          // Use a timeout to avoid indefinite waiting
-          let mut service_guard = match tokio::time::timeout(std::time::Duration::from_secs(5), lock_future).await { 
-              Ok(guard) => guard,
-              Err(_) => {
-                  println!("Timed out waiting for notification service lock - possible deadlock");
-                  return Err("Timed out waiting for notification service lock".to_string());
-              }
-          };
-    
+        if let Some(service_state) =
+            app_handle_arc.try_state::<Arc<TokioMutex<Option<NotificationService>>>>()
+        {
+            let lock_future = service_state.lock();
+            // Use a timeout to avoid indefinite waiting
+            let mut service_guard =
+                match tokio::time::timeout(std::time::Duration::from_secs(5), lock_future).await {
+                    Ok(guard) => guard,
+                    Err(_) => {
+                        println!(
+                            "Timed out waiting for notification service lock - possible deadlock"
+                        );
+                        return Err("Timed out waiting for notification service lock".to_string());
+                    }
+                };
+
             if let Some(service) = service_guard.as_mut() {
                 for (_index, event) in events.iter().enumerate() {
                     if let Err(e) = service.schedule_event_notifications(&event).await {
-                        eprintln!("Failed to schedule notification for event {}: {}", event.id, e);
+                        eprintln!(
+                            "Failed to schedule notification for event {}: {}",
+                            event.id, e
+                        );
                     }
                 }
                 Ok(())
@@ -244,25 +278,35 @@ impl NotificationService {
             println!("Could not get notification service state!");
             Ok(())
         }
-  }
+    }
 
+    // Method to schedule notifications for recurring events //
+    pub async fn schedule_recurring_event_notifications(
+        &mut self,
+        event: &CalendarEvent,
+        recurrence: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        println!(
+            "Scheduling notifications for recurring event with rule: {}",
+            recurrence
+        );
 
-  // Method to schedule notifications for recurring events //
-  pub async fn schedule_recurring_event_notifications(&mut self, event: &CalendarEvent, recurrence: &str) -> Result<(), Box<dyn std::error::Error>> {
-        println!("Scheduling notifications for recurring event with rule: {}", recurrence);
-        
         // Initialize RRule parser
         let rrule_str = if recurrence.starts_with("RRULE:") {
             recurrence.to_string()
         } else {
             format!("RRULE:{}", recurrence)
         };
-        
+
         // Parse the RRULE
         let rrule = match rrule::RRule::from_str(&rrule_str) {
             Ok(rule) => rule,
-            Err(e) => return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, 
-                format!("Failed to parse RRule: {}", e))))
+            Err(e) => {
+                return Err(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Failed to parse RRule: {}", e),
+                )))
+            }
         };
 
         // Setup the RRULE with the event start time - use Local timezone
@@ -276,9 +320,13 @@ impl NotificationService {
         match rrule.validate(dt_start) {
             Ok(validated_rrule) => {
                 let _ = rruleset.clone().rrule(validated_rrule);
-            },
-            Err(e) => return Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other, format!("Invalid RRule: {:?}", e))))
+            }
+            Err(e) => {
+                return Err(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Invalid RRule: {:?}", e),
+                )))
+            }
         };
 
         // Calculate occurrences (limit to 5)
@@ -286,12 +334,12 @@ impl NotificationService {
         let now = chrono::Local::now();
 
         // Filter out past occurrences
-        let future_occurrences: Vec<_> = occurrences.dates
-          .iter()
-          .filter(|date| *date > &now)
-          .cloned()
-          .collect();
-
+        let future_occurrences: Vec<_> = occurrences
+            .dates
+            .iter()
+            .filter(|date| *date > &now)
+            .cloned()
+            .collect();
 
         if future_occurrences.is_empty() {
             println!("No future occurrences found for recurring event");
@@ -315,14 +363,20 @@ impl NotificationService {
                 deleted: event.deleted,
                 recurrence: None::<String>,
             };
-            
+
             // Schedule the notification for this instance
             if let Err(e) = self.schedule_event_notifications(&instance_event).await {
-                eprintln!("Failed to schedule notification for recurring instance {}: {}", instance_event.id, e);
+                eprintln!(
+                    "Failed to schedule notification for recurring instance {}: {}",
+                    instance_event.id, e
+                );
             }
         }
-        
-        println!("Total scheduled tasks after adding recurring event: {}", self.scheduled_tasks.len());
+
+        println!(
+            "Total scheduled tasks after adding recurring event: {}",
+            self.scheduled_tasks.len()
+        );
         Ok(())
     }
 }

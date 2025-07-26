@@ -1,14 +1,9 @@
-use crate::encryption_utils::{encrypt_user_data, decrypt_user_data, create_user_encryption_key};
 use crate::NotificationServiceState;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
-use std::path::PathBuf;
-use std::fs;
-use aes_gcm::{Aes256Gcm, Key, Nonce};
-use aes_gcm::aead::Aead; 
-use aes_gcm::KeyInit; 
-use rand::RngCore;
-use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct UserSettings {
@@ -18,57 +13,52 @@ pub struct UserSettings {
 
 // Helper function -> to get the user file path //
 fn get_user_file_path(app_handle: &AppHandle) -> Result<PathBuf, String> {
-    let app_dir = app_handle.path().app_data_dir()
+    let app_dir = app_handle
+        .path()
+        .app_data_dir()
         .map_err(|e| format!("Failed to get app data directory: {}", e))?;
-    
-    fs::create_dir_all(&app_dir)
-        .map_err(|e| format!("Failed to create app directory: {}", e))?;
-    
+
+    fs::create_dir_all(&app_dir).map_err(|e| format!("Failed to create app directory: {}", e))?;
+
     Ok(app_dir.join("user.enc"))
 }
 
 // Function to save the current user ID to a file with encryption //
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn save_current_user_id(app_handle: &AppHandle, user_id: &str) -> Result<(), String> {
-    // Use a global key for user_id encryption
-    #[cfg(not(target_os = "android"))]
-    {
-        use crate::encryption_utils::get_encryption_key;
-        use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
-        use chacha20poly1305::aead::{Aead, KeyInit};
-        use rand::RngCore;
+    use crate::encryption_utils::get_encryption_key;
+    use chacha20poly1305::aead::{Aead, KeyInit};
+    use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
+    use rand::RngCore;
 
-        let key = get_encryption_key().map_err(|e| format!("Key error: {}", e))?;
-        let key = Key::from_slice(&key);
-        let cipher = ChaCha20Poly1305::new(key);
+    let key = get_encryption_key().map_err(|e| format!("Key error: {}", e))?;
+    let key = Key::from_slice(&key);
+    let cipher = ChaCha20Poly1305::new(key);
 
-        let mut nonce_bytes = [0u8; 12];
-        rand::thread_rng().fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
+    let mut nonce_bytes = [0u8; 12];
+    rand::thread_rng().fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::from_slice(&nonce_bytes);
 
-        let encrypted = cipher.encrypt(nonce, user_id.as_bytes())
-            .map_err(|e| format!("Encryption failed: {}", e))?;
+    let encrypted = cipher
+        .encrypt(nonce, user_id.as_bytes())
+        .map_err(|e| format!("Encryption failed: {}", e))?;
 
-        let mut encrypted_data = Vec::with_capacity(nonce_bytes.len() + encrypted.len());
-        encrypted_data.extend_from_slice(&nonce_bytes);
-        encrypted_data.extend_from_slice(&encrypted);
+    let mut encrypted_data = Vec::with_capacity(nonce_bytes.len() + encrypted.len());
+    encrypted_data.extend_from_slice(&nonce_bytes);
+    encrypted_data.extend_from_slice(&encrypted);
 
-        let file_path = get_user_file_path(app_handle)?;
-        fs::write(file_path, encrypted_data)
-            .map_err(|e| format!("Failed to write user file: {}", e))
-    }
+    let file_path = get_user_file_path(app_handle)?;
+    fs::write(file_path, encrypted_data)
+        .map_err(|e| format!("Failed to write user file: {}", e))
+}
 
-    #[cfg(target_os = "android")]
-    {
-        use crate::encryption_utils::{create_user_encryption_key, encrypt_user_data};
-        create_user_encryption_key(app_handle, "GLOBAL_USER_ID")?;
-        let encrypted_data = encrypt_user_data(app_handle, "GLOBAL_USER_ID", user_id.as_bytes())?;
-        let file_path = get_user_file_path(app_handle)?;
-        fs::write(file_path, encrypted_data)
-            .map_err(|e| format!("Failed to write user file: {}", e))
-    }
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn save_current_user_id(_: &AppHandle, _: &str) -> Result<(), String> {
+    Err("Use the tauri-plugin-keystore JS API to save user ID on Android/iOS".to_string())
 }
 
 // Function to get the current user ID from the encrypted file //
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn get_current_user_id(app_handle: &AppHandle) -> Result<String, String> {
     let file_path = get_user_file_path(app_handle)?;
 
@@ -76,62 +66,62 @@ pub fn get_current_user_id(app_handle: &AppHandle) -> Result<String, String> {
         return Err("No user is currently logged in".to_string());
     }
 
-    let encrypted_data = fs::read(&file_path)
-        .map_err(|e| format!("Failed to read user file: {}", e))?;
+    let encrypted_data =
+        fs::read(&file_path).map_err(|e| format!("Failed to read user file: {}", e))?;
 
-    // Use a global key for user_id encryption/decryption
-    #[cfg(not(target_os = "android"))]
-    {
-        use crate::encryption_utils::get_encryption_key;
-        use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
-        use chacha20poly1305::aead::{Aead, KeyInit};
+    use crate::encryption_utils::get_encryption_key;
+    use chacha20poly1305::aead::{Aead, KeyInit};
+    use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
 
-        let key = get_encryption_key().map_err(|e| format!("Key error: {}", e))?;
-        let key = Key::from_slice(&key);
-        let cipher = ChaCha20Poly1305::new(key);
+    let key = get_encryption_key().map_err(|e| format!("Key error: {}", e))?;
+    let key = Key::from_slice(&key);
+    let cipher = ChaCha20Poly1305::new(key);
 
-        if encrypted_data.len() < 12 {
-            return Err("Encrypted data is too short".to_string());
-        }
-        let (nonce_bytes, ciphertext) = encrypted_data.split_at(12);
-        let nonce = Nonce::from_slice(nonce_bytes);
-
-        let user_id_bytes = cipher.decrypt(nonce, ciphertext)
-            .map_err(|e| format!("Decryption failed: {}", e))?;
-        String::from_utf8(user_id_bytes).map_err(|e| format!("UTF-8 error: {}", e))
+    if encrypted_data.len() < 12 {
+        return Err("Encrypted data is too short".to_string());
     }
+    let (nonce_bytes, ciphertext) = encrypted_data.split_at(12);
+    let nonce = Nonce::from_slice(nonce_bytes);
 
-    #[cfg(target_os = "android")]
-    {
-        // On Android, use the Keystore-based global key
-        use crate::encryption_utils::decrypt_user_data;
-        let user_id_bytes = decrypt_user_data(app_handle, "GLOBAL_USER_ID", &encrypted_data)?;
-        String::from_utf8(user_id_bytes).map_err(|e| format!("UTF-8 error: {}", e))
-    }
+    let user_id_bytes = cipher
+        .decrypt(nonce, ciphertext)
+        .map_err(|e| format!("Decryption failed: {}", e))?;
+    String::from_utf8(user_id_bytes).map_err(|e| format!("UTF-8 error: {}", e))
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn get_current_user_id(_: &AppHandle) -> Result<String, String> {
+    Err("Use the tauri-plugin-keystore JS API to get user ID on Android/iOS".to_string())
 }
 
 // Function to clear the current user ID by removing the encrypted file //
 pub fn clear_current_user_id(app_handle: &AppHandle) -> Result<(), String> {
     let file_path = get_user_file_path(app_handle)?;
-    
+
     if file_path.exists() {
-        fs::remove_file(file_path)
-            .map_err(|e| format!("Failed to remove user file: {}", e))?;
+        fs::remove_file(file_path).map_err(|e| format!("Failed to remove user file: {}", e))?;
     }
-    
+
     println!("User ID cleared successfully");
     Ok(())
 }
 
 // Function to set the notification service and lead time //
-pub async fn set_notification_service(app_handle: AppHandle, enabled: bool, lead_minutes: Option<u32>) -> Result<(), String> {
+pub async fn set_notification_service(
+    app_handle: AppHandle,
+    enabled: bool,
+    lead_minutes: Option<u32>,
+) -> Result<(), String> {
     let lead = lead_minutes.unwrap_or(15); // default to 15 if not provided
-    let settings = UserSettings { 
+    let settings = UserSettings {
         notification_service: enabled,
         notification_lead_minutes: lead,
     };
     std::fs::write("settings.json", serde_json::to_string(&settings).unwrap()).unwrap();
-    println!("Notification service set to: {}, lead: {} min", enabled, lead);
+    println!(
+        "Notification service set to: {}, lead: {} min",
+        enabled, lead
+    );
 
     let notification_state = app_handle.state::<NotificationServiceState>();
 
@@ -157,7 +147,10 @@ pub async fn set_notification_service(app_handle: AppHandle, enabled: bool, lead
 }
 
 // Function to set the notification lead time //
-pub async fn set_notification_lead_time(app_handle: AppHandle, lead_minutes: u32) -> Result<(), String> {
+pub async fn set_notification_lead_time(
+    app_handle: AppHandle,
+    lead_minutes: u32,
+) -> Result<(), String> {
     // Read current settings
     let mut settings: UserSettings = std::fs::read_to_string("settings.json")
         .ok()
@@ -176,7 +169,12 @@ pub async fn set_notification_lead_time(app_handle: AppHandle, lead_minutes: u32
     let mut service_guard = notification_state.lock().await;
     if let Some(_service) = service_guard.as_mut() {
         // Reschedule all notifications
-        crate::notification_service::NotificationService::check_and_schedule_all_notifications(&Arc::new(app_handle), true).await.ok();
+        crate::notification_service::NotificationService::check_and_schedule_all_notifications(
+            &Arc::new(app_handle),
+            true,
+        )
+        .await
+        .ok();
     }
     Ok(())
 }

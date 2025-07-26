@@ -22,6 +22,24 @@
   --section-gap: 160px;
 }
 
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-main: var(--color-dark);
+    --color-border: var(--color-light);
+    --color-text: var(--color-light);
+    --color-shadow: var(--color-shadow-dark);
+  }
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --color-main: var(--color-light);
+    --color-border: var(--color-dark);
+    --color-text: var(--color-dark);
+    --color-shadow: var(--color-shadow-light);
+  }
+}
+
 *,
 *::before,
 *::after {

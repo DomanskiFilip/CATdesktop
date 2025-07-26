@@ -1,12 +1,14 @@
-use crate::token_utils::{read_tokens_from_file, save_tokens_to_file};
-use crate::api_utils::{AppConfig, get_device_info};
-use crate::user_utils::save_current_user_id;
+use crate::api_utils::{get_device_info, AppConfig};
+#[cfg(target_os = "android")]
+use crate::read_tokens_from_cache;
+#[cfg(target_os = "android")]
+use crate::token_utils::save_tokens_to_file;
 #[cfg(not(target_os = "android"))]
-use crate::encryption_utils::load_user_encryption_key;
+use crate::token_utils::{read_tokens_from_file, save_tokens_to_file};
+use crate::user_utils::save_current_user_id;
 use reqwest::Client;
 use serde::Deserialize;
 use tauri::AppHandle;
-
 
 // Structs (classes/objects) to deserialize the Lambda response
 #[derive(Deserialize)]
@@ -22,19 +24,35 @@ struct Body {
 }
 
 // Function to handle auto-login using AWS Lambda //
+
 pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
     println!("Starting auto-login process...");
     let config = AppConfig::new()?;
-    let device_info = get_device_info();
+    let device_info = get_device_info(&app_handle);
 
     // Read tokens from file
-    let (access_token, refresh_token) = match read_tokens_from_file(&app_handle) {
+    #[cfg(target_os = "android")]
+    let (access_token, refresh_token, database_token) = match read_tokens_from_cache().await {
         Ok(tokens) => tokens,
         Err(e) => {
             println!("No tokens found or failed to read tokens: {}", e);
             return Ok(false);
         }
     };
+
+    #[cfg(not(target_os = "android"))]
+    let (access_token, refresh_token, database_token) = match read_tokens_from_file(&app_handle) {
+        Ok(tokens) => tokens,
+        Err(e) => {
+            println!("No tokens found or failed to read tokens: {}", e);
+            return Ok(false);
+        }
+    };
+
+    if let Some(db_token) = database_token {
+    let mut cache = crate::login::DATABASE_TOKEN.lock().unwrap();
+    *cache = Some(db_token);
+    }
 
     let url = format!("{}/autologin", config.lambda_base_url);
     let client = Client::new();
@@ -63,23 +81,15 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
             // Access token is valid, save email as user_id
             let body_json: serde_json::Value = serde_json::from_str(&lambda_resp.body)
                 .map_err(|e| format!("Failed to parse response body: {}", e))?;
-      
-              // Extract email from the body
-              if let Some(email) = body_json["email"].as_str() {
-                  // Save the email as the user ID
-                  save_current_user_id(app_handle, email)?;
 
-                  // Load the user's encryption key for decryption
-                  #[cfg(not(target_os = "android"))]
-                  {
-                    match load_user_encryption_key(app_handle, email) {
-                        Ok(_) => println!("Successfully loaded user encryption key"),
-                        Err(e) => eprintln!("Failed to load user encryption key: {}", e),
-                    }
-                  }
-              } else {
-                  return Err("Failed to extract email from response body".to_string());
-              }
+            // Extract email from the body
+            if let Some(email) = body_json["email"].as_str() {
+                // Save the email as the user ID
+                save_current_user_id(app_handle, email)?;
+
+            } else {
+                return Err("Failed to extract email from response body".to_string());
+            }
 
             // User is logged in
             println!("User is logged in successfully.");
@@ -87,7 +97,10 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
         }
         201 => {
             // Access token expired, send refresh token
-            println!("Access token expired. Server response: {}", lambda_resp.body);
+            println!(
+                "Access token expired. Server response: {}",
+                lambda_resp.body
+            );
             if let Some(refresh_token) = Some(refresh_token) {
                 payload = serde_json::json!({
                     "body": serde_json::json!({
@@ -105,43 +118,56 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
                     .map_err(|e| e.to_string())?;
 
                 let text = response.text().await.map_err(|e| e.to_string())?;
-                let lambda_resp: LambdaResponse = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+                let lambda_resp: LambdaResponse =
+                    serde_json::from_str(&text).map_err(|e| e.to_string())?;
 
                 if lambda_resp.status_code == 300 {
                     let body_json: serde_json::Value = serde_json::from_str(&lambda_resp.body)
                         .map_err(|e| format!("Failed to parse response body: {}", e))?;
-              
-                      // Extract email from the body
-                      if let Some(email) = body_json["email"].as_str() {
-                          // Save the email as the user ID
-                          save_current_user_id(app_handle, email)?;
-                      } else {
-                          return Err("Failed to extract email from response body".to_string());
-                      }
+
+                    // Extract email from the body
+                    if let Some(email) = body_json["email"].as_str() {
+                        // Save the email as the user ID
+                        save_current_user_id(app_handle, email)?;
+                    } else {
+                        return Err("Failed to extract email from response body".to_string());
+                    }
 
                     // Save new access token
                     let body: Body = serde_json::from_str(&lambda_resp.body).map_err(|e| e.to_string())?;
                     if let Some(new_access_token) = body.access_token {
-                        save_tokens_to_file(&app_handle, &new_access_token, &refresh_token)
+                        save_tokens_to_file(&app_handle, &new_access_token, &refresh_token, database_token.as_ref(),)
                             .map_err(|e| format!("Failed to save tokens: {}", e))?;
                         println!("User is logged in successfully with refresh token.");
                         return Ok(true);
                     }
                 }
-                println!("Failed to refresh access token. Server response: {}", lambda_resp.body);
+                println!(
+                    "Failed to refresh access token. Server response: {}",
+                    lambda_resp.body
+                );
                 return Ok(false);
             }
-            println!("No refresh token available. Server response: {}", lambda_resp.body);
+            println!(
+                "No refresh token available. Server response: {}",
+                lambda_resp.body
+            );
             Ok(false)
         }
         301 => {
             // Refresh token expired or device mismatch
-            println!("Refresh token expired or device mismatch. Server response: {}", lambda_resp.body);
+            println!(
+                "Refresh token expired or device mismatch. Server response: {}",
+                lambda_resp.body
+            );
             Ok(false)
         }
         _ => {
             // Unexpected status code
-            println!("Unexpected status code: {}. Server response: {}", lambda_resp.status_code, lambda_resp.body);
+            println!(
+                "Unexpected status code: {}. Server response: {}",
+                lambda_resp.status_code, lambda_resp.body
+            );
             Ok(false)
         }
     }

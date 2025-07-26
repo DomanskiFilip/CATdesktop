@@ -1,19 +1,19 @@
-use std::time::Instant;
-use std::net::TcpListener;
-use std::io::Read;
-use urlencoding;
-use tauri::{AppHandle, Manager};
+use crate::user_utils::get_current_user_id;
 use oauth2::basic::BasicTokenType;
 use oauth2::{
-    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge,
-    RedirectUrl, Scope, TokenResponse, TokenUrl, basic::BasicClient
+    basic::BasicClient, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken,
+    PkceCodeChallenge, RedirectUrl, Scope, TokenResponse, TokenUrl,
 };
 #[cfg(not(target_os = "android"))]
 use open;
-use std::io::Write;
-use std::fs;
-use crate::user_utils::get_current_user_id;
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::io::Read;
+use std::io::Write;
+use std::net::TcpListener;
+use std::time::Instant;
+use tauri::{AppHandle, Manager};
+use urlencoding;
 
 #[allow(dead_code)]
 #[derive(Deserialize)]
@@ -35,13 +35,15 @@ pub struct GoogleTokenExtraFields {
 
 #[cfg(not(target_os = "android"))]
 pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String, String> {
-
-    let client_id = ClientId::new("99017034100-stfl2943ef0lnp7c36upsqrstaub49ns.apps.googleusercontent.com".to_string());
+    let client_id = ClientId::new(
+        "99017034100-stfl2943ef0lnp7c36upsqrstaub49ns.apps.googleusercontent.com".to_string(),
+    );
     let secret_json = fs::read_to_string("google_client.json").map_err(|e| e.to_string())?;
     let secret: GoogleSecret = serde_json::from_str(&secret_json).map_err(|e| e.to_string())?;
     let client_secret = ClientSecret::new(secret.installed.client_secret);
     let redirect_url = RedirectUrl::new("http://127.0.0.1:1425".to_string()).unwrap();
-    let auth_url = AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string()).unwrap();
+    let auth_url =
+        AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string()).unwrap();
     let token_url = TokenUrl::new("https://oauth2.googleapis.com/token".to_string()).unwrap();
 
     let client = BasicClient::new(client_id, Some(client_secret), auth_url, Some(token_url))
@@ -54,12 +56,14 @@ pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String,
         .add_scope(Scope::new("openid".to_string()))
         .add_scope(Scope::new("email".to_string()))
         .add_scope(Scope::new("profile".to_string()))
-        .add_scope(Scope::new("https://www.googleapis.com/auth/calendar".to_string()))
+        .add_scope(Scope::new(
+            "https://www.googleapis.com/auth/calendar".to_string(),
+        ))
         .set_pkce_challenge(pkce_challenge)
         .url();
 
-   open::that(auth_url.as_str()).map_err(|e| e.to_string())?;
-   
+    open::that(auth_url.as_str()).map_err(|e| e.to_string())?;
+
     // Listen for the redirect with the code
     let listener = TcpListener::bind("127.0.0.1:1425").map_err(|e| e.to_string())?;
     let code: String;
@@ -85,7 +89,9 @@ pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String,
                                 if key == "code" {
                                     let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
                                         <html><body><h2>Authentication complete. You can close this window.</h2></body></html>";
-                                    stream.write_all(response.as_bytes()).map_err(|e| e.to_string())?;
+                                    stream
+                                        .write_all(response.as_bytes())
+                                        .map_err(|e| e.to_string())?;
                                     code = value.to_string();
                                     break 'outer;
                                 }
@@ -97,19 +103,24 @@ pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String,
         } else {
             let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
                 <html><body><h2>Waiting for authentication...</h2></body></html>";
-            stream.write_all(response.as_bytes()).map_err(|e| e.to_string())?;
+            stream
+                .write_all(response.as_bytes())
+                .map_err(|e| e.to_string())?;
         }
     }
-    let code = urlencoding::decode(&code).map_err(|e| e.to_string())?.to_string();
-    let token_result: oauth2::StandardTokenResponse<oauth2::EmptyExtraTokenFields, BasicTokenType> = client
-        .exchange_code(AuthorizationCode::new(code))
-        .set_pkce_verifier(pkce_verifier)
-        .request_async(oauth2::reqwest::async_http_client)
-        .await
-        .map_err(|e| {
-            println!("Token exchange error: {:?}", e);
-            e.to_string()
-    })?;
+    let code = urlencoding::decode(&code)
+        .map_err(|e| e.to_string())?
+        .to_string();
+    let token_result: oauth2::StandardTokenResponse<oauth2::EmptyExtraTokenFields, BasicTokenType> =
+        client
+            .exchange_code(AuthorizationCode::new(code))
+            .set_pkce_verifier(pkce_verifier)
+            .request_async(oauth2::reqwest::async_http_client)
+            .await
+            .map_err(|e| {
+                println!("Token exchange error: {:?}", e);
+                e.to_string()
+            })?;
 
     let access_token = token_result.access_token().secret().to_string();
     let refresh_token = token_result.refresh_token().map(|t| t.secret().to_string());
@@ -121,7 +132,9 @@ pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String,
         "access_token": access_token,
         "refresh_token": refresh_token,
     });
-    let token_path = app_handle.path().app_data_dir()
+    let token_path = app_handle
+        .path()
+        .app_data_dir()
         .map_err(|e| format!("Failed to get app data directory: {}", e))?
         .join(format!("google_tokens_{}.json", user_id));
     fs::create_dir_all(token_path.parent().unwrap()).map_err(|e| e.to_string())?;

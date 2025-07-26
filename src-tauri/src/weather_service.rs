@@ -1,10 +1,10 @@
-use tauri::{AppHandle, Manager};
-use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::PathBuf;
 use chrono::{Local, NaiveDate};
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
+use tauri::{AppHandle, Manager};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DailyWeather {
@@ -16,7 +16,11 @@ pub struct DailyWeather {
 
 // Function to fetch weekly weather data from Open-Meteo API and cache it //
 #[tauri::command]
-pub async fn get_weekly_weather(app_handle: AppHandle, latitude: f64, longitude: f64) -> Result<HashMap<String, DailyWeather>, String> {
+pub async fn get_weekly_weather(
+    app_handle: AppHandle,
+    latitude: f64,
+    longitude: f64,
+) -> Result<HashMap<String, DailyWeather>, String> {
     let cache_path = get_weather_cache_path(&app_handle);
     let today = Local::now().date_naive();
 
@@ -37,7 +41,11 @@ pub async fn get_weekly_weather(app_handle: AppHandle, latitude: f64, longitude:
         "https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&daily=weathercode,temperature_2m_max,wind_speed_10m_max&timezone=auto",
         latitude, longitude
     );
-    let resp = Client::new().get(&url).send().await.map_err(|e| e.to_string())?;
+    let resp = Client::new()
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
     let json = resp.text().await.map_err(|e| e.to_string())?;
     let parsed: serde_json::Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
 
@@ -56,18 +64,25 @@ pub async fn get_weekly_weather(app_handle: AppHandle, latitude: f64, longitude:
 
     let mut result = HashMap::new();
     for i in 0..dates.len() {
-        let date = dates.get(i).and_then(|d| d.as_str()).unwrap_or_default().to_string();
+        let date = dates
+            .get(i)
+            .and_then(|d| d.as_str())
+            .unwrap_or_default()
+            .to_string();
         let code_val = codes.get(i).and_then(|c| c.as_u64()).unwrap_or(0) as u8;
         let description = weather_code_to_string(code_val);
         let temp = temps.get(i).and_then(|t| t.as_f64()).unwrap_or(0.0) as f32;
         let wind = winds.get(i).and_then(|w| w.as_f64()).unwrap_or(0.0) as f32;
 
-        result.insert(date.clone(), DailyWeather {
-            date,
-            weather: description,
-            temperature_2m_max: temp,
-            wind_speed_10m_max: wind,
-        });
+        result.insert(
+            date.clone(),
+            DailyWeather {
+                date,
+                weather: description,
+                temperature_2m_max: temp,
+                wind_speed_10m_max: wind,
+            },
+        );
     }
 
     // Save to cache
@@ -92,7 +107,8 @@ fn weather_code_to_string(code: u8) -> String {
         95 => "Thunderstorm",
         96 | 99 => "Thunderstorm with hail",
         _ => "Unknown",
-    }.to_string()
+    }
+    .to_string()
 }
 
 // Function to get the path for the weather cache file //

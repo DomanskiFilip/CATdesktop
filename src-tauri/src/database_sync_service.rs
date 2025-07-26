@@ -1,17 +1,17 @@
-use crate::database_utils::{ CalendarEvent, get_db_connection, save_event };
-use crate::api_utils::{ AppConfig, get_device_info };
-use crate::user_utils::get_current_user_id;
-use crate::token_utils::{ read_tokens_from_file };
+use crate::api_utils::{get_device_info, AppConfig};
 use crate::auto_login::auto_login_lambda;
+use crate::database_utils::{get_db_connection, save_event, CalendarEvent};
 use crate::logout_user;
-use std::time::Duration;
-use tokio::time;
-use tauri::AppHandle;
+use crate::token_utils::read_tokens_from_file;
+use crate::user_utils::get_current_user_id;
 use reqwest::Client;
 use serde_json::{json, Value};
-use std::sync::Arc;
-use tokio::task::JoinHandle;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+use tauri::AppHandle;
+use tokio::task::JoinHandle;
+use tokio::time;
 
 pub struct DbSyncService {
     config: Arc<AppConfig>,
@@ -35,7 +35,7 @@ impl DbSyncService {
     pub async fn stop(&mut self) {
         println!("Stopping Db sync service...");
         self.running.store(false, Ordering::SeqCst);
-        
+
         if let Some(handle) = self.task_handle.take() {
             handle.abort();
             println!("DB sync background task aborted");
@@ -45,7 +45,7 @@ impl DbSyncService {
     // Starts the Db sync service //
     pub async fn start(&mut self, app_handle_arc: Arc<AppHandle>, user_logged_in: bool) {
         println!("Starting Db sync service...");
-        
+
         // Perform initial sync on app start
         println!("Performing initial sync to DynamoDB...");
         if let Err(e) = self.sync_to_dynamodb(&app_handle_arc, user_logged_in).await {
@@ -55,24 +55,27 @@ impl DbSyncService {
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
         println!("Performing initial sync from DynamoDB...");
-        if let Err(e) = self.sync_from_dynamodb(&app_handle_arc, user_logged_in).await {
+        if let Err(e) = self
+            .sync_from_dynamodb(&app_handle_arc, user_logged_in)
+            .await
+        {
             eprintln!("Initial sync from DynamoDB failed: {}", e);
         }
 
         // Set running to true
         self.running.store(true, Ordering::SeqCst);
-        
+
         // Create clones for the background task
         let running = Arc::clone(&self.running);
         let config = Arc::clone(&self.config);
         let client = self.client.clone();
         let app_handle_ref = Arc::clone(&app_handle_arc);
-        
+
         // Start periodic checking in a separate task
         self.task_handle = Some(tokio::spawn(async move {
             let sync_interval = Duration::from_secs(240); // 4 minutes
             let mut interval = time::interval(sync_interval);
-            
+
             // Create a temporary service instance for the background task
             let temp_service = DbSyncService {
                 config,
@@ -83,7 +86,7 @@ impl DbSyncService {
 
             while running.load(Ordering::SeqCst) {
                 interval.tick().await;
-                
+
                 // Check if the user is logged in
                 let user_logged_in = match get_current_user_id(&app_handle_ref) {
                     Ok(_) => true,
@@ -92,52 +95,66 @@ impl DbSyncService {
                         false
                     }
                 };
-                
+
                 println!("Running periodic sync to DynamoDB...");
-                if let Err(e) = temp_service.sync_to_dynamodb(&app_handle_ref, user_logged_in).await {
-                  eprintln!("Sync to DynamoDB failed: {}", e);
+                if let Err(e) = temp_service
+                    .sync_to_dynamodb(&app_handle_ref, user_logged_in)
+                    .await
+                {
+                    eprintln!("Sync to DynamoDB failed: {}", e);
                 }
 
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
                 println!("Running periodic sync from DynamoDB...");
-                if let Err(e) = temp_service.sync_from_dynamodb(&app_handle_ref, user_logged_in).await {
-                  eprintln!("Sync from DynamoDB failed: {}", e); 
+                if let Err(e) = temp_service
+                    .sync_from_dynamodb(&app_handle_ref, user_logged_in)
+                    .await
+                {
+                    eprintln!("Sync from DynamoDB failed: {}", e);
                 }
             }
-            
+
             println!("DB sync background task completed");
         }));
     }
 
     // Method to sync events to DynamoDB (upload changes) //
-    pub async fn sync_to_dynamodb(&self, app_handle_arc: &Arc<AppHandle>, user_logged_in: bool) -> Result<(), String> {
+    pub async fn sync_to_dynamodb(
+        &self,
+        app_handle_arc: &Arc<AppHandle>,
+        user_logged_in: bool,
+    ) -> Result<(), String> {
         // Verify user is actually logged in before proceeding
         if !user_logged_in {
             println!("User not logged in, skipping notification scheduling.");
             return Ok(());
         }
 
-          // Get user ID
-          let user_id = match get_current_user_id(&app_handle_arc) {
+        // Get user ID
+        let user_id = match get_current_user_id(&app_handle_arc) {
             Ok(id) => id,
             Err(e) => {
                 println!("Failed to get user ID: {}", e);
                 return Ok(());
             }
-          };
+        };
 
         let events = {
             let conn = get_db_connection(app_handle_arc)
                 .map_err(|e| format!("Database connection failed: {}", e))?;
-            
-            let now = chrono::Utc::now().date_naive().and_hms_opt(0, 0, 0).unwrap();
+
+            let now = chrono::Utc::now()
+                .date_naive()
+                .and_hms_opt(0, 0, 0)
+                .unwrap();
             let mut unsynced = conn.prepare(
                 "SELECT id, user_id, description, time, alarm, synced, synced_google, deleted, recurrence FROM events 
                 WHERE user_id = ? AND ((synced = 0) OR (deleted = 1 AND synced = 0)) AND time >= ?"
             ).map_err(|e| format!("Failed to prepare statement: {}", e))?;
 
-            let events_result = unsynced.query_map((&user_id, &now.to_string()), CalendarEvent::from_row)
+            let events_result = unsynced
+                .query_map((&user_id, &now.to_string()), CalendarEvent::from_row)
                 .map_err(|e| e.to_string())?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| format!("Failed to collect events: {}", e))?;
@@ -167,7 +184,11 @@ impl DbSyncService {
     }
 
     // Method to sync from DynamoDB to local (download changes) //
-    pub async fn sync_from_dynamodb(&self, app_handle_arc: &Arc<AppHandle>, user_logged_in: bool) -> Result<(), String> {
+    pub async fn sync_from_dynamodb(
+        &self,
+        app_handle_arc: &Arc<AppHandle>,
+        user_logged_in: bool,
+    ) -> Result<(), String> {
         if !user_logged_in {
             println!("User not logged in, skipping sync from DynamoDB.");
             return Ok(());
@@ -183,7 +204,7 @@ impl DbSyncService {
                 return Ok(());
             }
         };
-        let device_info = get_device_info();
+        let device_info = get_device_info(&app_handle_arc);
 
         // --- Add access token to payload ---
         let mut payload = json!({
@@ -193,10 +214,11 @@ impl DbSyncService {
             "deviceInfo": device_info,
             "email": user_id
         });
-        if let Ok((access_token, _)) = read_tokens_from_file(app_handle_arc) {
+        if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle_arc) {
             payload["access_token"] = serde_json::json!(access_token);
         }
-        let response = self.client
+        let response = self
+            .client
             .post(&sync_url)
             .header("Content-Type", "application/json")
             .json(&payload)
@@ -215,9 +237,10 @@ impl DbSyncService {
                     // Wait briefly to ensure token file is written
                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                     // Retry with new token (always read from file)
-                    if let Ok((access_token, _)) = read_tokens_from_file(app_handle_arc) {
+                    if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle_arc) {
                         payload["access_token"] = serde_json::json!(access_token);
-                        let retry_response = self.client
+                        let retry_response = self
+                            .client
                             .post(&sync_url)
                             .header("Content-Type", "application/json")
                             .json(&payload)
@@ -257,7 +280,9 @@ impl DbSyncService {
                 }
                 if let Some(body) = lambda_response.get("body").and_then(|v| v.as_str()) {
                     if let Ok(body_json) = serde_json::from_str::<serde_json::Value>(body) {
-                        if let Some(events_array) = body_json.get("events").and_then(|v| v.as_array()) {
+                        if let Some(events_array) =
+                            body_json.get("events").and_then(|v| v.as_array())
+                        {
                             self.merge_remote_events(app_handle_arc, events_array)
                                 .await
                                 .map_err(|e| format!("Failed to merge remote events: {}", e))?;
@@ -276,9 +301,12 @@ impl DbSyncService {
         Ok(())
     }
 
-
     // Helper method -> send events to DynamoDB //
-    async fn send_to_dynamodb(&self, app_handle_arc: &Arc<AppHandle>, events: &[CalendarEvent]) -> Result<(), String> {
+    async fn send_to_dynamodb(
+        &self,
+        app_handle_arc: &Arc<AppHandle>,
+        events: &[CalendarEvent],
+    ) -> Result<(), String> {
         // Get user ID
         let user_id = match get_current_user_id(&app_handle_arc) {
             Ok(id) => id,
@@ -287,8 +315,8 @@ impl DbSyncService {
                 return Ok(());
             }
         };
-        let device_info = get_device_info();  
-      
+        let device_info = get_device_info(&app_handle_arc);
+
         // Prepare batch payload
         let mut payload = json!({
             "body": json!({
@@ -300,19 +328,20 @@ impl DbSyncService {
                     "alarm": event.alarm,
                     "synced_google": event.synced_google,
                     "deleted": event.deleted,
-                    "recurrence": event.recurrence.clone().unwrap_or_else(|| "none".to_string()) 
+                    "recurrence": event.recurrence.clone().unwrap_or_else(|| "none".to_string())
                 })).collect::<Vec<_>>()
             }).to_string(),
             "deviceInfo": device_info,
             "email": user_id
         });
-        if let Ok((access_token, _)) = read_tokens_from_file(app_handle_arc) {
+        if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle_arc) {
             payload["access_token"] = serde_json::json!(access_token);
         }
         // Use lambda endpoint from config
         let sync_url = format!("{}/sync-events", self.config.lambda_base_url);
 
-        let response = self.client
+        let response = self
+            .client
             .post(&sync_url)
             .header("Content-Type", "application/json")
             .json(&payload)
@@ -331,10 +360,11 @@ impl DbSyncService {
                     // Wait briefly to ensure token file is written
                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                     // Retry with new token (always read from file)
-                    if let Ok((access_token, _)) = read_tokens_from_file(app_handle_arc) {
-                      println!("New access token after auto-login: {}", access_token);
+                    if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle_arc) {
+                        println!("New access token after auto-login: {}", access_token);
                         payload["access_token"] = serde_json::json!(access_token);
-                        let retry_response = self.client
+                        let retry_response = self
+                            .client
                             .post(&sync_url)
                             .header("Content-Type", "application/json")
                             .json(&payload)
@@ -369,7 +399,10 @@ impl DbSyncService {
                     if let Some(body) = lambda_response.get("body").and_then(|v| v.as_str()) {
                         return Err(format!("Failed to sync events: {}", body));
                     } else {
-                        return Err(format!("Failed to sync events: status code {}", status_code));
+                        return Err(format!(
+                            "Failed to sync events: status code {}",
+                            status_code
+                        ));
                     }
                 }
                 if let Some(body) = lambda_response.get("body").and_then(|v| v.as_str()) {
@@ -390,30 +423,41 @@ impl DbSyncService {
     }
 
     // Helper method -> mark events synced //
-    fn mark_events_synced(&self, conn: &rusqlite::Connection, events: &[CalendarEvent]) -> Result<(), String> {
-        let mut synced = conn.prepare(
-            "UPDATE events SET synced = TRUE WHERE id = ?"
-        ).map_err(|e| e.to_string())?;
-        
+    fn mark_events_synced(
+        &self,
+        conn: &rusqlite::Connection,
+        events: &[CalendarEvent],
+    ) -> Result<(), String> {
+        let mut synced = conn
+            .prepare("UPDATE events SET synced = TRUE WHERE id = ?")
+            .map_err(|e| e.to_string())?;
+
         for event in events {
-            synced.execute([&event.id])
+            synced
+                .execute([&event.id])
                 .map_err(|e| format!("Failed to mark event {} as synced: {}", event.id, e))?;
         }
-        
+
         Ok(())
     }
 
     // Helper method -> merge remote events into local database //
-    async fn merge_remote_events(&self, app_handle: &AppHandle, remote_events: &[Value]) -> Result<(), String> {
+    async fn merge_remote_events(
+        &self,
+        app_handle: &AppHandle,
+        remote_events: &[Value],
+    ) -> Result<(), String> {
         let conn = get_db_connection(app_handle)
             .map_err(|e| format!("Database connection failed: {}", e))?;
 
         for event_data in remote_events {
             let event_id = event_data["id"].as_str().unwrap_or("");
             let user_id = event_data["email"].as_str().unwrap_or("");
-            let mut query = conn.prepare("SELECT COUNT(*) FROM events WHERE id = ?1 AND user_id = ?2")
+            let mut query = conn
+                .prepare("SELECT COUNT(*) FROM events WHERE id = ?1 AND user_id = ?2")
                 .map_err(|e| format!("Failed to prepare check statement: {}", e))?;
-            let exists: i64 = query.query_row([event_id, user_id], |row| row.get(0))
+            let exists: i64 = query
+                .query_row([event_id, user_id], |row| row.get(0))
                 .map_err(|e| format!("Failed to check for existing event: {}", e))?;
             if exists > 0 {
                 continue; // Skip if already exists

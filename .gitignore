@@ -42,5 +42,3 @@ client_secret_*.json
 
 # Exclude build artifacts
 build/
-gen/
-gen/android

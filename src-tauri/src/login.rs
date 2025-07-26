@@ -1,9 +1,12 @@
+use crate::api_utils::{ get_device_info, AppConfig };
+use crate::token_utils::save_tokens_to_file;
 use reqwest::Client;
 use serde::Deserialize;
 use tauri::AppHandle;
-use crate::token_utils::save_tokens_to_file;
-use crate::api_utils::{AppConfig, get_device_info};
-
+use argon2::{ Argon2, PasswordHasher };
+use argon2::password_hash::{ SaltString };
+use once_cell::sync::Lazy;
+use std::sync::Mutex;
 
 // Structs (classes/objects) to deserialize the Lambda response
 #[derive(Deserialize)]
@@ -19,19 +22,23 @@ struct Body {
 }
 
 // Function to log in a user using AWS Lambda //
-pub async fn login_user_lambda(app_handle: &AppHandle, email: String, password: String) -> Result<String, String> {
+pub async fn login_user_lambda(
+    app_handle: &AppHandle,
+    email: String,
+    password: String,
+) -> Result<String, String> {
     let config = AppConfig::new()?;
-    let device_info = get_device_info();
+    let device_info = get_device_info(&app_handle);
 
     let url = format!("{}/login", config.lambda_base_url);
     let client = Client::new();
-    
+
     let user_data = serde_json::json!({
         "email": email,
         "password": password,
         "deviceInfo": device_info
     });
-    
+
     let payload = serde_json::json!({
         "body": user_data.to_string()
     });
@@ -72,7 +79,8 @@ pub async fn login_user_lambda(app_handle: &AppHandle, email: String, password: 
     // Check status_code
     if lambda_resp.status_code != 200 {
         // Parse the error message from the Lambda response body
-        let error_body: serde_json::Value = serde_json::from_str(&lambda_resp.body).map_err(|e| e.to_string())?;
+        let error_body: serde_json::Value =
+            serde_json::from_str(&lambda_resp.body).map_err(|e| e.to_string())?;
         let error_message = error_body["message"].as_str().unwrap_or("Unknown error");
 
         let frontend_response = serde_json::json!({
@@ -84,13 +92,48 @@ pub async fn login_user_lambda(app_handle: &AppHandle, email: String, password: 
 
     let body: Body = serde_json::from_str(&lambda_resp.body).map_err(|e| e.to_string())?;
 
-    // Save tokens to an encrypted file
-    save_tokens_to_file(&app_handle, &body.access_token, &body.refresh_token,).map_err(|e| format!("Failed to save tokens: {}", e))?;
+    // Derive and cache the database token for this session
+    let db_token = derive_database_token(&email, &password);
+    {
+        let mut cache = DATABASE_TOKEN.lock().unwrap();
+        *cache = Some(db_token);
+    }
 
-    // Pass status to frontend
-    let frontend_response = serde_json::json!({
+    // Desktop: Save tokens to an encrypted file
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    save_tokens_to_file(&app_handle, &body.access_token, &body.refresh_token, Some(&db_token))
+        .map_err(|e| format!("Failed to save tokens: {}", e))?;
+
+    // Build frontend response for all platforms
+    #[allow(unused_mut)] // silence unused mut warning on desktop platforms
+    let mut frontend_response = serde_json::json!({
         "status": "ok",
     });
-    
+
+    // On Android/iOS, return tokens and user_id to frontend for keystore storage
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        frontend_response["tokens"] = serde_json::json!({
+            "access_token": body.access_token,
+            "refresh_token": body.refresh_token,
+        });
+        frontend_response["user_id"] = serde_json::json!(email); // or actual user_id if available
+    }
+
     Ok(frontend_response.to_string())
+}
+
+// Static cache for the database token
+pub static DATABASE_TOKEN: Lazy<Mutex<Option<[u8; 32]>>> = Lazy::new(|| Mutex::new(None));
+
+fn derive_database_token(email: &str, password: &str) -> [u8; 32] {
+    let salt = SaltString::encode_b64(email.as_bytes()).unwrap(); // Use email as salt for determinism
+    let argon2 = Argon2::default();
+    let password = format!("{}:{}", email, password);
+    let hash = argon2.hash_password(password.as_bytes(), &salt).unwrap();
+    let hash_value = hash.hash.unwrap();
+    let hash_bytes = hash_value.as_bytes();
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&hash_bytes[..32]);
+    key
 }

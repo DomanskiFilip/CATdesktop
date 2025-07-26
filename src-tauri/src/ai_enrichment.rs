@@ -1,12 +1,12 @@
 use crate::ai_assistant::LambdaResponse;
+use crate::api_utils::{get_device_info, AppConfig};
 use crate::database_utils::CalendarEvent;
-use crate::user_utils::get_current_user_id;
-use crate::api_utils::{ AppConfig, get_device_info };
-use crate::token_utils::read_tokens_from_file;
 use crate::get_weekly_weather;
-use tauri::{ AppHandle, Manager };
-use serde::{ Deserialize, Serialize };
-use chrono::{ Utc };
+use crate::token_utils::read_tokens_from_file;
+use crate::user_utils::get_current_user_id;
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Manager};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EnrichmentResponse {
@@ -25,9 +25,13 @@ impl AIEnrichmentService {
         Self
     }
 
-    async fn get_context(&self, app_handle: &AppHandle, event: &CalendarEvent,) -> Result<(String, serde_json::Value, String, String, String), String> {
-        let user_id = get_current_user_id(app_handle)?;
-        let device_info = get_device_info();
+    async fn get_context(
+        &self,
+        app_handle: &AppHandle,
+        event: &CalendarEvent,
+    ) -> Result<(String, serde_json::Value, String, String, String), String> {
+        let user_id = get_current_user_id(&app_handle)?;
+        let device_info = get_device_info(&app_handle);
         let config = AppConfig::new()?;
         let current_time = Utc::now().to_rfc3339();
 
@@ -36,18 +40,30 @@ impl AIEnrichmentService {
             let event_date = event.time.date_naive();
             let user_location_state = app_handle.state::<tokio::sync::Mutex<crate::UserLocation>>();
             let loc = user_location_state.lock().await;
-            let weather_map = get_weekly_weather(app_handle.clone(), loc.latitude, loc.longitude).await
+            let weather_map = get_weekly_weather(app_handle.clone(), loc.latitude, loc.longitude)
+                .await
                 .map_err(|e| format!("Failed to fetch weather: {}", e))?;
             let key = event_date.format("%Y-%m-%d").to_string();
-            weather_map.get(&key)
+            weather_map
+                .get(&key)
                 .map(|w| w.weather.clone())
                 .unwrap_or_else(|| "No weather data available.".to_string())
         };
 
-        Ok((user_id, device_info, config.lambda_base_url, current_time, weather))
+        Ok((
+            user_id,
+            device_info,
+            config.lambda_base_url,
+            current_time,
+            weather,
+        ))
     }
 
-    async fn send_lambda_request(&self, url: &str, payload: &serde_json::Value,) -> Result<EnrichmentResponse, String> {
+    async fn send_lambda_request(
+        &self,
+        url: &str,
+        payload: &serde_json::Value,
+    ) -> Result<EnrichmentResponse, String> {
         let client = reqwest::Client::new();
         let resp = client
             .post(url)
@@ -57,7 +73,9 @@ impl AIEnrichmentService {
             .await
             .map_err(|e| format!("Failed to call Lambda: {}", e))?;
 
-        let text = resp.text().await
+        let text = resp
+            .text()
+            .await
             .map_err(|e| format!("Failed to read Lambda response: {}", e))?;
 
         let lambda_resp: LambdaResponse = serde_json::from_str(&text)
@@ -71,7 +89,11 @@ impl AIEnrichmentService {
         Ok(enrichment)
     }
 
-    pub async fn enrich_event(&self, app_handle: &AppHandle, event: CalendarEvent) -> Result<EnrichmentResponse, String> {
+    pub async fn enrich_event(
+        &self,
+        app_handle: &AppHandle,
+        event: CalendarEvent,
+    ) -> Result<EnrichmentResponse, String> {
         let (user_id, device_info, lambda_base_url, current_time, weather) =
             self.get_context(app_handle, &event).await?;
 
@@ -85,7 +107,7 @@ impl AIEnrichmentService {
             "email": user_id,
         });
 
-        if let Ok((access_token, _)) = read_tokens_from_file(app_handle) {
+        if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle) {
             payload["access_token"] = serde_json::json!(access_token);
         }
 
@@ -93,7 +115,13 @@ impl AIEnrichmentService {
         self.send_lambda_request(&url, &payload).await
     }
 
-    pub async fn enrichment_followup(&self, app_handle: &AppHandle, event: CalendarEvent, user_additional_info: String, clarification_history: Option<String>,) -> Result<EnrichmentResponse, String> {
+    pub async fn enrichment_followup(
+        &self,
+        app_handle: &AppHandle,
+        event: CalendarEvent,
+        user_additional_info: String,
+        clarification_history: Option<String>,
+    ) -> Result<EnrichmentResponse, String> {
         let (user_id, device_info, lambda_base_url, current_time, weather) =
             self.get_context(app_handle, &event).await?;
 
@@ -109,7 +137,7 @@ impl AIEnrichmentService {
             "email": user_id,
         });
 
-        if let Ok((access_token, _)) = read_tokens_from_file(app_handle) {
+        if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle) {
             payload["access_token"] = serde_json::json!(access_token);
         }
 

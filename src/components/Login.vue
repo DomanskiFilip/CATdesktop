@@ -13,8 +13,10 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { platform } from '@tauri-apps/plugin-os'
+import { checkStatus, BiometryType, type Status } from "@tauri-apps/plugin-biometric";
+import { store as keystoreStore } from '@impierce/tauri-plugin-keystore'
 
-// error values
 const email = ref('')
 const emailError = ref(false)
 const password = ref('')
@@ -24,14 +26,12 @@ const loadingOn = ref(false)
 
 const emit = defineEmits(['updateLoggedIn']);
 
-// Function to handle login
-function login() {
+async function login() {
   error.value = ''
   emailError.value = false
   passwordError.value = false
   loadingOn.value = true
 
-  // validation checks
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value)) {
     error.value = 'Please enter a valid email address.'
     emailError.value = true
@@ -46,39 +46,66 @@ function login() {
     return
   }
 
-  // Call the backend to login the user and handle response
-  invoke('login_user', { email: email.value, password: password.value })
-  .then((response: any) => {
-    let respObj = response;
-    if (typeof response === 'string') {
-      try {
-        respObj = JSON.parse(response);
-      } catch (e) {
-        error.value = 'Unexpected response from server.';
-        loadingOn.value = false
+  try {
+    const os = await platform();
+    if (os === 'android' || os === 'ios') {
+      // Check biometric status BEFORE login or keystore usage
+      const biometricsStatus: Status = await checkStatus();
+      if (biometricsStatus.biometryType === BiometryType.None) {
+        error.value = "Please set up a biometric (fingerprint, face, etc.) on your device to enable secure login.";
+        loadingOn.value = false;
         return;
       }
     }
 
+    const response: any = await invoke('login_user', { email: email.value, password: password.value })
+    let respObj = response
+    if (typeof response === 'string') {
+      try {
+        respObj = JSON.parse(response)
+      } catch (e) {
+        error.value = 'Unexpected response from server.'
+        loadingOn.value = false
+        return
+      }
+    }
+
     if (respObj.status === 'ok') {
+      if (os === 'android' || os === 'ios') {
+        if (respObj.tokens?.access_token) {
+          await keystoreStore(respObj.tokens.access_token, 'access_token', 'default');
+        }
+        if (respObj.tokens?.refresh_token) {
+          await keystoreStore(respObj.tokens.refresh_token, 'refresh_token', 'default');
+        }
+        if (respObj.user_id) {
+          await keystoreStore(respObj.user_id, 'user_id', 'default');
+        }
+        if (respObj.database_token) {
+          await keystoreStore(respObj.database_token, 'database_token', 'default');
+        }
+      }
       error.value = 'Log in successful!';
-      emit('updateLoggedIn', true)
+      emit('updateLoggedIn', true);
     }
     loadingOn.value = false
-  })
-  .catch((err) => {
+  } catch (err) {
+    console.error("Login error (raw):", err)
     let msg = 'An error during login occurred'
-    if (typeof err === 'string') {
+    // Show a user-friendly message for biometric errors
+    if (typeof err === 'string' && err.includes('biometric')) {
+      msg = "Please set up a biometric (fingerprint, face, etc.) on your device to enable secure login.";
+    } else if (typeof err === 'string') {
       try {
         const parsed = JSON.parse(err)
-          msg = parsed.message || msg
+        msg = parsed.message || msg
       } catch (_) {
         msg = err
       }
     }
     error.value = msg
     loadingOn.value = false
-  });
+  }
 }
 </script>
 

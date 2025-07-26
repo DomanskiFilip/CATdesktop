@@ -93,7 +93,8 @@ import Themes from './components/Themes.vue'
 import Calendar from './components/Calendar.vue'
 import AiAssistant from './components/AiAssistant.vue'
 import Notifications from './components/Notifications.vue'
-
+import { platform } from '@tauri-apps/plugin-os'
+import { retrieve as keystoreRetrieve } from '@impierce/tauri-plugin-keystore'
 
 const isMobile = computed(() => /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent))
 const isLoading = ref(true)
@@ -103,6 +104,35 @@ const activeSection = ref('section1')
 const ismoreInfoVisible = ref(false)
 const currentCoordinates = ref<{ lat: number, lng: number } | null>(null)
 const currentLocationName = ref('')
+
+async function provideTokensToBackend() {
+  const os = await platform()
+  if (os === 'android' || os === 'ios') {
+    try {
+      const access_token = await keystoreRetrieve('access_token', 'default');
+      const refresh_token = await keystoreRetrieve('refresh_token', 'default');
+      const user_id = await keystoreRetrieve('user_id', 'default');
+      const database_token = await keystoreRetrieve('database_token', 'default');
+      if (access_token && refresh_token && database_token) {
+        await invoke('set_tokens_for_autologin', { access_token, refresh_token, user_id, database_token });
+      }
+    } catch (e) {
+      console.error("Failed to provide tokens to backend:", e)
+    }
+  }
+}
+
+async function provideUserIdToBackend() {
+  try {
+    const stored = await keystoreRetrieve('user_id', 'default');
+    if (stored) {
+      console.log("Invoking set_user_id_for_backend with:", { userId: stored });
+      await invoke('set_user_id_for_backend', { userId: stored });
+    }
+  } catch (e) {
+    console.error("Failed to provide user ID to backend:", e);
+  }
+}
 
 // Function to log out the user
 const logout = async () => {
@@ -185,7 +215,11 @@ onMounted(async () => {
       console.log('Auto-login failed - tokens may be expired or invalid');
     }
   });
-  
+  const os = await platform()
+  if (os === 'android' || os === 'ios') {
+    await provideUserIdToBackend();
+    await provideTokensToBackend();
+  }
   // Fallback: Check current login status if event was missed
   setTimeout(async () => {
     if (!loggedIn.value) {

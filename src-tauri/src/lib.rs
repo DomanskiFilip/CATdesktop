@@ -1,38 +1,38 @@
-mod api_utils;
-mod token_utils;
-mod theme_utils;
-mod database_utils;
-mod encryption_utils;
-mod user_utils;
-mod notification_service;
-mod database_sync_service;
-mod google_sync_service;
-mod weather_service;
-mod google_oauth;
-mod login;
-mod register;
-mod auto_login;
 mod ai_assistant;
 mod ai_enrichment;
+mod api_utils;
+mod auto_login;
+mod database_sync_service;
+mod database_utils;
+mod encryption_utils;
+mod google_oauth;
+mod google_sync_service;
+mod login;
+mod notification_service;
+mod register;
+mod theme_utils;
+mod token_utils;
+mod user_utils;
+mod weather_service;
 
-
-use tauri::{AppHandle, Manager, Emitter, State};
-#[cfg(not(target_os = "android"))]
-use tauri::tray::{TrayIconBuilder, TrayIconEvent};
-#[cfg(not(target_os = "android"))]
-use tauri::menu::{Menu, MenuItem};
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use crate::ai_enrichment::AIEnrichmentService;
+use crate::database_sync_service::DbSyncService;
+use crate::database_utils::CalendarEvent;
+use crate::google_sync_service::GoogleSyncService;
+use crate::notification_service::NotificationService;
+use crate::weather_service::get_weekly_weather;
 #[cfg(not(target_os = "android"))]
 use auto_launch::AutoLaunchBuilder;
+use serde::{Deserialize, Serialize};
 use std::env;
-use serde::{Serialize, Deserialize};
-use crate::notification_service::NotificationService;
-use crate::database_sync_service::DbSyncService;
-use crate::google_sync_service::GoogleSyncService;
-use crate::weather_service::get_weekly_weather;
-use crate::ai_enrichment::AIEnrichmentService;
-use crate::database_utils::CalendarEvent;
+use std::sync::Arc;
+#[cfg(not(target_os = "android"))]
+use tauri::menu::{Menu, MenuItem};
+#[cfg(not(target_os = "android"))]
+use tauri::tray::{TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter, Manager, State};
+use tokio::sync::Mutex;
+use once_cell::sync::Lazy;
 
 pub type AppConfigState = Arc<crate::api_utils::AppConfig>;
 pub type NotificationServiceState = Arc<Mutex<Option<NotificationService>>>;
@@ -52,51 +52,125 @@ pub struct UserLocation {
     pub longitude: f64,
 }
 
+struct TokenCache {
+    access_token: Option<String>,
+    refresh_token: Option<String>,
+    user_id: Option<String>,
+    database_token: Option<String>,
+}
+
+static TOKEN_CACHE: once_cell::sync::Lazy<Mutex<TokenCache>> = once_cell::sync::Lazy::new(|| Mutex::new(TokenCache {
+    access_token: None,
+    refresh_token: None,
+    user_id: None,
+    database_token: None,
+}));
+
+#[tauri::command]
+async fn set_tokens_for_autologin(access_token: String, refresh_token: String, user_id: Option<String>, database_token: Option<String>,) {
+  use base64::Engine;  
+  let mut cache = TOKEN_CACHE.lock().await;
+    cache.access_token = Some(access_token);
+    cache.refresh_token = Some(refresh_token);
+    cache.user_id = user_id;
+
+    if let Some(db_token_b64) = database_token {
+        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(db_token_b64) {
+            if bytes.len() == 32 {
+                let mut db_token = [0u8; 32];
+                db_token.copy_from_slice(&bytes);
+                let mut db_cache = crate::login::DATABASE_TOKEN.lock().unwrap();
+                *db_cache = Some(db_token);
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "android")]
+async fn read_tokens_from_cache() -> Result<(String, String, Option<[u8; 32]>), String> {
+    use base64::Engine;
+    let cache = TOKEN_CACHE.lock().await;
+    match (&cache.access_token, &cache.refresh_token, &cache.database_token) {
+        (Some(a), Some(r), Some(db_token_b64)) => {
+            let db_token = base64::engine::general_purpose::STANDARD
+                .decode(db_token_b64)
+                .ok()
+                .and_then(|bytes| {
+                    if bytes.len() == 32 {
+                        let mut arr = [0u8; 32];
+                        arr.copy_from_slice(&bytes);
+                        Some(arr)
+                    } else {
+                        None
+                    }
+                });
+            Ok((a.clone(), r.clone(), db_token))
+        }
+        (Some(a), Some(r), None) => Ok((a.clone(), r.clone(), None)),
+        _ => Err("No tokens in cache".to_string()),
+    }
+}
+
+static USER_ID_CACHE: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
+
+#[tauri::command]
+async fn set_user_id_for_backend(user_id: String) {
+    let mut cache = USER_ID_CACHE.lock().await;
+    *cache = Some(user_id);
+}
+
+// Helper for Android/iOS to get user_id from cache
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn get_current_user_id(_: &AppHandle) -> Result<String, String> {
+    tauri::async_runtime::block_on(async {
+        let cache = USER_ID_CACHE.lock().await;
+        cache.clone().ok_or("User ID not set in backend cache".to_string())
+    })
+}
+
 // Check login status command
 #[tauri::command]
 async fn check_login_status(app_handle: tauri::AppHandle) -> Result<bool, String> {
     match crate::auto_login::auto_login_lambda(&app_handle).await {
         Ok(is_logged_in) => Ok(is_logged_in),
-        Err(_) => Ok(false)
+        Err(_) => Ok(false),
     }
 }
 
 // login user command
 #[tauri::command]
-async fn login_user(app_handle: tauri::AppHandle, email: String, password: String) -> Result<String, String> {
-// Wrap in Arc for the async tasks
+async fn login_user(app_handle: tauri::AppHandle, email: String, password: String,) -> Result<String, String> {
+    // Wrap in Arc for the async tasks
     let app_handle_arc = Arc::new(app_handle);
-    
+
     // Attempt login
-    let login_result = crate::login::login_user_lambda(&app_handle_arc, email.clone(), password).await?;
+    let login_result =
+        crate::login::login_user_lambda(&app_handle_arc, email.clone(), password).await?;
 
     // If login was successful, store the email as user ID and start notification service
     if login_result.contains("\"status\":\"ok\"") {
-        // Store the email as user ID
+        // Store the email as user ID (desktop only)
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         user_utils::save_current_user_id(&app_handle_arc, &email)?;
-
-        // Create or load the user's encryption key
-        match crate::encryption_utils::create_user_encryption_key(&app_handle_arc, &email) {
-            Ok(_) => println!("User encryption key created/loaded successfully"),
-            Err(e) => eprintln!("Failed to create/load user encryption key: {}", e),
-        }
 
         // initialize database
         if let Err(e) = database_utils::init_db(&app_handle_arc) {
             eprintln!("Failed to initialize database after login: {}", e);
         }
-        
-        let notifications_on = app_handle_arc.state::<AppConfigState>().notification_service;
+
+        let notifications_on = app_handle_arc
+            .state::<AppConfigState>()
+            .notification_service;
         if notifications_on == true {
-          // Start notification service and database sync service asynchronously
-          let app_handle_ref1 = Arc::clone(&app_handle_arc);
-          tauri::async_runtime::spawn(async move {
-              if let Err(e) = start_notification_service(app_handle_ref1, true).await {
-                  eprintln!("Failed to start notification service after login: {}", e);
-              } else {
-                  println!("Notification service started successfully after login.");
-              }
-          });
+            // Start notification service and database sync service asynchronously
+            let app_handle_ref1 = Arc::clone(&app_handle_arc);
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = start_notification_service(app_handle_ref1, true).await {
+                    eprintln!("Failed to start notification service after login: {}", e);
+                } else {
+                    println!("Notification service started successfully after login.");
+                }
+            });
         }
 
         let app_handle_ref2 = Arc::clone(&app_handle_arc);
@@ -108,7 +182,7 @@ async fn login_user(app_handle: tauri::AppHandle, email: String, password: Strin
             }
         });
     }
-    
+
     Ok(login_result)
 }
 
@@ -123,7 +197,7 @@ async fn register_user(email: String, password: String) -> Result<String, String
 async fn logout_user(app_handle: tauri::AppHandle) -> Result<bool, String> {
     // Clear tokens first
     crate::token_utils::clear_tokens(&app_handle)?;
-    
+
     // Clear current user ID
     user_utils::clear_current_user_id(&app_handle)?;
 
@@ -135,7 +209,7 @@ async fn logout_user(app_handle: tauri::AppHandle) -> Result<bool, String> {
     tokio::spawn(async move {
         let notification_state = app_handle_ref1.state::<NotificationServiceState>();
         let mut service_guard = notification_state.lock().await;
-        
+
         if let Some(mut existing_service) = service_guard.take() {
             println!("Stopping existing notification service...");
             existing_service.stop().await;
@@ -146,13 +220,13 @@ async fn logout_user(app_handle: tauri::AppHandle) -> Result<bool, String> {
     tokio::spawn(async move {
         let db_state = app_handle_ref2.state::<DbSyncServiceState>();
         let mut service_guard = db_state.lock().await;
-        
+
         if let Some(mut existing_service) = service_guard.take() {
             println!("Stopping existing database sync service...");
             existing_service.stop().await;
         }
     });
-    
+
     // emit ("auto-login-completed", false) to notify the frontend that auto-login is no longer valid
     let _ = app_handle_arc.emit("auto-login-completed", false);
     Ok(true)
@@ -197,7 +271,8 @@ const TIMEOUT: u64 = 120;
 #[tauri::command]
 async fn run_oauth2_flow(app_handle: tauri::AppHandle) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        tokio::runtime::Handle::current().block_on(crate::google_oauth::oauth2_flow(&app_handle, TIMEOUT))
+        tokio::runtime::Handle::current()
+            .block_on(crate::google_oauth::oauth2_flow(&app_handle, TIMEOUT))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -218,22 +293,26 @@ async fn setup_auto_launch() -> Result<(), String> {
         return Ok(());
     }
 
-    let app_path = std::env::current_exe()
-        .map_err(|e| format!("Failed to get executable path: {}", e))?;
-    
+    let app_path =
+        std::env::current_exe().map_err(|e| format!("Failed to get executable path: {}", e))?;
+
     let auto = AutoLaunchBuilder::new()
         .set_app_name("Calendar Assistant")
         .set_app_path(&app_path.to_string_lossy())
         .build()
         .map_err(|e| e.to_string())?;
-    
+
     auto.enable().map_err(|e| e.to_string())?;
     Ok(())
 }
 
 // save user coordinates command
 #[tauri::command]
-async fn set_user_coordinates(state: State<'_, Mutex<UserLocation>>, latitude: f64, longitude: f64) -> Result<(), String> {
+async fn set_user_coordinates(
+    state: State<'_, Mutex<UserLocation>>,
+    latitude: f64,
+    longitude: f64,
+) -> Result<(), String> {
     let mut loc = state.lock().await;
     loc.latitude = latitude;
     loc.longitude = longitude;
@@ -241,14 +320,22 @@ async fn set_user_coordinates(state: State<'_, Mutex<UserLocation>>, latitude: f
 }
 
 #[tauri::command]
-async fn set_notification_service(app_handle: tauri::AppHandle, enabled: bool, lead_minutes: Option<u32>) -> Result<(), String> {
+async fn set_notification_service(
+    app_handle: tauri::AppHandle,
+    enabled: bool,
+    lead_minutes: Option<u32>,
+) -> Result<(), String> {
     user_utils::set_notification_service(app_handle, enabled, lead_minutes)
-        .await.map_err(|e| format!("Failed to set notification service: {}", e))?;
+        .await
+        .map_err(|e| format!("Failed to set notification service: {}", e))?;
     Ok(())
 }
 
 #[tauri::command]
-async fn set_notification_lead_time(app_handle: tauri::AppHandle, lead_minutes: u32) -> Result<(), String> {
+async fn set_notification_lead_time(
+    app_handle: tauri::AppHandle,
+    lead_minutes: u32,
+) -> Result<(), String> {
     user_utils::set_notification_lead_time(app_handle, lead_minutes)
         .await
         .map_err(|e| format!("Failed to set notification lead time: {}", e))
@@ -256,20 +343,27 @@ async fn set_notification_lead_time(app_handle: tauri::AppHandle, lead_minutes: 
 
 // ai assistant comands //
 #[tauri::command]
-async fn process_ai_message(app_handle: AppHandle, query: String, conversation_history: String) -> Result<String, String> {
-      let parsed_history: Option<Vec<ConversationMessage>> = if conversation_history.is_empty() {
+async fn process_ai_message(
+    app_handle: AppHandle,
+    query: String,
+    conversation_history: String,
+) -> Result<String, String> {
+    let parsed_history: Option<Vec<ConversationMessage>> = if conversation_history.is_empty() {
         None
     } else {
         match serde_json::from_str(&conversation_history) {
             Ok(history) => Some(history),
             Err(e) => {
-                println!("Failed to parse conversation_history: {} | Raw: {}", e, conversation_history);
+                println!(
+                    "Failed to parse conversation_history: {} | Raw: {}",
+                    e, conversation_history
+                );
                 None
             }
         }
     };
 
-  // Call the AI processing logic
+    // Call the AI processing logic
     match crate::ai_assistant::process_user_query(&app_handle, query, parsed_history).await {
         Ok(response) => {
             // Ensure we're returning valid, clean JSON
@@ -277,17 +371,16 @@ async fn process_ai_message(app_handle: AppHandle, query: String, conversation_h
                 Ok(json_string) => Ok(json_string),
                 Err(e) => Err(format!("Failed to serialize response: {}", e)),
             }
-        },
+        }
         Err(e) => Err(format!("Failed to process AI message: {}", e)),
     }
 }
 
-
 // Tauri command to enrich calendar event
 #[tauri::command]
 async fn enrich_event(app_handle: AppHandle, event_json: String) -> Result<String, String> {
-    let event: CalendarEvent = serde_json::from_str(&event_json)
-        .map_err(|e| format!("Failed to parse event: {}", e))?;
+    let event: CalendarEvent =
+        serde_json::from_str(&event_json).map_err(|e| format!("Failed to parse event: {}", e))?;
     let service = AIEnrichmentService::new();
     let response = service.enrich_event(&app_handle, event).await?;
     serde_json::to_string(&response).map_err(|e| format!("Failed to serialize response: {}", e))
@@ -295,19 +388,31 @@ async fn enrich_event(app_handle: AppHandle, event_json: String) -> Result<Strin
 
 // Tauri command to handle AI enrichment follow-up
 #[tauri::command]
-async fn enrichment_followup(app_handle: AppHandle, event_json: String, user_additional_info: String, clarification_history: Option<String>,) -> Result<String, String> {
-    let event: CalendarEvent = serde_json::from_str(&event_json)
-        .map_err(|e| format!("Failed to parse event: {}", e))?;
+async fn enrichment_followup(
+    app_handle: AppHandle,
+    event_json: String,
+    user_additional_info: String,
+    clarification_history: Option<String>,
+) -> Result<String, String> {
+    let event: CalendarEvent =
+        serde_json::from_str(&event_json).map_err(|e| format!("Failed to parse event: {}", e))?;
     let service = AIEnrichmentService::new();
-    let response = service.enrichment_followup(&app_handle, event, user_additional_info, clarification_history).await?;
+    let response = service
+        .enrichment_followup(
+            &app_handle,
+            event,
+            user_additional_info,
+            clarification_history,
+        )
+        .await?;
     serde_json::to_string(&response).map_err(|e| format!("Failed to serialize response: {}", e))
 }
 
 #[tauri::command]
 async fn save_event_from_ai(event_json: String, app_handle: AppHandle) -> Result<(), String> {
-    let event: crate::database_utils::CalendarEvent = serde_json::from_str(&event_json)
-        .map_err(|e| format!("Failed to parse event: {}", e))?;
-    
+    let event: crate::database_utils::CalendarEvent =
+        serde_json::from_str(&event_json).map_err(|e| format!("Failed to parse event: {}", e))?;
+
     database_utils::save_event(&app_handle, serde_json::to_string(&event).unwrap())
         .map_err(|e| format!("Failed to save event: {}", e))
 }
@@ -324,19 +429,21 @@ async fn delete_all_events(app_handle: tauri::AppHandle) -> Result<usize, String
         Ok(conn) => conn,
         Err(e) => return Err(e.to_string()),
     };
-    
+
     // Get current user ID
     let user_id = match user_utils::get_current_user_id(&app_handle) {
         Ok(id) => id,
         Err(e) => return Err(e.to_string()),
     };
-    
+
     // Mark all events as deleted
-    let result = conn.execute(
-        "UPDATE events SET deleted = TRUE WHERE user_id = ?",
-        [&user_id]
-    ).map_err(|e| e.to_string())?;
-    
+    let result = conn
+        .execute(
+            "UPDATE events SET deleted = TRUE WHERE user_id = ?",
+            [&user_id],
+        )
+        .map_err(|e| e.to_string())?;
+
     Ok(result as usize)
 }
 
@@ -346,32 +453,42 @@ async fn start_auto_login(app_handle_arc: Arc<AppHandle>) -> Result<bool, String
         Ok(result) => result,
         Err(_e) => false,
     };
-    
+
     // Emit login status to frontend
-    app_handle_arc.emit("auto-login-completed", login_success).ok();
-    
+    app_handle_arc
+        .emit("auto-login-completed", login_success)
+        .ok();
+
     Ok(login_success)
 }
 
 // Start notification service //
-async fn start_notification_service(app_handle_arc: Arc<AppHandle>, user_logged_in: bool) -> Result<(), String> {
+async fn start_notification_service(
+    app_handle_arc: Arc<AppHandle>,
+    user_logged_in: bool,
+) -> Result<(), String> {
     let notification_state = app_handle_arc.state::<NotificationServiceState>();
     let mut service_guard = notification_state.lock().await;
-    
+
     // Stop existing service if it exists
     if let Some(mut existing_service) = service_guard.take() {
         existing_service.stop().await;
     }
-    
+
     // Always create and start a new service
     let service = NotificationService::new();
-    service.start(Arc::clone(&app_handle_arc), user_logged_in).await;
+    service
+        .start(Arc::clone(&app_handle_arc), user_logged_in)
+        .await;
     *service_guard = Some(service);
     Ok(())
 }
 
 // Start database sync service //
-async fn start_database_sync_service(app_handle_arc: Arc<AppHandle>, user_logged_in: bool) -> Result<(), String> {
+async fn start_database_sync_service(
+    app_handle_arc: Arc<AppHandle>,
+    user_logged_in: bool,
+) -> Result<(), String> {
     let config_state = app_handle_arc.state::<AppConfigState>();
     if !config_state.enable_database_sync {
         println!("Database sync service is disabled via configuration");
@@ -385,20 +502,25 @@ async fn start_database_sync_service(app_handle_arc: Arc<AppHandle>, user_logged
     if let Some(mut existing_service) = service_guard.take() {
         existing_service.stop().await;
     }
-    
+
     // Always create and start a new service
     match DbSyncService::new(Arc::clone(&config_state)) {
         Ok(mut service) => {
-            service.start(Arc::clone(&app_handle_arc), user_logged_in).await;
+            service
+                .start(Arc::clone(&app_handle_arc), user_logged_in)
+                .await;
             *service_guard = Some(service);
             println!("Database sync service started successfully");
             Ok(())
-        },
-        Err(e) => Err(format!("Failed to create database sync service: {}", e))
+        }
+        Err(e) => Err(format!("Failed to create database sync service: {}", e)),
     }
 }
 
-async fn start_google_sync_service(app_handle_arc: Arc<AppHandle>, user_logged_in: bool) -> Result<(), String> {
+async fn start_google_sync_service(
+    app_handle_arc: Arc<AppHandle>,
+    user_logged_in: bool,
+) -> Result<(), String> {
     let config_state = app_handle_arc.state::<AppConfigState>();
     if !config_state.enable_google_sync {
         println!("Google sync service is disabled via configuration");
@@ -415,7 +537,9 @@ async fn start_google_sync_service(app_handle_arc: Arc<AppHandle>, user_logged_i
 
     // Always create and start a new service
     let mut service = GoogleSyncService::new(Arc::clone(&config_state));
-    service.start(Arc::clone(&app_handle_arc), user_logged_in).await;
+    service
+        .start(Arc::clone(&app_handle_arc), user_logged_in)
+        .await;
     *service_guard = Some(service);
     println!("Google sync service started successfully");
     Ok(())
@@ -423,15 +547,20 @@ async fn start_google_sync_service(app_handle_arc: Arc<AppHandle>, user_logged_i
 
 // Schedule event notification command //
 #[tauri::command]
-async fn schedule_event_notification( event_json: String, app_handle: AppHandle) -> Result<String, String> {
-    let event: crate::database_utils::CalendarEvent = serde_json::from_str(&event_json)
-        .map_err(|e| format!("Failed to parse event: {}", e))?;
-    
+async fn schedule_event_notification(
+    event_json: String,
+    app_handle: AppHandle,
+) -> Result<String, String> {
+    let event: crate::database_utils::CalendarEvent =
+        serde_json::from_str(&event_json).map_err(|e| format!("Failed to parse event: {}", e))?;
+
     let notification_state = app_handle.state::<NotificationServiceState>();
     let mut service_guard = notification_state.lock().await;
-    
+
     if let Some(service) = service_guard.as_mut() {
-        service.schedule_event_notifications(&event).await
+        service
+            .schedule_event_notifications(&event)
+            .await
             .map_err(|e| format!("Failed to schedule notification: {}", e))?;
         Ok("Notification scheduled successfully".to_string())
     } else {
@@ -480,17 +609,22 @@ fn create_system_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .icon(app.default_window_icon().unwrap().clone())
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_menu_event(move |_app, event| {
-            match event.id().as_ref() {
-                "quit" => {
-                    std::process::exit(0);
-                }
-                _ => {}
+        .on_menu_event(move |_app, event| match event.id().as_ref() {
+            "quit" => {
+                std::process::exit(0);
             }
+            _ => {}
         })
         .on_tray_icon_event(|_tray, event| {
-            if let TrayIconEvent::Click { button, button_state, .. } = event {
-                if button == tauri::tray::MouseButton::Left && button_state == tauri::tray::MouseButtonState::Up {
+            if let TrayIconEvent::Click {
+                button,
+                button_state,
+                ..
+            } = event
+            {
+                if button == tauri::tray::MouseButton::Left
+                    && button_state == tauri::tray::MouseButtonState::Up
+                {
                     if let Some(app) = _tray.app_handle().get_webview_window("main") {
                         if app.is_visible().unwrap_or(false) {
                             let _ = app.hide();
@@ -517,8 +651,18 @@ pub fn run() {
 
 pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
     let app_config = Arc::new(crate::api_utils::AppConfig::new()?);
+    #[allow(unused_mut)] // silence unused mut warning on desktop platforms
+    let mut builder = tauri::Builder::default();
 
-    tauri::Builder::default()
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        builder = builder.plugin(tauri_plugin_biometric::init());
+    }
+
+    builder
+        .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_machine_uid::init())
+        .plugin(tauri_plugin_keystore::init())
         .manage(app_config.clone() as AppConfigState)
         .manage(tokio::sync::Mutex::new(UserLocation::default()))
         .manage(Arc::new(Mutex::new(None::<NotificationService>)) as NotificationServiceState)
@@ -530,6 +674,8 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
             register_user,
             logout_user,
             save_theme,
+            set_tokens_for_autologin,
+            set_user_id_for_backend,
             load_theme,
             save_event,
             delete_event,
@@ -551,7 +697,7 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
             set_notification_lead_time,
         ])
         .setup(|app| {
-          // Request notification permissions on macOS
+            // Request notification permissions on macOS
             #[cfg(target_os = "macos")]
             {
                 tauri::api::notification::request_permission();
@@ -565,8 +711,10 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
             create_system_tray(&app.handle())?;
 
             // Initialize notification service state
-            app.manage(Arc::new(Mutex::new(None::<NotificationService>)) as NotificationServiceState);
-            
+            app.manage(
+                Arc::new(Mutex::new(None::<NotificationService>)) as NotificationServiceState
+            );
+
             // Initialize database sync service state
             app.manage(Arc::new(Mutex::new(None::<DbSyncService>)) as DbSyncServiceState);
 
@@ -577,40 +725,48 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
         .build(tauri::generate_context!())?
         .run(|app_handle, event| match event {
             tauri::RunEvent::Ready => {
-              let app_handle_owned = app_handle.clone();
+                let app_handle_owned = app_handle.clone();
                 tauri::async_runtime::spawn(async move {
-                  let app_handle_arc = Arc::new(app_handle_owned);
-                  // Start auto-login
-                  let login_success = start_auto_login(Arc::clone(&app_handle_arc)).await
-                      .unwrap_or(false);
-                      
-                  // Start notification service
-                  if let Err(e) = start_notification_service(Arc::clone(&app_handle_arc), login_success).await {
-                      eprintln!("Failed to start notification service: {}", e);
-                  }
+                    let app_handle_arc = Arc::new(app_handle_owned);
+                    // Start auto-login
+                    let login_success = start_auto_login(Arc::clone(&app_handle_arc))
+                        .await
+                        .unwrap_or(false);
 
-                  // Start database sync service using a connection pool or other thread-safe approach
-                  if let Err(e) = start_database_sync_service(Arc::clone(&app_handle_arc), login_success).await {
-                      eprintln!("Failed to start database sync service: {}", e);
-                  }
+                    // Start notification service
+                    if let Err(e) =
+                        start_notification_service(Arc::clone(&app_handle_arc), login_success).await
+                    {
+                        eprintln!("Failed to start notification service: {}", e);
+                    }
 
-                  // Start google sync service using a connection pool or other thread-safe approach
-                  if let Err(e) = start_google_sync_service(Arc::clone(&app_handle_arc), login_success).await {
-                      eprintln!("Failed to start google sync service: {}", e);
-                  }
-              });
+                    // Start database sync service using a connection pool or other thread-safe approach
+                    if let Err(e) =
+                        start_database_sync_service(Arc::clone(&app_handle_arc), login_success)
+                            .await
+                    {
+                        eprintln!("Failed to start database sync service: {}", e);
+                    }
+
+                    // Start google sync service using a connection pool or other thread-safe approach
+                    if let Err(e) =
+                        start_google_sync_service(Arc::clone(&app_handle_arc), login_success).await
+                    {
+                        eprintln!("Failed to start google sync service: {}", e);
+                    }
+                });
             }
             tauri::RunEvent::WindowEvent { label, event, .. } => {
-              #[cfg(not(target_os = "android"))]
-              {
-                  if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                      // Hide the window instead of closing it
-                      if let Some(window) = app_handle.get_webview_window(&label) {
-                          let _ = window.hide();
-                      }
-                      api.prevent_close();
-                  }
-              }
+                #[cfg(not(target_os = "android"))]
+                {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        // Hide the window instead of closing it
+                        if let Some(window) = app_handle.get_webview_window(&label) {
+                            let _ = window.hide();
+                        }
+                        api.prevent_close();
+                    }
+                }
             }
             _ => {}
         });
