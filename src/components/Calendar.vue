@@ -1142,4 +1142,46 @@ padding: 0.1rem;
 .expand {
   margin-left: auto;
 }
+
+/* Mobile */
+#main-page.is-mobile #main-content .content-section #calendar {
+  grid-template-columns: 1fr;
+  gap: 0;
+  padding: 0;
+  width: 100vw;
+  margin: 0;
+}
+
+#main-page.is-mobile #main-content .content-section #calendar #calendar-container {
+  min-width: 0;
+  width: 100vw;
+  padding: 0;
+}
+
+#main-page.is-mobile #main-content .content-section #calendar #calendar-container #calendar-header {
+  justify-content: center;
+  margin-top: 0.5rem;
+  margin-bottom: 0;
+  padding: 1rem;
+}
+
+#main-page.is-mobile #main-content .content-section #calendar #calendar-container #calendar-grid {
+  grid-template-columns: repeat(7, 1fr);
+  width: 100vw;
+}
+
+#main-page.is-mobile #main-content .content-section #calendar #calendar-container #calendar-grid .calendar-cell {
+  min-width: 0;
+  max-width: none;
+  min-height: 0;
+  max-height: none;
+  width: 2rem;
+  height: 2rem;
+}
+
+#main-page.is-mobile #main-content .content-section #calendar #schedule-container {
+  padding: 1rem;
+  margin: 0;
+  width: 100vw;
+}
 </style>

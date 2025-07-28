@@ -1,4 +1,7 @@
-use crate::user_utils::get_current_user_id;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use crate::user_utils::{ get_current_user_id };
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use crate::user_utils::{ get_current_user_id_mobile };
 use oauth2::basic::BasicTokenType;
 use oauth2::{
     basic::BasicClient, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken,
@@ -125,7 +128,38 @@ pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String,
     let access_token = token_result.access_token().secret().to_string();
     let refresh_token = token_result.refresh_token().map(|t| t.secret().to_string());
     // Get the current user's email (user_id)
-    let user_id = get_current_user_id(app_handle)?;
+    let user_id: String = {
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                match get_current_user_id(&app_handle) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        println!("Failed to get user ID: {}", e);
+                        return Ok(LLMResponse {
+                            response_text: "You are not logged in. Please log in to use the assistant.".to_string(),
+                            extracted_events: None,
+                            action_taken: None,
+                            confidence: None,
+                        });
+                    }
+                }
+            }
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            {
+                match get_current_user_id_mobile().await {
+                    Ok(id) => id,
+                    Err(e) => {
+                        println!("Failed to get user ID: {}", e);
+                        return Ok(LLMResponse {
+                          response_text: "You are not logged in. Please log in to use the assistant.".to_string(),
+                          extracted_events: None,
+                          action_taken: Some("none".to_string()),
+                          confidence: None,
+                      });
+                    }
+                }
+            }
+        };
 
     // Save all tokens in a user-specific file
     let token_data = serde_json::json!({

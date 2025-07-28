@@ -1,5 +1,9 @@
-use crate::database_utils::{get_db_connection, CalendarEvent};
-use crate::user_utils::{get_current_user_id, UserSettings};
+use crate::database_utils::{ get_db_connection, CalendarEvent };
+use crate::user_utils::UserSettings;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use crate::user_utils::{ get_current_user_id };
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use crate::user_utils::{ get_current_user_id_mobile };
 use chrono::{Duration, Local};
 #[cfg(not(target_os = "android"))]
 use notify_rust::Notification;
@@ -219,7 +223,7 @@ impl NotificationService {
             }
             #[cfg(any(target_os = "android", target_os = "ios"))]
             {
-                match get_current_user_id().await {
+                match get_current_user_id_mobile().await {
                     Ok(id) => id,
                     Err(e) => {
                         println!("Failed to get user ID: {}", e);

@@ -90,8 +90,8 @@ pub fn get_current_user_id(app_handle: &AppHandle) -> Result<String, String> {
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
-pub async fn get_current_user_id() -> Result<String, String> {
-    crate::get_current_user_id().await
+pub async fn get_current_user_id_mobile() -> Result<String, String> {
+    crate::get_current_user_id_from_cache().await
 }
 
 // Function to clear the current user ID by removing the encrypted file //

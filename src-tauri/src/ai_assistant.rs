@@ -3,7 +3,10 @@ use crate::auto_login::auto_login_lambda;
 use crate::database_utils::{get_events, CalendarEvent};
 use crate::logout_user;
 use crate::token_utils::read_tokens_from_file;
-use crate::user_utils::get_current_user_id;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use crate::user_utils::{ get_current_user_id };
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use crate::user_utils::{ get_current_user_id_mobile };
 use crate::ConversationMessage;
 use crate::{get_weekly_weather, UserLocation};
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
@@ -63,12 +66,7 @@ impl AIAssistantService {
         Self
     }
 
-    pub async fn process_user_query(
-        &self,
-        query: String,
-        app_handle: &AppHandle,
-        conversation_history: Option<Vec<ConversationMessage>>,
-    ) -> Result<LLMResponse, String> {
+    pub async fn process_user_query(&self, query: String, app_handle: &AppHandle, conversation_history: Option<Vec<ConversationMessage>>,) -> Result<LLMResponse, String> {
         println!("📝 User Query: {}", query);
 
         // Check for canned responses first
@@ -79,9 +77,7 @@ impl AIAssistantService {
 
         // Create enhanced prompt with event IDs
         let location_state = app_handle.state::<tokio::sync::Mutex<UserLocation>>();
-        let prompt = self
-            .create_enhanced_prompt(&query, app_handle, conversation_history, location_state)
-            .await?;
+        let prompt = self.create_enhanced_prompt(&query, app_handle, conversation_history, location_state).await?;
 
         let llm_response = self.invoke_lambda_endpoint(prompt, app_handle).await?;
         Ok(llm_response)
@@ -122,13 +118,7 @@ impl AIAssistantService {
         }
     }
 
-    async fn create_enhanced_prompt(
-        &self,
-        query: &str,
-        app_handle: &AppHandle,
-        conversation_history: Option<Vec<ConversationMessage>>,
-        location_state: tauri::State<'_, tokio::sync::Mutex<UserLocation>>,
-    ) -> Result<serde_json::Value, String> {
+    async fn create_enhanced_prompt(&self, query: &str, app_handle: &AppHandle, conversation_history: Option<Vec<ConversationMessage>>, location_state: tauri::State<'_, tokio::sync::Mutex<UserLocation>>,) -> Result<serde_json::Value, String> {
         let recent_events = self.get_recent_events(app_handle).await?;
 
         // Format events with IDs for AI context
@@ -200,21 +190,17 @@ impl AIAssistantService {
         Ok(prompt_json)
     }
 
-    async fn invoke_lambda_endpoint(
-        &self,
-        prompt: serde_json::Value,
-        app_handle: &AppHandle,
-    ) -> Result<LLMResponse, String> {
+    async fn invoke_lambda_endpoint(&self, prompt: serde_json::Value, app_handle: &AppHandle,) -> Result<LLMResponse, String> {
         // Get user ID
-        let user_id = {
+        let user_id: String = {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
-                match get_current_user_id(app_handle_arc) {
+                match get_current_user_id(&app_handle) {
                     Ok(id) => id,
                     Err(e) => {
                         println!("Failed to get user ID: {}", e);
                         return Ok(LLMResponse {
-                            response_text: "Failed to get user ID".to_string(),
+                            response_text: "You are not logged in. Please log in to use the assistant.".to_string(),
                             extracted_events: None,
                             action_taken: None,
                             confidence: None,
@@ -224,16 +210,16 @@ impl AIAssistantService {
             }
             #[cfg(any(target_os = "android", target_os = "ios"))]
             {
-                match get_current_user_id().await {
+                match get_current_user_id_mobile().await {
                     Ok(id) => id,
                     Err(e) => {
                         println!("Failed to get user ID: {}", e);
                         return Ok(LLMResponse {
-                            response_text: "Failed to get user ID".to_string(),
-                            extracted_events: None,
-                            action_taken: None,
-                            confidence: None,
-                        });
+                          response_text: "You are not logged in. Please log in to use the assistant.".to_string(),
+                          extracted_events: None,
+                          action_taken: Some("none".to_string()),
+                          confidence: None,
+                      });
                     }
                 }
             }
@@ -388,13 +374,7 @@ impl AIAssistantService {
     }
 }
 
-pub async fn process_user_query(
-    app_handle: &AppHandle,
-    query: String,
-    conversation_history: Option<Vec<ConversationMessage>>,
-) -> Result<LLMResponse, String> {
+pub async fn process_user_query(app_handle: &AppHandle, query: String, conversation_history: Option<Vec<ConversationMessage>>,) -> Result<LLMResponse, String> {
     let ai_service = AIAssistantService::new();
-    ai_service
-        .process_user_query(query, app_handle, conversation_history)
-        .await
+    ai_service.process_user_query(query, app_handle, conversation_history).await
 }

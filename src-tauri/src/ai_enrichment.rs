@@ -1,12 +1,15 @@
 use crate::ai_assistant::LambdaResponse;
-use crate::api_utils::{get_device_info, AppConfig};
+use crate::api_utils::{ get_device_info, AppConfig };
 use crate::database_utils::CalendarEvent;
 use crate::get_weekly_weather;
 use crate::token_utils::read_tokens_from_file;
-use crate::user_utils::get_current_user_id;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use crate::user_utils::{ get_current_user_id };
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use crate::user_utils::{ get_current_user_id_mobile };
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use serde::{ Deserialize, Serialize };
+use tauri::{ AppHandle, Manager };
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EnrichmentResponse {
@@ -25,16 +28,12 @@ impl AIEnrichmentService {
         Self
     }
 
-    async fn get_context(
-        &self,
-        app_handle: &AppHandle,
-        event: &CalendarEvent,
-    ) -> Result<(String, serde_json::Value, String, String, String), String> {
+    async fn get_context(&self, app_handle: &AppHandle, event: &CalendarEvent,) -> Result<(String, serde_json::Value, String, String, String), String> {
         // Get user ID
-        let user_id = {
+        let user_id: String = {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
-                match get_current_user_id(app_handle_arc) {
+                match get_current_user_id(&app_handle) {
                     Ok(id) => id,
                     Err(e) => {
                         println!("Failed to get user ID: {}", e);
@@ -50,7 +49,7 @@ impl AIEnrichmentService {
             }
             #[cfg(any(target_os = "android", target_os = "ios"))]
             {
-                match get_current_user_id().await {
+                match get_current_user_id_mobile().await {
                     Ok(id) => id,
                     Err(e) => {
                         println!("Failed to get user ID: {}", e);
@@ -93,11 +92,7 @@ impl AIEnrichmentService {
         ))
     }
 
-    async fn send_lambda_request(
-        &self,
-        url: &str,
-        payload: &serde_json::Value,
-    ) -> Result<EnrichmentResponse, String> {
+    async fn send_lambda_request(&self, url: &str, payload: &serde_json::Value,) -> Result<EnrichmentResponse, String> {
         let client = reqwest::Client::new();
         let resp = client
             .post(url)
@@ -123,11 +118,7 @@ impl AIEnrichmentService {
         Ok(enrichment)
     }
 
-    pub async fn enrich_event(
-        &self,
-        app_handle: &AppHandle,
-        event: CalendarEvent,
-    ) -> Result<EnrichmentResponse, String> {
+    pub async fn enrich_event(&self, app_handle: &AppHandle, event: CalendarEvent,) -> Result<EnrichmentResponse, String> {
         let (user_id, device_info, lambda_base_url, current_time, weather) =
             self.get_context(app_handle, &event).await?;
 
@@ -149,13 +140,7 @@ impl AIEnrichmentService {
         self.send_lambda_request(&url, &payload).await
     }
 
-    pub async fn enrichment_followup(
-        &self,
-        app_handle: &AppHandle,
-        event: CalendarEvent,
-        user_additional_info: String,
-        clarification_history: Option<String>,
-    ) -> Result<EnrichmentResponse, String> {
+    pub async fn enrichment_followup(&self, app_handle: &AppHandle, event: CalendarEvent, user_additional_info: String, clarification_history: Option<String>,) -> Result<EnrichmentResponse, String> {
         let (user_id, device_info, lambda_base_url, current_time, weather) =
             self.get_context(app_handle, &event).await?;
 

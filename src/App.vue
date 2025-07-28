@@ -28,7 +28,7 @@
   </section>
 
   <!-- main page -->
-  <section v-if="loggedIn && !isLoading" id="main-page">
+  <section v-if="loggedIn && !isLoading" id="main-page" :class="{ 'is-mobile': isMobile }">
     <section id="side-bar">
       <button @click="moreInfo(ismoreInfoVisible)">
         <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)">
@@ -113,7 +113,7 @@ async function provideTokensToBackend() {
       const tokensJson = await keystoreRetrieve('default', 'default');
       if (tokensJson) {
         // Send the JSON string directly to the backend
-        await invoke('set_tokens_for_autologin', { tokens_json: tokensJson });
+        await invoke('set_tokens_for_autologin', { tokensJson: tokensJson });
       }
     } catch (e) {
       console.error("Failed to provide tokens to backend:", e);
@@ -422,5 +422,59 @@ stroke: var(--color-dark);
   background-color: var(--color-theme);
   clip-path: polygon(100% 100%, 0 100%, 100% 0);
   pointer-events: none;
+}
+
+/* Mobile */
+#main-page.is-mobile {
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+}
+
+#main-page.is-mobile * {
+  touch-action: pan-y;
+}
+
+#main-page.is-mobile #side-bar {
+  position: fixed;
+  top: auto;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  width: 100vw;
+  height: 6rem;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  padding-top: 0.5rem;
+  padding-left: 0.5rem;
+  border-top-left-radius: 10px;
+  border-top-right-radius: 10px;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  z-index: 1001;
+}
+
+#main-page.is-mobile #side-bar button {
+  width: 4rem;
+  height: 4rem;
+  margin: 0.5rem;
+}
+
+#main-page.is-mobile #side-bar button:first-of-type {
+  display: none;
+}
+
+#main-page.is-mobile #main-content  {
+  margin-left: 0;
+  padding-top: 0;
+  width: 100vw;
+  height: calc(100vh - 5rem);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+#main-page.is-mobile #main-content .content-section {
+  padding: 0;
 }
 </style>

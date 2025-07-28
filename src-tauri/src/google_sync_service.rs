@@ -1,17 +1,20 @@
-use crate::database_utils::{get_db_connection, save_event, CalendarEvent};
+use crate::database_utils::{ get_db_connection, save_event, CalendarEvent };
 use crate::encryption_utils::decrypt_user_data_base;
-use crate::user_utils::get_current_user_id;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use crate::user_utils::{ get_current_user_id };
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use crate::user_utils::{ get_current_user_id_mobile };
 use base64::Engine;
 use chrono::Timelike;
 use reqwest::Client;
 use serde_json::json;
 use serde_json::Value;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{ AtomicBool, Ordering };
 use std::sync::Arc;
 use tauri::Emitter;
-use tauri::{AppHandle, Manager};
+use tauri::{ AppHandle, Manager };
 use tokio::task::JoinHandle;
-use tokio::time::{self, Duration};
+use tokio::time::{ self, Duration };
 
 pub struct GoogleSyncService {
     config: Arc<crate::api_utils::AppConfig>,
@@ -79,14 +82,14 @@ impl GoogleSyncService {
                 let username = {
                     #[cfg(not(any(target_os = "android", target_os = "ios")))]
                     {
-                        match get_current_user_id(app_handle_arc) {
+                        match get_current_user_id(&app_handle_arc) {
                             Ok(_) => true,
                             Err(_) => false
                         }
                     }
                     #[cfg(any(target_os = "android", target_os = "ios"))]
                     {
-                        match get_current_user_id().await {
+                        match get_current_user_id_mobile().await {
                             Ok(_) => true,
                             Err(_) => false
                         }
@@ -139,7 +142,7 @@ impl GoogleSyncService {
             }
             #[cfg(any(target_os = "android", target_os = "ios"))]
             {
-                match get_current_user_id().await {
+                match get_current_user_id_mobile().await {
                     Ok(id) => id,
                     Err(e) => {
                         println!("Failed to get user ID: {}", e);
@@ -397,7 +400,7 @@ impl GoogleSyncService {
             }
             #[cfg(any(target_os = "android", target_os = "ios"))]
             {
-                match get_current_user_id().await {
+                match get_current_user_id_mobile().await {
                     Ok(id) => id,
                     Err(e) => {
                         println!("Failed to get user ID: {}", e);

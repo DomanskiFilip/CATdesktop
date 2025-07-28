@@ -1,13 +1,16 @@
-use crate::encryption_utils::{decrypt_user_data_base, encrypt_user_data_base};
-use crate::user_utils::get_current_user_id;
-use base64::{engine::general_purpose, Engine};
-use chrono::{DateTime, Local, TimeZone};
+use crate::encryption_utils::{ decrypt_user_data_base, encrypt_user_data_base };
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use crate::user_utils::{ get_current_user_id };
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use crate::user_utils::{ get_current_user_id_mobile };
+use base64::{ engine::general_purpose, Engine };
+use chrono::{ DateTime, Local, TimeZone };
 use rusqlite::Error as SqliteError;
-use rusqlite::{Connection, Result};
-use serde::{Deserialize, Serialize};
+use rusqlite::{ Connection, Result };
+use serde::{ Deserialize, Serialize };
 use std::fs;
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use tauri::{ AppHandle, Manager };
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CalendarEvent {
@@ -159,7 +162,7 @@ pub async fn save_event(app_handle: &AppHandle, event_json: String) -> Result<()
     let user_id = {
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
-            match get_current_user_id(app_handle_arc) {
+            match get_current_user_id(&app_handle) {
                 Ok(id) => id,
                 Err(e) => {
                     println!("Failed to get user ID: {}", e);
@@ -169,7 +172,7 @@ pub async fn save_event(app_handle: &AppHandle, event_json: String) -> Result<()
         }
         #[cfg(any(target_os = "android", target_os = "ios"))]
         {
-            match get_current_user_id().await {
+            match get_current_user_id_mobile().await {
                 Ok(id) => id,
                 Err(e) => {
                     println!("Failed to get user ID: {}", e);
@@ -269,21 +272,21 @@ pub async fn get_events(app_handle: &AppHandle) -> Result<Vec<String>, SqliteErr
     let user_id = {
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
-            match get_current_user_id(app_handle_arc) {
+            match get_current_user_id(&app_handle) {
                 Ok(id) => id,
                 Err(e) => {
                     println!("Failed to get user ID: {}", e);
-                    return Ok((Vec::new()));
+                    return Ok(Vec::new());
                 }
             }
         }
         #[cfg(any(target_os = "android", target_os = "ios"))]
         {
-            match get_current_user_id().await {
+            match get_current_user_id_mobile().await {
                 Ok(id) => id,
                 Err(e) => {
                     println!("Failed to get user ID: {}", e);
-                    return Ok((Vec::new()));
+                    return Ok(Vec::new());
                 }
             }
         }
@@ -357,7 +360,7 @@ pub async fn delete_event(app_handle: &AppHandle, id: String) -> Result<(), Sqli
     let user_id = {
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
-            match get_current_user_id(app_handle_arc) {
+            match get_current_user_id(&app_handle) {
                 Ok(id) => id,
                 Err(e) => {
                     println!("Failed to get user ID: {}", e);
@@ -367,7 +370,7 @@ pub async fn delete_event(app_handle: &AppHandle, id: String) -> Result<(), Sqli
         }
         #[cfg(any(target_os = "android", target_os = "ios"))]
         {
-            match get_current_user_id().await {
+            match get_current_user_id_mobile().await {
                 Ok(id) => id,
                 Err(e) => {
                     println!("Failed to get user ID: {}", e);
@@ -393,7 +396,7 @@ pub async fn clean_old_events(app_handle: &AppHandle) -> Result<(), SqliteError>
     let user_id = {
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
-            match get_current_user_id(app_handle_arc) {
+            match get_current_user_id(&app_handle) {
                 Ok(id) => id,
                 Err(e) => {
                     println!("Failed to get user ID: {}", e);
@@ -403,7 +406,7 @@ pub async fn clean_old_events(app_handle: &AppHandle) -> Result<(), SqliteError>
         }
         #[cfg(any(target_os = "android", target_os = "ios"))]
         {
-            match get_current_user_id().await {
+            match get_current_user_id_mobile().await {
                 Ok(id) => id,
                 Err(e) => {
                     println!("Failed to get user ID: {}", e);

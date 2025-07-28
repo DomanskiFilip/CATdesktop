@@ -903,4 +903,26 @@ watch(chatHistory, () => {
 .clear-btn:active {
   transform: scale(0.9);
 }
+
+/* Mobile */
+#main-page.is-mobile #main-content .content-section #ai-assistant {
+  margin-top: 2rem;
+  height: 93%;
+}
+
+#main-page.is-mobile #main-content .content-section #ai-assistant #suggestions-area ul{
+  touch-action: pan-x;
+}
+
+#main-page.is-mobile #main-content .content-section #ai-assistant #suggestions-area ul li {
+  flex-shrink: 0;
+  height: 2.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#main-page.is-mobile #main-content .content-section #ai-assistant #input-area {
+  margin: 0 1rem;
+}
 </style>

@@ -121,7 +121,7 @@ async fn set_user_id_for_backend(user_id: String) {
 
 // Helper for Android/iOS to get user_id from cache
 #[cfg(any(target_os = "android", target_os = "ios"))]
-pub async fn get_current_user_id() -> Result<String, String> {
+pub async fn get_current_user_id_from_cache() -> Result<String, String> {
     let cache = USER_ID_CACHE.lock().await;
     cache.clone().ok_or("User ID not set in backend cache".to_string())
 }
@@ -268,12 +268,7 @@ const TIMEOUT: u64 = 120;
 
 #[tauri::command]
 async fn run_oauth2_flow(app_handle: tauri::AppHandle) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        tokio::runtime::Handle::current()
-            .block_on(crate::google_oauth::oauth2_flow(&app_handle, TIMEOUT))
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    crate::google_oauth::oauth2_flow(&app_handle, TIMEOUT).await
 }
 
 #[tauri::command]
@@ -306,11 +301,7 @@ async fn setup_auto_launch() -> Result<(), String> {
 
 // save user coordinates command
 #[tauri::command]
-async fn set_user_coordinates(
-    state: State<'_, Mutex<UserLocation>>,
-    latitude: f64,
-    longitude: f64,
-) -> Result<(), String> {
+async fn set_user_coordinates(state: State<'_, Mutex<UserLocation>>, latitude: f64, longitude: f64,) -> Result<(), String> {
     let mut loc = state.lock().await;
     loc.latitude = latitude;
     loc.longitude = longitude;
@@ -318,11 +309,7 @@ async fn set_user_coordinates(
 }
 
 #[tauri::command]
-async fn set_notification_service(
-    app_handle: tauri::AppHandle,
-    enabled: bool,
-    lead_minutes: Option<u32>,
-) -> Result<(), String> {
+async fn set_notification_service(app_handle: tauri::AppHandle, enabled: bool, lead_minutes: Option<u32>,) -> Result<(), String> {
     user_utils::set_notification_service(app_handle, enabled, lead_minutes)
         .await
         .map_err(|e| format!("Failed to set notification service: {}", e))?;
@@ -330,10 +317,7 @@ async fn set_notification_service(
 }
 
 #[tauri::command]
-async fn set_notification_lead_time(
-    app_handle: tauri::AppHandle,
-    lead_minutes: u32,
-) -> Result<(), String> {
+async fn set_notification_lead_time(app_handle: tauri::AppHandle, lead_minutes: u32,) -> Result<(), String> {
     user_utils::set_notification_lead_time(app_handle, lead_minutes)
         .await
         .map_err(|e| format!("Failed to set notification lead time: {}", e))
@@ -341,11 +325,7 @@ async fn set_notification_lead_time(
 
 // ai assistant comands //
 #[tauri::command]
-async fn process_ai_message(
-    app_handle: AppHandle,
-    query: String,
-    conversation_history: String,
-) -> Result<String, String> {
+async fn process_ai_message(app_handle: AppHandle, query: String, conversation_history: String,) -> Result<String, String> {
     let parsed_history: Option<Vec<ConversationMessage>> = if conversation_history.is_empty() {
         None
     } else {
@@ -386,12 +366,7 @@ async fn enrich_event(app_handle: AppHandle, event_json: String) -> Result<Strin
 
 // Tauri command to handle AI enrichment follow-up
 #[tauri::command]
-async fn enrichment_followup(
-    app_handle: AppHandle,
-    event_json: String,
-    user_additional_info: String,
-    clarification_history: Option<String>,
-) -> Result<String, String> {
+async fn enrichment_followup(app_handle: AppHandle, event_json: String, user_additional_info: String, clarification_history: Option<String>,) -> Result<String, String> {
     let event: CalendarEvent =
         serde_json::from_str(&event_json).map_err(|e| format!("Failed to parse event: {}", e))?;
     let service = AIEnrichmentService::new();
@@ -436,17 +411,17 @@ async fn delete_all_events(app_handle: tauri::AppHandle) -> Result<usize, String
                 Ok(id) => id,
                 Err(e) => {
                     println!("Failed to get user ID: {}", e);
-                    return Ok((0));
+                    return Ok(0);
                 }
             }
         }
         #[cfg(any(target_os = "android", target_os = "ios"))]
         {
-            match user_utils::get_current_user_id().await {
+            match user_utils::get_current_user_id_mobile().await {
                 Ok(id) => id,
                 Err(e) => {
                     println!("Failed to get user ID: {}", e);
-                    return Ok((0));
+                    return Ok(0);
                 }
             }
         }
@@ -600,7 +575,7 @@ async fn trigger_sync(app_handle: tauri::AppHandle) -> Result<(), String> {
         }
         #[cfg(any(target_os = "android", target_os = "ios"))]
         {
-            match crate::user_utils::get_current_user_id().await {
+            match crate::user_utils::get_current_user_id_mobile().await {
                 Ok(_) => true,
                 Err(_) => false,
             }

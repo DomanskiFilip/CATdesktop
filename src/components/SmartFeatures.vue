@@ -466,4 +466,17 @@ onMounted(async () => {
 .steps-color {
   color: var(--color-theme);
 }
+
+/* Mobile */
+#main-page.is-mobile #main-content .content-section #calendar #smart-features-container {
+  padding: 0.7rem;
+  margin-top: 1rem;
+  margin-bottom: 5rem;
+  width: 95vw;
+  align-self: center;
+}
+
+#main-page.is-mobile #main-content .content-section #calendar #smart-features-container #smart-features-header div h2 {
+  text-align: center;
+}
 </style>

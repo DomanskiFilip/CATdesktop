@@ -1,12 +1,15 @@
-use crate::api_utils::{get_device_info, AppConfig};
+use crate::api_utils::{ get_device_info, AppConfig };
 use crate::auto_login::auto_login_lambda;
-use crate::database_utils::{get_db_connection, save_event, CalendarEvent};
+use crate::database_utils::{ get_db_connection, save_event, CalendarEvent };
 use crate::logout_user;
 use crate::token_utils::read_tokens_from_file;
-use crate::user_utils::get_current_user_id;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use crate::user_utils::{ get_current_user_id };
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use crate::user_utils::{ get_current_user_id_mobile };
 use reqwest::Client;
-use serde_json::{json, Value};
-use std::sync::atomic::{AtomicBool, Ordering};
+use serde_json::{ json, Value };
+use std::sync::atomic::{ AtomicBool, Ordering };
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::AppHandle;
@@ -91,14 +94,14 @@ impl DbSyncService {
                 let user_logged_in = {
                     #[cfg(not(any(target_os = "android", target_os = "ios")))]
                     {
-                        match crate::user_utils::get_current_user_id(&app_handle_arc) {
+                        match get_current_user_id(&app_handle_arc) {
                             Ok(_) => true,
                             Err(_) => false,
                         }
                     }
                     #[cfg(any(target_os = "android", target_os = "ios"))]
                     {
-                        match crate::user_utils::get_current_user_id().await {
+                        match get_current_user_id_mobile().await {
                             Ok(_) => true,
                             Err(_) => false,
                         }
@@ -141,7 +144,7 @@ impl DbSyncService {
         }
 
         // Get user ID
-        let user_id = {
+        let user_id: String = {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 match get_current_user_id(app_handle_arc) {
@@ -154,7 +157,7 @@ impl DbSyncService {
             }
             #[cfg(any(target_os = "android", target_os = "ios"))]
             {
-                match get_current_user_id().await {
+                match get_current_user_id_mobile().await {
                     Ok(id) => id,
                     Err(e) => {
                         println!("Failed to get user ID: {}", e);
@@ -221,7 +224,7 @@ impl DbSyncService {
         let sync_url = format!("{}/get-events", self.config.lambda_base_url);
 
         // Get user ID
-        let user_id = {
+        let user_id: String = {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 match get_current_user_id(app_handle_arc) {
@@ -234,7 +237,7 @@ impl DbSyncService {
             }
             #[cfg(any(target_os = "android", target_os = "ios"))]
             {
-                match get_current_user_id().await {
+                match get_current_user_id_mobile().await {
                     Ok(id) => id,
                     Err(e) => {
                         println!("Failed to get user ID: {}", e);
@@ -347,7 +350,7 @@ impl DbSyncService {
         events: &[CalendarEvent],
     ) -> Result<(), String> {
         // Get user ID
-        let user_id = {
+        let user_id: String = {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 match get_current_user_id(app_handle_arc) {
@@ -360,7 +363,7 @@ impl DbSyncService {
             }
             #[cfg(any(target_os = "android", target_os = "ios"))]
             {
-                match get_current_user_id().await {
+                match get_current_user_id_mobile().await {
                     Ok(id) => id,
                     Err(e) => {
                         println!("Failed to get user ID: {}", e);
