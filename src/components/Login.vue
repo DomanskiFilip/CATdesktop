@@ -72,17 +72,17 @@ async function login() {
 
     if (respObj.status === 'ok') {
       if (os === 'android' || os === 'ios') {
-        if (respObj.tokens?.access_token) {
-          await keystoreStore(respObj.tokens.access_token, 'access_token', 'default');
-        }
-        if (respObj.tokens?.refresh_token) {
-          await keystoreStore(respObj.tokens.refresh_token, 'refresh_token', 'default');
-        }
+        const tokensToStore = {
+          access_token: respObj.tokens?.access_token || null,
+          refresh_token: respObj.tokens?.refresh_token || null,
+          user_id: respObj.user_id || null,
+          database_token: respObj.database_token || null,
+        };
+        await keystoreStore(JSON.stringify(tokensToStore));
+        // Cache user_id in localStorage for quick access
         if (respObj.user_id) {
-          await keystoreStore(respObj.user_id, 'user_id', 'default');
-        }
-        if (respObj.database_token) {
-          await keystoreStore(respObj.database_token, 'database_token', 'default');
+          localStorage.setItem('cachedUserId', respObj.user_id);
+          await invoke('set_user_id_for_backend', { userId: respObj.user_id });
         }
       }
       error.value = 'Log in successful!';

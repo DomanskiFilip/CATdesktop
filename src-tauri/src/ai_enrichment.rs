@@ -30,7 +30,41 @@ impl AIEnrichmentService {
         app_handle: &AppHandle,
         event: &CalendarEvent,
     ) -> Result<(String, serde_json::Value, String, String, String), String> {
-        let user_id = get_current_user_id(&app_handle)?;
+        // Get user ID
+        let user_id = {
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                match get_current_user_id(app_handle_arc) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        println!("Failed to get user ID: {}", e);
+                        return Ok((
+                          String::new(),
+                          serde_json::Value::Null,
+                          String::new(),
+                          String::new(),
+                          String::new(),
+                      ));
+                    }
+                }
+            }
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            {
+                match get_current_user_id().await {
+                    Ok(id) => id,
+                    Err(e) => {
+                        println!("Failed to get user ID: {}", e);
+                        return Ok((
+                          String::new(),
+                          serde_json::Value::Null,
+                          String::new(),
+                          String::new(),
+                          String::new(),
+                      ));
+                    }
+                }
+            }
+        };
         let device_info = get_device_info(&app_handle);
         let config = AppConfig::new()?;
         let current_time = Utc::now().to_rfc3339();

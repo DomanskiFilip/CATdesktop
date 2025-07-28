@@ -32,10 +32,10 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
 
     // Read tokens from file
     #[cfg(target_os = "android")]
-    let (access_token, refresh_token, database_token) = match read_tokens_from_cache().await {
-        Ok(tokens) => tokens,
-        Err(e) => {
-            println!("No tokens found or failed to read tokens: {}", e);
+    let (access_token, refresh_token, database_token) = match crate::read_tokens_from_cache().await {
+        Some(tokens) => tokens,
+        None => {
+            println!("No tokens found or failed to read tokens");
             return Ok(false);
         }
     };

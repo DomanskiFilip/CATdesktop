@@ -76,11 +76,20 @@ impl GoogleSyncService {
             while running.load(Ordering::SeqCst) {
                 interval.tick().await;
 
-                let user_logged_in = match get_current_user_id(&app_handle_ref) {
-                    Ok(_) => true,
-                    Err(e) => {
-                        println!("Failed to get user ID: {}", e);
-                        false
+                let username = {
+                    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                    {
+                        match get_current_user_id(app_handle_arc) {
+                            Ok(_) => true,
+                            Err(_) => false
+                        }
+                    }
+                    #[cfg(any(target_os = "android", target_os = "ios"))]
+                    {
+                        match get_current_user_id().await {
+                            Ok(_) => true,
+                            Err(_) => false
+                        }
                     }
                 };
 
@@ -117,11 +126,26 @@ impl GoogleSyncService {
             return Ok(());
         }
 
-        let username = match get_current_user_id(app_handle_arc) {
-            Ok(id) => id,
-            Err(e) => {
-                println!("Failed to get user ID: {}", e);
-                return Ok(());
+        let username = {
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                match get_current_user_id(app_handle_arc) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        println!("Failed to get user ID: {}", e);
+                        return Ok(());
+                    }
+                }
+            }
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            {
+                match get_current_user_id().await {
+                    Ok(id) => id,
+                    Err(e) => {
+                        println!("Failed to get user ID: {}", e);
+                        return Ok(());
+                    }
+                }
             }
         };
 
@@ -360,11 +384,26 @@ impl GoogleSyncService {
             return Ok(());
         }
 
-        let username = match get_current_user_id(app_handle_arc) {
-            Ok(id) => id,
-            Err(e) => {
-                println!("Failed to get user ID: {}", e);
-                return Ok(());
+        let username = {
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                match get_current_user_id(app_handle_arc) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        println!("Failed to get user ID: {}", e);
+                        return Ok(());
+                    }
+                }
+            }
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            {
+                match get_current_user_id().await {
+                    Ok(id) => id,
+                    Err(e) => {
+                        println!("Failed to get user ID: {}", e);
+                        return Ok(());
+                    }
+                }
             }
         };
 

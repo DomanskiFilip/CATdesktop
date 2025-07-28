@@ -33,6 +33,7 @@ use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex;
 use once_cell::sync::Lazy;
+use base64::Engine;
 
 pub type AppConfigState = Arc<crate::api_utils::AppConfig>;
 pub type NotificationServiceState = Arc<Mutex<Option<NotificationService>>>;
@@ -52,14 +53,15 @@ pub struct UserLocation {
     pub longitude: f64,
 }
 
-struct TokenCache {
-    access_token: Option<String>,
-    refresh_token: Option<String>,
-    user_id: Option<String>,
-    database_token: Option<String>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenBundle {
+    pub access_token: Option<String>,
+    pub refresh_token: Option<String>,
+    pub user_id: Option<String>,
+    pub database_token: Option<String>,
 }
 
-static TOKEN_CACHE: once_cell::sync::Lazy<Mutex<TokenCache>> = once_cell::sync::Lazy::new(|| Mutex::new(TokenCache {
+static TOKEN_CACHE: once_cell::sync::Lazy<Mutex<TokenBundle>> = once_cell::sync::Lazy::new(|| Mutex::new(TokenBundle {
     access_token: None,
     refresh_token: None,
     user_id: None,
@@ -67,48 +69,46 @@ static TOKEN_CACHE: once_cell::sync::Lazy<Mutex<TokenCache>> = once_cell::sync::
 }));
 
 #[tauri::command]
-async fn set_tokens_for_autologin(access_token: String, refresh_token: String, user_id: Option<String>, database_token: Option<String>,) {
-  use base64::Engine;  
-  let mut cache = TOKEN_CACHE.lock().await;
-    cache.access_token = Some(access_token);
-    cache.refresh_token = Some(refresh_token);
-    cache.user_id = user_id;
+async fn set_tokens_for_autologin(tokens_json: String) {
+    let parsed: Result<TokenBundle, _> = serde_json::from_str(&tokens_json);
+    if let Ok(tokens) = parsed {
+        let mut cache = TOKEN_CACHE.lock().await;
+        cache.access_token = tokens.access_token;
+        cache.refresh_token = tokens.refresh_token;
+        cache.user_id = tokens.user_id;
+        cache.database_token = tokens.database_token.clone();
 
-    if let Some(db_token_b64) = database_token {
-        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(db_token_b64) {
-            if bytes.len() == 32 {
-                let mut db_token = [0u8; 32];
-                db_token.copy_from_slice(&bytes);
-                let mut db_cache = crate::login::DATABASE_TOKEN.lock().unwrap();
-                *db_cache = Some(db_token);
+        // Optionally decode and cache database_token as bytes if needed
+        if let Some(db_token_b64) = tokens.database_token {
+            if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(db_token_b64) {
+                if bytes.len() == 32 {
+                    let mut db_token = [0u8; 32];
+                    db_token.copy_from_slice(&bytes);
+                    let mut db_cache = crate::login::DATABASE_TOKEN.lock().unwrap();
+                    *db_cache = Some(db_token);
+                }
             }
         }
     }
 }
 
 #[cfg(target_os = "android")]
-async fn read_tokens_from_cache() -> Result<(String, String, Option<[u8; 32]>), String> {
-    use base64::Engine;
+async fn read_tokens_from_cache() -> Option<(String, String, Option<[u8; 32]>)> {
     let cache = TOKEN_CACHE.lock().await;
-    match (&cache.access_token, &cache.refresh_token, &cache.database_token) {
-        (Some(a), Some(r), Some(db_token_b64)) => {
-            let db_token = base64::engine::general_purpose::STANDARD
-                .decode(db_token_b64)
-                .ok()
-                .and_then(|bytes| {
-                    if bytes.len() == 32 {
-                        let mut arr = [0u8; 32];
-                        arr.copy_from_slice(&bytes);
-                        Some(arr)
-                    } else {
-                        None
-                    }
-                });
-            Ok((a.clone(), r.clone(), db_token))
-        }
-        (Some(a), Some(r), None) => Ok((a.clone(), r.clone(), None)),
-        _ => Err("No tokens in cache".to_string()),
-    }
+    let access_token = cache.access_token.clone().unwrap_or_default();
+    let refresh_token = cache.refresh_token.clone().unwrap_or_default();
+    let database_token = cache.database_token.as_ref().and_then(|b64| {
+        base64::engine::general_purpose::STANDARD.decode(b64).ok().and_then(|bytes| {
+            if bytes.len() == 32 {
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(&bytes);
+                Some(arr)
+            } else {
+                None
+            }
+        })
+    });
+    Some((access_token, refresh_token, database_token))
 }
 
 static USER_ID_CACHE: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
@@ -121,11 +121,9 @@ async fn set_user_id_for_backend(user_id: String) {
 
 // Helper for Android/iOS to get user_id from cache
 #[cfg(any(target_os = "android", target_os = "ios"))]
-pub fn get_current_user_id(_: &AppHandle) -> Result<String, String> {
-    tauri::async_runtime::block_on(async {
-        let cache = USER_ID_CACHE.lock().await;
-        cache.clone().ok_or("User ID not set in backend cache".to_string())
-    })
+pub async fn get_current_user_id() -> Result<String, String> {
+    let cache = USER_ID_CACHE.lock().await;
+    cache.clone().ok_or("User ID not set in backend cache".to_string())
 }
 
 // Check login status command
@@ -246,23 +244,23 @@ async fn load_theme(app_handle: tauri::AppHandle) -> Result<String, String> {
 // save, load and delete event commands
 #[tauri::command]
 async fn save_event(app_handle: tauri::AppHandle, event: String) -> Result<(), String> {
-    database_utils::save_event(&app_handle, event)
+    database_utils::save_event(&app_handle, event).await
 }
 
 #[tauri::command]
 async fn get_events(app_handle: tauri::AppHandle) -> Result<Vec<String>, String> {
-    database_utils::get_events(&app_handle).map_err(|e| e.to_string())
+    database_utils::get_events(&app_handle).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn delete_event(app_handle: tauri::AppHandle, id: String) -> Result<(), String> {
-    database_utils::delete_event(&app_handle, id).map_err(|e| e.to_string())
+    database_utils::delete_event(&app_handle, id).await.map_err(|e| e.to_string())
 }
 
 // clean old events comand
 #[tauri::command]
 async fn clean_old_events(app_handle: tauri::AppHandle) -> Result<(), String> {
-    database_utils::clean_old_events(&app_handle).map_err(|e| e.to_string())
+    database_utils::clean_old_events(&app_handle).await.map_err(|e| e.to_string())
 }
 
 // google oauth2 functionalities
@@ -414,7 +412,7 @@ async fn save_event_from_ai(event_json: String, app_handle: AppHandle) -> Result
         serde_json::from_str(&event_json).map_err(|e| format!("Failed to parse event: {}", e))?;
 
     database_utils::save_event(&app_handle, serde_json::to_string(&event).unwrap())
-        .map_err(|e| format!("Failed to save event: {}", e))
+        .await.map_err(|e| format!("Failed to save event: {}", e))
 }
 
 #[tauri::command]
@@ -431,9 +429,27 @@ async fn delete_all_events(app_handle: tauri::AppHandle) -> Result<usize, String
     };
 
     // Get current user ID
-    let user_id = match user_utils::get_current_user_id(&app_handle) {
-        Ok(id) => id,
-        Err(e) => return Err(e.to_string()),
+    let user_id = {
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        {
+            match user_utils::get_current_user_id(&app_handle) {
+                Ok(id) => id,
+                Err(e) => {
+                    println!("Failed to get user ID: {}", e);
+                    return Ok((0));
+                }
+            }
+        }
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        {
+            match user_utils::get_current_user_id().await {
+                Ok(id) => id,
+                Err(e) => {
+                    println!("Failed to get user ID: {}", e);
+                    return Ok((0));
+                }
+            }
+        }
     };
 
     // Mark all events as deleted
@@ -574,9 +590,21 @@ async fn trigger_sync(app_handle: tauri::AppHandle) -> Result<(), String> {
     let app_handle_arc = Arc::new(app_handle);
     let config_state = app_handle_arc.state::<AppConfigState>();
 
-    let user_logged_in = match crate::user_utils::get_current_user_id(&app_handle_arc) {
-        Ok(_) => true,
-        Err(_) => false,
+    let user_logged_in = {
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        {
+            match crate::user_utils::get_current_user_id(&app_handle_arc) {
+                Ok(_) => true,
+                Err(_) => false,
+            }
+        }
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        {
+            match crate::user_utils::get_current_user_id().await {
+                Ok(_) => true,
+                Err(_) => false,
+            }
+        }
     };
 
     if !user_logged_in {

@@ -106,31 +106,18 @@ const currentCoordinates = ref<{ lat: number, lng: number } | null>(null)
 const currentLocationName = ref('')
 
 async function provideTokensToBackend() {
-  const os = await platform()
+  const os = await platform();
   if (os === 'android' || os === 'ios') {
     try {
-      const access_token = await keystoreRetrieve('access_token', 'default');
-      const refresh_token = await keystoreRetrieve('refresh_token', 'default');
-      const user_id = await keystoreRetrieve('user_id', 'default');
-      const database_token = await keystoreRetrieve('database_token', 'default');
-      if (access_token && refresh_token && database_token) {
-        await invoke('set_tokens_for_autologin', { access_token, refresh_token, user_id, database_token });
+      // Retrieve the single JSON string from keystore
+      const tokensJson = await keystoreRetrieve('default', 'default');
+      if (tokensJson) {
+        // Send the JSON string directly to the backend
+        await invoke('set_tokens_for_autologin', { tokens_json: tokensJson });
       }
     } catch (e) {
-      console.error("Failed to provide tokens to backend:", e)
+      console.error("Failed to provide tokens to backend:", e);
     }
-  }
-}
-
-async function provideUserIdToBackend() {
-  try {
-    const stored = await keystoreRetrieve('user_id', 'default');
-    if (stored) {
-      console.log("Invoking set_user_id_for_backend with:", { userId: stored });
-      await invoke('set_user_id_for_backend', { userId: stored });
-    }
-  } catch (e) {
-    console.error("Failed to provide user ID to backend:", e);
   }
 }
 
@@ -217,7 +204,6 @@ onMounted(async () => {
   });
   const os = await platform()
   if (os === 'android' || os === 'ios') {
-    await provideUserIdToBackend();
     await provideTokensToBackend();
   }
   // Fallback: Check current login status if event was missed

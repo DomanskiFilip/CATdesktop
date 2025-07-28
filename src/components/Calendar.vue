@@ -79,6 +79,8 @@
 import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { platform } from '@tauri-apps/plugin-os'
+import { retrieve as keystoreRetrieve } from '@impierce/tauri-plugin-keystore'
 import linkifyStr from 'linkify-string'
 import SmartFeatures from './SmartFeatures.vue'
 
@@ -133,6 +135,30 @@ const weather = ref<Record<string, DailyWeather> | 'no data'>('no data')
 const showSmartFeatures = ref(false)
 const smartFeaturesEvent = ref<CalendarEvent | null>(null)
 const smartFeaturesRef = ref<InstanceType<typeof SmartFeatures> | null>(null)
+// for mobile
+const cachedUserId = ref<string | null>(null);
+
+// helper for mobile
+async function getUserIdFromKeystore() {
+  if (cachedUserId.value) return cachedUserId.value;
+  // Try localStorage first
+  const localUserId = localStorage.getItem('cachedUserId');
+  if (localUserId) {
+    cachedUserId.value = localUserId;
+    return localUserId;
+  }
+  // Fallback to keystore if not found in localStorage
+  const tokensJson = await keystoreRetrieve('default', 'default');
+  if (tokensJson) {
+    const tokens = JSON.parse(tokensJson);
+    if (tokens.user_id) {
+      cachedUserId.value = tokens.user_id;
+      localStorage.setItem('cachedUserId', tokens.user_id);
+      return tokens.user_id;
+    }
+  }
+  return null;
+}
 
 // == Utility functions == //
 // utility function -> check if its current day
@@ -334,7 +360,20 @@ const closeSmartFeatures = () => {
 const pendingSaves = new Map<string, ReturnType<typeof setTimeout>>()
 
 // helper function -> Save event function
-const saveEvent = (event: CalendarEvent) => {
+const saveEvent = async (event: CalendarEvent) => {
+  // On mobile, provide user ID to backend before saving
+  const os = await platform();
+  if (os === 'android' || os === 'ios') {
+    try {
+      const userId = await getUserIdFromKeystore();
+      if (userId) {
+        await invoke('set_user_id_for_backend', { userId: userId });
+      }
+    } catch (e) {
+      console.error('Failed to provide user ID to backend:', e);
+      return;
+    }
+  }
   // Clear any existing timeout for this event
   const existingTimeout = pendingSaves.get(event.id)
   if (existingTimeout) {

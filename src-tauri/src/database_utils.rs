@@ -152,13 +152,31 @@ pub fn init_db(app_handle: &AppHandle) -> Result<(), SqliteError> {
 }
 
 // Function to save events //
-pub fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), String> {
+pub async fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), String> {
     let mut event = CalendarEvent::from_json(&event_json)?;
 
     // Get current user ID and assign to event
-    let user_id = match get_current_user_id(app_handle) {
-        Ok(id) => id,
-        Err(e) => return Err(format!("Failed to get current user: {}", e)),
+    let user_id = {
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        {
+            match get_current_user_id(app_handle_arc) {
+                Ok(id) => id,
+                Err(e) => {
+                    println!("Failed to get user ID: {}", e);
+                    return Ok(());
+                }
+            }
+        }
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        {
+            match get_current_user_id().await {
+                Ok(id) => id,
+                Err(e) => {
+                    println!("Failed to get user ID: {}", e);
+                    return Ok(());
+                }
+            }
+        }
     };
 
     event.user_id = user_id.clone();
@@ -238,7 +256,7 @@ pub fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), Stri
 }
 
 // Function to get all events //
-pub fn get_events(app_handle: &AppHandle) -> Result<Vec<String>, SqliteError> {
+pub async fn get_events(app_handle: &AppHandle) -> Result<Vec<String>, SqliteError> {
     let conn = match get_db_connection(app_handle) {
         Ok(conn) => conn,
         Err(e) => {
@@ -248,9 +266,27 @@ pub fn get_events(app_handle: &AppHandle) -> Result<Vec<String>, SqliteError> {
     };
 
     // Get current user ID
-    let user_id = match get_current_user_id(app_handle) {
-        Ok(id) => id,
-        Err(_) => return Ok(Vec::new()), // Return empty list if no user is logged in
+    let user_id = {
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        {
+            match get_current_user_id(app_handle_arc) {
+                Ok(id) => id,
+                Err(e) => {
+                    println!("Failed to get user ID: {}", e);
+                    return Ok((Vec::new()));
+                }
+            }
+        }
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        {
+            match get_current_user_id().await {
+                Ok(id) => id,
+                Err(e) => {
+                    println!("Failed to get user ID: {}", e);
+                    return Ok((Vec::new()));
+                }
+            }
+        }
     };
 
     let mut query = conn.prepare(
@@ -314,13 +350,31 @@ pub fn get_events(app_handle: &AppHandle) -> Result<Vec<String>, SqliteError> {
 }
 
 // Function to delete an event //
-pub fn delete_event(app_handle: &AppHandle, id: String) -> Result<(), SqliteError> {
+pub async fn delete_event(app_handle: &AppHandle, id: String) -> Result<(), SqliteError> {
     let conn = get_db_connection(app_handle)?;
 
     // Get current user ID
-    let user_id = match get_current_user_id(app_handle) {
-        Ok(id) => id,
-        Err(_) => return Ok(()),
+    let user_id = {
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        {
+            match get_current_user_id(app_handle_arc) {
+                Ok(id) => id,
+                Err(e) => {
+                    println!("Failed to get user ID: {}", e);
+                    return Ok(());
+                }
+            }
+        }
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        {
+            match get_current_user_id().await {
+                Ok(id) => id,
+                Err(e) => {
+                    println!("Failed to get user ID: {}", e);
+                    return Ok(());
+                }
+            }
+        }
     };
 
     conn.execute(
@@ -331,14 +385,32 @@ pub fn delete_event(app_handle: &AppHandle, id: String) -> Result<(), SqliteErro
 }
 
 // Function to clean old events //
-pub fn clean_old_events(app_handle: &AppHandle) -> Result<(), SqliteError> {
+pub async fn clean_old_events(app_handle: &AppHandle) -> Result<(), SqliteError> {
     let conn = get_db_connection(app_handle)?;
     let now = chrono::Local::now();
 
     // Get current user ID
-    let user_id = match get_current_user_id(app_handle) {
-        Ok(id) => id,
-        Err(_) => return Ok(()),
+    let user_id = {
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        {
+            match get_current_user_id(app_handle_arc) {
+                Ok(id) => id,
+                Err(e) => {
+                    println!("Failed to get user ID: {}", e);
+                    return Ok(());
+                }
+            }
+        }
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        {
+            match get_current_user_id().await {
+                Ok(id) => id,
+                Err(e) => {
+                    println!("Failed to get user ID: {}", e);
+                    return Ok(());
+                }
+            }
+        }
     };
 
     conn.execute(

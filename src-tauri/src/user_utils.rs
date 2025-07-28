@@ -90,8 +90,8 @@ pub fn get_current_user_id(app_handle: &AppHandle) -> Result<String, String> {
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
-pub fn get_current_user_id(_: &AppHandle) -> Result<String, String> {
-    Err("Use the tauri-plugin-keystore JS API to get user ID on Android/iOS".to_string())
+pub async fn get_current_user_id() -> Result<String, String> {
+    crate::get_current_user_id().await
 }
 
 // Function to clear the current user ID by removing the encrypted file //

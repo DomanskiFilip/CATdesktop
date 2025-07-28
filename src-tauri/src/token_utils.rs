@@ -1,6 +1,7 @@
 use rand::Rng;
 use std::fs;
 use tauri::{ AppHandle, Manager };
+use base64::Engine;
 
 #[cfg(not(target_os = "android"))]
 use crate::encryption_utils::get_encryption_key;
@@ -111,7 +112,10 @@ pub fn save_tokens_to_file(_: &AppHandle, _: &str, _: &str, _: Option<&[u8; 32]>
 #[cfg(target_os = "android")]
 pub fn read_tokens_from_file(_: &AppHandle) -> Result<(String, String, Option<[u8; 32]>), String> {
     // On Android, read from the in-memory cache (populated by set_tokens_for_autologin)
-    tauri::async_runtime::block_on(crate::read_tokens_from_cache())
+    let (access_token, refresh_token, database_token) =
+        tauri::async_runtime::block_on(crate::read_tokens_from_cache())
+            .ok_or("No tokens in cache".to_string())?;
+    Ok((access_token, refresh_token, database_token))
 }
 
 pub fn clear_tokens(app_handle: &AppHandle) -> Result<(), String> {

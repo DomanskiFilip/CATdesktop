@@ -206,11 +206,26 @@ impl NotificationService {
         }
 
         // Get user ID
-        let user_id = match get_current_user_id(app_handle_arc) {
-            Ok(id) => id,
-            Err(e) => {
-                println!("Failed to get user ID: {}", e);
-                return Ok(());
+        let user_id = {
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                match get_current_user_id(app_handle_arc) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        println!("Failed to get user ID: {}", e);
+                        return Ok(());
+                    }
+                }
+            }
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            {
+                match get_current_user_id().await {
+                    Ok(id) => id,
+                    Err(e) => {
+                        println!("Failed to get user ID: {}", e);
+                        return Ok(());
+                    }
+                }
             }
         };
 

@@ -88,11 +88,20 @@ impl DbSyncService {
                 interval.tick().await;
 
                 // Check if the user is logged in
-                let user_logged_in = match get_current_user_id(&app_handle_ref) {
-                    Ok(_) => true,
-                    Err(e) => {
-                        println!("Failed to get user ID: {}", e);
-                        false
+                let user_logged_in = {
+                    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                    {
+                        match crate::user_utils::get_current_user_id(&app_handle_arc) {
+                            Ok(_) => true,
+                            Err(_) => false,
+                        }
+                    }
+                    #[cfg(any(target_os = "android", target_os = "ios"))]
+                    {
+                        match crate::user_utils::get_current_user_id().await {
+                            Ok(_) => true,
+                            Err(_) => false,
+                        }
                     }
                 };
 
@@ -132,11 +141,26 @@ impl DbSyncService {
         }
 
         // Get user ID
-        let user_id = match get_current_user_id(&app_handle_arc) {
-            Ok(id) => id,
-            Err(e) => {
-                println!("Failed to get user ID: {}", e);
-                return Ok(());
+        let user_id = {
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                match get_current_user_id(app_handle_arc) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        println!("Failed to get user ID: {}", e);
+                        return Ok(());
+                    }
+                }
+            }
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            {
+                match get_current_user_id().await {
+                    Ok(id) => id,
+                    Err(e) => {
+                        println!("Failed to get user ID: {}", e);
+                        return Ok(());
+                    }
+                }
             }
         };
 
@@ -197,11 +221,26 @@ impl DbSyncService {
         let sync_url = format!("{}/get-events", self.config.lambda_base_url);
 
         // Get user ID
-        let user_id = match get_current_user_id(&app_handle_arc) {
-            Ok(id) => id,
-            Err(e) => {
-                println!("Failed to get user ID: {}", e);
-                return Ok(());
+        let user_id = {
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                match get_current_user_id(app_handle_arc) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        println!("Failed to get user ID: {}", e);
+                        return Ok(());
+                    }
+                }
+            }
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            {
+                match get_current_user_id().await {
+                    Ok(id) => id,
+                    Err(e) => {
+                        println!("Failed to get user ID: {}", e);
+                        return Ok(());
+                    }
+                }
             }
         };
         let device_info = get_device_info(&app_handle_arc);
@@ -308,11 +347,26 @@ impl DbSyncService {
         events: &[CalendarEvent],
     ) -> Result<(), String> {
         // Get user ID
-        let user_id = match get_current_user_id(&app_handle_arc) {
-            Ok(id) => id,
-            Err(e) => {
-                println!("Failed to get user ID: {}", e);
-                return Ok(());
+        let user_id = {
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                match get_current_user_id(app_handle_arc) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        println!("Failed to get user ID: {}", e);
+                        return Ok(());
+                    }
+                }
+            }
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            {
+                match get_current_user_id().await {
+                    Ok(id) => id,
+                    Err(e) => {
+                        println!("Failed to get user ID: {}", e);
+                        return Ok(());
+                    }
+                }
             }
         };
         let device_info = get_device_info(&app_handle_arc);

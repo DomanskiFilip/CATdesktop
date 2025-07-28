@@ -205,7 +205,39 @@ impl AIAssistantService {
         prompt: serde_json::Value,
         app_handle: &AppHandle,
     ) -> Result<LLMResponse, String> {
-        let user_id = get_current_user_id(&app_handle);
+        // Get user ID
+        let user_id = {
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                match get_current_user_id(app_handle_arc) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        println!("Failed to get user ID: {}", e);
+                        return Ok(LLMResponse {
+                            response_text: "Failed to get user ID".to_string(),
+                            extracted_events: None,
+                            action_taken: None,
+                            confidence: None,
+                        });
+                    }
+                }
+            }
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            {
+                match get_current_user_id().await {
+                    Ok(id) => id,
+                    Err(e) => {
+                        println!("Failed to get user ID: {}", e);
+                        return Ok(LLMResponse {
+                            response_text: "Failed to get user ID".to_string(),
+                            extracted_events: None,
+                            action_taken: None,
+                            confidence: None,
+                        });
+                    }
+                }
+            }
+        };
         let device_info = get_device_info(&app_handle);
 
         let config = AppConfig::new()?;
@@ -329,7 +361,7 @@ impl AIAssistantService {
         app_handle: &AppHandle,
     ) -> Result<Vec<CalendarEvent>, String> {
         let events_json =
-            get_events(app_handle).map_err(|e| format!("Failed to get events: {}", e))?;
+            get_events(app_handle).await.map_err(|e| format!("Failed to get events: {}", e))?;
 
         let events: Result<Vec<CalendarEvent>, _> = events_json
             .into_iter()
