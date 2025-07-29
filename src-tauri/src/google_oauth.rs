@@ -1,7 +1,7 @@
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-use crate::user_utils::{ get_current_user_id };
+use crate::user_utils::get_current_user_id;
 #[cfg(any(target_os = "android", target_os = "ios"))]
-use crate::user_utils::{ get_current_user_id_mobile };
+use crate::user_utils::get_current_user_id_mobile;
 use oauth2::basic::BasicTokenType;
 use oauth2::{
     basic::BasicClient, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken,
@@ -129,27 +129,27 @@ pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String,
     let refresh_token = token_result.refresh_token().map(|t| t.secret().to_string());
     // Get the current user's email (user_id)
     let user_id: String = {
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
-            {
-                match get_current_user_id(&app_handle) {
-                    Ok(id) => id,
-                    Err(e) => {
-                        println!("Failed to get user ID: {}", e);
-                        return Ok(String::new());
-                    }
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        {
+            match get_current_user_id(&app_handle) {
+                Ok(id) => id,
+                Err(e) => {
+                    println!("Failed to get user ID: {}", e);
+                    return Ok(String::new());
                 }
             }
-            #[cfg(any(target_os = "android", target_os = "ios"))]
-            {
-                match get_current_user_id_mobile().await {
-                    Ok(id) => id,
-                    Err(e) => {
-                        println!("Failed to get user ID: {}", e);
-                        return Ok(String::new());
-                    }
+        }
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        {
+            match get_current_user_id_mobile().await {
+                Ok(id) => id,
+                Err(e) => {
+                    println!("Failed to get user ID: {}", e);
+                    return Ok(String::new());
                 }
             }
-        };
+        }
+    };
 
     // Save all tokens in a user-specific file
     let token_data = serde_json::json!({

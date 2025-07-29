@@ -44,10 +44,10 @@ tauri-plugin-keystore = "2.1.0-alpha.1"
 tauri-plugin-os = "2"
 tauri-plugin-biometric = "2.3.0"
 once_cell = "1.19"
+tauri-plugin-notification = "2"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 tauri = { version = "2.5.0", features = ["tray-icon", "config-json5"] } 
-notify-rust = "4"
 auto-launch = "0.5"
 open = "5"
 mac_address = "1.1.8"

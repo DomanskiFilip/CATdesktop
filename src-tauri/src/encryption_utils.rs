@@ -1,19 +1,24 @@
 use crate::login::DATABASE_TOKEN;
 
-pub fn encrypt_user_data_base(_app_handle: &tauri::AppHandle, _user_id: &str, data: &[u8]) -> Result<Vec<u8>, String> {
+pub fn encrypt_user_data_base(
+    _app_handle: &tauri::AppHandle,
+    _user_id: &str,
+    data: &[u8],
+) -> Result<Vec<u8>, String> {
     let key = {
         let cache = DATABASE_TOKEN.lock().unwrap();
         cache.clone().ok_or("Database token not set".to_string())?
     };
-    use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
     use chacha20poly1305::aead::{Aead, KeyInit};
+    use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
     use rand::RngCore;
     let key = Key::from_slice(&key);
     let cipher = ChaCha20Poly1305::new(key);
     let mut nonce_bytes = [0u8; 12];
     rand::thread_rng().fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
-    let ciphertext = cipher.encrypt(nonce, data)
+    let ciphertext = cipher
+        .encrypt(nonce, data)
         .map_err(|e| format!("Encryption failed: {}", e))?;
     let mut encrypted_data = Vec::with_capacity(nonce_bytes.len() + ciphertext.len());
     encrypted_data.extend_from_slice(&nonce_bytes);
@@ -21,7 +26,11 @@ pub fn encrypt_user_data_base(_app_handle: &tauri::AppHandle, _user_id: &str, da
     Ok(encrypted_data)
 }
 
-pub fn decrypt_user_data_base(_app_handle: &tauri::AppHandle, _user_id: &str, encrypted_data: &[u8]) -> Result<Vec<u8>, String> {
+pub fn decrypt_user_data_base(
+    _app_handle: &tauri::AppHandle,
+    _user_id: &str,
+    encrypted_data: &[u8],
+) -> Result<Vec<u8>, String> {
     if encrypted_data.len() < 12 {
         return Err("Encrypted data is too short".to_string());
     }
@@ -29,25 +38,26 @@ pub fn decrypt_user_data_base(_app_handle: &tauri::AppHandle, _user_id: &str, en
         let cache = DATABASE_TOKEN.lock().unwrap();
         cache.clone().ok_or("Database token not set".to_string())?
     };
-    use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
     use chacha20poly1305::aead::{Aead, KeyInit};
+    use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
     let (nonce_bytes, ciphertext) = encrypted_data.split_at(12);
     let nonce = Nonce::from_slice(nonce_bytes);
     let key = Key::from_slice(&key);
     let cipher = ChaCha20Poly1305::new(key);
-    let plaintext = cipher.decrypt(nonce, ciphertext)
+    let plaintext = cipher
+        .decrypt(nonce, ciphertext)
         .map_err(|e| format!("Decryption failed: {}", e))?;
     Ok(plaintext)
 }
 
 #[cfg(not(target_os = "android"))]
 mod platform {
-    use std::fs;
-    use std::path::Path;
-    use rand::Rng;
-    use std::env;
     use base64::{engine::general_purpose, Engine};
     use dotenvy::dotenv;
+    use rand::Rng;
+    use std::env;
+    use std::fs;
+    use std::path::Path;
 
     fn generate_encryption_key() -> [u8; 32] {
         let mut key = [0u8; 32];
@@ -99,6 +109,4 @@ mod platform {
 }
 
 #[cfg(not(target_os = "android"))]
-pub use platform::{
-    get_encryption_key,
-};
+pub use platform::get_encryption_key;

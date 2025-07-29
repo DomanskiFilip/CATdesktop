@@ -1,22 +1,22 @@
-use crate::api_utils::{ get_device_info, AppConfig };
+use crate::api_utils::{get_device_info, AppConfig};
 use crate::auto_login::auto_login_lambda;
-use crate::database_utils::{ get_db_connection, save_event, CalendarEvent };
+use crate::database_utils::{get_db_connection, save_event, CalendarEvent};
 use crate::logout_user;
 use crate::token_utils::read_tokens_from_file;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-use crate::user_utils::{ get_current_user_id };
+use crate::user_utils::get_current_user_id;
 #[cfg(any(target_os = "android", target_os = "ios"))]
-use crate::user_utils::{ get_current_user_id_mobile };
+use crate::user_utils::get_current_user_id_mobile;
+use base64::engine::general_purpose;
+use base64::Engine;
 use reqwest::Client;
-use serde_json::{ json, Value };
-use std::sync::atomic::{ AtomicBool, Ordering };
+use serde_json::{json, Value};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::AppHandle;
 use tokio::task::JoinHandle;
 use tokio::time;
-use base64::engine::general_purpose;
-use base64::Engine;
 
 pub struct DbSyncService {
     config: Arc<AppConfig>,
@@ -212,7 +212,11 @@ impl DbSyncService {
     }
 
     // Method to sync from DynamoDB to local (download changes) //
-    pub async fn sync_from_dynamodb(&self, app_handle_arc: &Arc<AppHandle>, user_logged_in: bool,) -> Result<(), String> {
+    pub async fn sync_from_dynamodb(
+        &self,
+        app_handle_arc: &Arc<AppHandle>,
+        user_logged_in: bool,
+    ) -> Result<(), String> {
         if !user_logged_in {
             println!("User not logged in, skipping sync from DynamoDB.");
             return Ok(());
@@ -496,79 +500,88 @@ impl DbSyncService {
     }
 
     // Helper method -> merge remote events into local database //
-    async fn merge_remote_events(&self, app_handle: &AppHandle, remote_events: &[Value],) -> Result<(), String> {
+    async fn merge_remote_events(
+        &self,
+        app_handle: &AppHandle,
+        remote_events: &[Value],
+    ) -> Result<(), String> {
         for event_data in remote_events.iter().cloned() {
-              let event_id = event_data["id"].as_str().unwrap_or("").to_string();
-              let user_id = event_data["email"].as_str().unwrap_or("").to_string();
-              let event_id_for_log = event_id.clone();
-              let mut description_plain = String::new();
-              if let Some(enc_desc) = event_data.get("description").and_then(|v| v.as_str()) {
-                  if let Ok(decoded) = general_purpose::STANDARD.decode(enc_desc) {
-                      match crate::encryption_utils::decrypt_user_data_base(app_handle, &user_id, &decoded) {
-                          Ok(decrypted) => {
-                              if let Ok(desc_str) = String::from_utf8(decrypted) {
-                                  description_plain = desc_str;
-                              } else {
-                                  description_plain = "[UNREADABLE EVENT]".to_string();
-                              }
-                          }
-                          Err(_) => {
-                              description_plain = "[UNREADABLE EVENT]".to_string();
-                          }
-                      }
-                  } else {
-                      description_plain = enc_desc.to_string();
-                  }
-              }
+            let event_id = event_data["id"].as_str().unwrap_or("").to_string();
+            let user_id = event_data["email"].as_str().unwrap_or("").to_string();
+            let event_id_for_log = event_id.clone();
+            let mut description_plain = String::new();
+            if let Some(enc_desc) = event_data.get("description").and_then(|v| v.as_str()) {
+                if let Ok(decoded) = general_purpose::STANDARD.decode(enc_desc) {
+                    match crate::encryption_utils::decrypt_user_data_base(
+                        app_handle, &user_id, &decoded,
+                    ) {
+                        Ok(decrypted) => {
+                            if let Ok(desc_str) = String::from_utf8(decrypted) {
+                                description_plain = desc_str;
+                            } else {
+                                description_plain = "[UNREADABLE EVENT]".to_string();
+                            }
+                        }
+                        Err(_) => {
+                            description_plain = "[UNREADABLE EVENT]".to_string();
+                        }
+                    }
+                } else {
+                    description_plain = enc_desc.to_string();
+                }
+            }
 
-              let incoming_deleted = event_data.get("deleted").and_then(|v| v.as_bool()).unwrap_or(false);
+            let incoming_deleted = event_data
+                .get("deleted")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
 
-              let event_json = json!({
-                  "id": event_data["id"],
-                  "user_id": event_data["email"],
-                  "description": description_plain,
-                  "time": event_data["time"],
-                  "alarm": event_data["alarm"],
-                  "deleted": incoming_deleted,
-                  "synced": event_data.get("synced").and_then(|v| v.as_bool()).unwrap_or(false),
-                  "synced_google": event_data.get("synced_google").and_then(|v| v.as_bool()).unwrap_or(false),
-                  "recurrence": event_data.get("recurrence").and_then(|v| v.as_str()).map(String::from)
-              });
+            let event_json = json!({
+                "id": event_data["id"],
+                "user_id": event_data["email"],
+                "description": description_plain,
+                "time": event_data["time"],
+                "alarm": event_data["alarm"],
+                "deleted": incoming_deleted,
+                "synced": event_data.get("synced").and_then(|v| v.as_bool()).unwrap_or(false),
+                "synced_google": event_data.get("synced_google").and_then(|v| v.as_bool()).unwrap_or(false),
+                "recurrence": event_data.get("recurrence").and_then(|v| v.as_str()).map(String::from)
+            });
 
-              let app_handle = app_handle.clone();
-              let event_json_string = event_json.to_string();
+            let app_handle = app_handle.clone();
+            let event_json_string = event_json.to_string();
 
-              let result = tokio::task::spawn_blocking(move || {
-                  let conn = get_db_connection(&app_handle)
-                      .map_err(|e| format!("Database connection failed: {}", e))?;
+            let result = tokio::task::spawn_blocking(move || {
+                let conn = get_db_connection(&app_handle)
+                    .map_err(|e| format!("Database connection failed: {}", e))?;
 
-                  let mut query = conn
-                      .prepare("SELECT deleted FROM events WHERE id = ?1 AND user_id = ?2")
-                      .map_err(|e| format!("Failed to prepare check statement: {}", e))?;
-                  let mut should_save = true;
-                  let existing_deleted: Option<bool> = query
-                      .query_row([event_id.as_str(), user_id.as_str()], |row| row.get(0))
-                      .ok();
+                let mut query = conn
+                    .prepare("SELECT deleted FROM events WHERE id = ?1 AND user_id = ?2")
+                    .map_err(|e| format!("Failed to prepare check statement: {}", e))?;
+                let mut should_save = true;
+                let existing_deleted: Option<bool> = query
+                    .query_row([event_id.as_str(), user_id.as_str()], |row| row.get(0))
+                    .ok();
 
-                  if let Some(existing_deleted) = existing_deleted {
-                      // Only update if deleted status is different
-                      if existing_deleted == incoming_deleted {
-                          should_save = false;
-                      }
-                  }
-                  if should_save {
-                      futures::executor::block_on(save_event(&app_handle, event_json_string))
-                  } else {
-                      Ok(())
-                  }
-              })
-              .await
-              .map_err(|e| format!("Join error: {}", e))?;
+                if let Some(existing_deleted) = existing_deleted {
+                    // Only update if deleted status is different
+                    if existing_deleted == incoming_deleted {
+                        should_save = false;
+                    }
+                }
+                if should_save {
+                    futures::executor::block_on(save_event(&app_handle, event_json_string))
+                } else {
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| format!("Join error: {}", e))?;
 
-              if let Err(e) = result {
-                  println!("Failed to save event {}: {}", event_id_for_log, e);
-              }
-          }
+            if let Err(e) = result {
+                println!("Failed to save event {}: {}", event_id_for_log, e);
+            }
+        }
         Ok(())
     }
 }

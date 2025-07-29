@@ -1,14 +1,14 @@
-use crate::api_utils::{ get_device_info, AppConfig };
+use crate::api_utils::{get_device_info, AppConfig};
 use crate::token_utils::save_tokens_to_file;
-use reqwest::Client;
-use serde::Deserialize;
-use tauri::AppHandle;
-use argon2::{ Argon2, PasswordHasher };
-use argon2::password_hash::{ SaltString };
-use once_cell::sync::Lazy;
-use std::sync::Mutex;
+use argon2::password_hash::SaltString;
+use argon2::{Argon2, PasswordHasher};
 #[cfg(any(target_os = "android", target_os = "ios"))]
 use base64::Engine;
+use once_cell::sync::Lazy;
+use reqwest::Client;
+use serde::Deserialize;
+use std::sync::Mutex;
+use tauri::AppHandle;
 
 // Structs (classes/objects) to deserialize the Lambda response
 #[derive(Deserialize)]
@@ -24,7 +24,11 @@ struct Body {
 }
 
 // Function to log in a user using AWS Lambda //
-pub async fn login_user_lambda(app_handle: &AppHandle, email: String, password: String,) -> Result<String, String> {
+pub async fn login_user_lambda(
+    app_handle: &AppHandle,
+    email: String,
+    password: String,
+) -> Result<String, String> {
     let config = AppConfig::new()?;
     let device_info = get_device_info(&app_handle);
 
@@ -99,8 +103,14 @@ pub async fn login_user_lambda(app_handle: &AppHandle, email: String, password: 
 
     // Desktop: Save tokens to an encrypted file
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    save_tokens_to_file(&app_handle, &body.access_token, &body.refresh_token, Some(&db_token)).await
-        .map_err(|e| format!("Failed to save tokens: {}", e))?;
+    save_tokens_to_file(
+        &app_handle,
+        &body.access_token,
+        &body.refresh_token,
+        Some(&db_token),
+    )
+    .await
+    .map_err(|e| format!("Failed to save tokens: {}", e))?;
 
     // Build frontend response for all platforms
     #[allow(unused_mut)] // silence unused mut warning on desktop platforms
@@ -116,7 +126,8 @@ pub async fn login_user_lambda(app_handle: &AppHandle, email: String, password: 
             "refresh_token": body.refresh_token,
         });
         frontend_response["user_id"] = serde_json::json!(email);
-        frontend_response["database_token"] = serde_json::json!(base64::engine::general_purpose::STANDARD.encode(db_token));
+        frontend_response["database_token"] =
+            serde_json::json!(base64::engine::general_purpose::STANDARD.encode(db_token));
     }
 
     Ok(frontend_response.to_string())

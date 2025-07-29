@@ -84,6 +84,9 @@
 import { ref, watch, onMounted, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, emit } from '@tauri-apps/api/event'
+import { platform } from '@tauri-apps/plugin-os'
+import { retrieve as keystoreRetrieve } from '@impierce/tauri-plugin-keystore'
+import { useRouter } from 'vue-router'
 import TitleBar from './components/TitleBar.vue'
 import Oauth from './components/Oauth.vue'
 import Location from './components/Location.vue'
@@ -93,8 +96,7 @@ import Themes from './components/Themes.vue'
 import Calendar from './components/Calendar.vue'
 import AiAssistant from './components/AiAssistant.vue'
 import Notifications from './components/Notifications.vue'
-import { platform } from '@tauri-apps/plugin-os'
-import { retrieve as keystoreRetrieve } from '@impierce/tauri-plugin-keystore'
+
 
 const isMobile = computed(() => /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent))
 const isLoading = ref(true)
@@ -191,6 +193,16 @@ const handleLocationUpdate = async (coordinates: { lat: number, lng: number } | 
 const handleLocationNameUpdate = (name: string) => {
   currentLocationName.value = name
 }
+
+const router = useRouter()
+
+onMounted(() => {
+  listen('open-smart-features', (event) => {
+    // Always navigate to calendar page
+    router.push({ name: 'Calendar' })
+    // Optionally, you can emit a custom event to Calendar.vue if needed
+  })
+})
 
 onMounted(async () => {
   // Listen for backend auto-login events

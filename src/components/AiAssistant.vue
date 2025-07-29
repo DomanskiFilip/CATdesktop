@@ -446,7 +446,7 @@ const updateEventByTargetId = async (eventSuggestion: EventSuggestion) => {
   await invoke('save_event', { event: JSON.stringify(updatedEvent) });
   if (updatedEvent.alarm) {
     try {
-      await invoke('schedule_event_notification', { event_json: JSON.stringify(updatedEvent) });
+      await invoke('schedule_event_notification', { eventJson: JSON.stringify(updatedEvent) });
     } catch (notificationError) {
       console.warn('Failed to schedule notification:', notificationError);
     }

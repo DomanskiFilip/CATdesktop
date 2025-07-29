@@ -48,8 +48,7 @@ pub fn save_current_user_id(app_handle: &AppHandle, user_id: &str) -> Result<(),
     encrypted_data.extend_from_slice(&encrypted);
 
     let file_path = get_user_file_path(app_handle)?;
-    fs::write(file_path, encrypted_data)
-        .map_err(|e| format!("Failed to write user file: {}", e))
+    fs::write(file_path, encrypted_data).map_err(|e| format!("Failed to write user file: {}", e))
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]

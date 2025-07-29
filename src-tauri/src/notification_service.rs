@@ -1,20 +1,21 @@
 use crate::database_utils::{ get_db_connection, CalendarEvent };
-use crate::user_utils::UserSettings;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-use crate::user_utils::{ get_current_user_id };
+use crate::user_utils::get_current_user_id;
 #[cfg(any(target_os = "android", target_os = "ios"))]
-use crate::user_utils::{ get_current_user_id_mobile };
-use chrono::{Duration, Local};
-#[cfg(not(target_os = "android"))]
-use notify_rust::Notification;
-use rrule::{RRuleSet, Tz};
+use crate::user_utils::get_current_user_id_mobile;
+use crate::user_utils::UserSettings;
+use crate::encryption_utils::decrypt_user_data_base;
+use base64::Engine;
+use tauri_plugin_notification::NotificationExt;
+use chrono::{ Duration, Local };
+use rrule::{ RRuleSet, Tz };
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager};
+use tauri::{ AppHandle, Manager, Emitter };
 use tokio::sync::Mutex as TokioMutex;
 use tokio::task::JoinHandle;
-use tokio::time::{sleep, Duration as TokioDuration};
+use tokio::time::{ sleep, Duration as TokioDuration };
 
 pub struct NotificationService {
     scheduled_tasks: HashMap<String, JoinHandle<()>>,
@@ -84,7 +85,7 @@ impl NotificationService {
     }
 
     // Helper method for check_and_schedule_all_notifications -> schedule notifications for a single event //
-    pub async fn schedule_event_notifications(&mut self, event: &CalendarEvent,) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn schedule_event_notifications(&mut self, app_handle_arc: Arc<AppHandle>, event: &CalendarEvent,) -> Result<(), Box<dyn std::error::Error>> {
         println!("Scheduling notifications for event!");
 
         // Check if the event has an alarm set
@@ -97,7 +98,7 @@ impl NotificationService {
 
         // Handle recurrence if present
         if let Some(recurrence) = &event.recurrence {
-            return Box::pin(self.schedule_recurring_event_notifications(event, recurrence)).await;
+            return Box::pin(self.schedule_recurring_event_notifications(app_handle_arc.clone(), event, recurrence)).await;
         }
 
         // Calculate delays
@@ -131,18 +132,25 @@ impl NotificationService {
             let _event_id_clone = event_id.clone();
             let _description_clone = description.clone();
 
+            let app_handle_arc = Arc::clone(&app_handle_arc);
             let warning_task = tokio::spawn(async move {
                 sleep(TokioDuration::from_secs(warning_delay.num_seconds() as u64)).await;
-                #[cfg(not(target_os = "android"))]
-                if let Err(e) = Notification::new()
-                    .summary("Calendar AssistanT - Event Reminder")
-                    .body(&format!(
-                        "Upcoming event in 15 minutes: {}",
-                        _description_clone
-                    ))
-                    .appname("Calendar AssistanT")
-                    .icon("icons/icon.png")
-                    .timeout(0)
+
+                // Decrypt the description before showing the notification
+                let decrypted_description = match base64::engine::general_purpose::STANDARD.decode(&_description_clone) {
+                    Ok(decoded) => match decrypt_user_data_base(&app_handle_arc, "", &decoded) {
+                        Ok(decrypted) => String::from_utf8(decrypted).unwrap_or("[UNREADABLE EVENT]".to_string()),
+                        Err(_) => "[UNREADABLE EVENT]".to_string(),
+                    },
+                    Err(_) => "[UNREADABLE EVENT]".to_string(),
+                };
+
+
+                if let Err(e) = app_handle_arc
+                    .notification()
+                    .builder()
+                    .title("Calendar AssistanT - Event Reminder")
+                    .body(&format!("Upcoming event in 15 minutes: {}", decrypted_description))
                     .show()
                 {
                     eprintln!("Failed to show warning notification: {}", e);
@@ -165,15 +173,24 @@ impl NotificationService {
             let _event_id_clone = event_id.clone();
             let _description_clone = description.clone();
 
+            let app_handle_arc = Arc::clone(&app_handle_arc);
             let event_task = tokio::spawn(async move {
                 sleep(TokioDuration::from_secs(event_delay.num_seconds() as u64)).await;
-                #[cfg(not(target_os = "android"))]
-                if let Err(e) = Notification::new()
-                    .summary("Calendar AssistanT - Event Now")
-                    .body(&format!("Event now: {}", _description_clone))
-                    .appname("Calendar AssistanT")
-                    .icon("icons/icon.png")
-                    .timeout(0)
+
+                // Decrypt the description before showing the notification
+                let decrypted_description = match base64::engine::general_purpose::STANDARD.decode(&_description_clone) {
+                    Ok(decoded) => match decrypt_user_data_base(&app_handle_arc, "", &decoded) {
+                        Ok(decrypted) => String::from_utf8(decrypted).unwrap_or("[UNREADABLE EVENT]".to_string()),
+                        Err(_) => "[UNREADABLE EVENT]".to_string(),
+                    },
+                    Err(_) => "[UNREADABLE EVENT]".to_string(),
+                };
+
+                if let Err(e) = app_handle_arc
+                    .notification()
+                    .builder()
+                    .title("Calendar AssistanT - Event Now")
+                    .body(&format!("Event now: {}", decrypted_description))
                     .show()
                 {
                     eprintln!("Failed to show event notification: {}", e);
@@ -272,7 +289,7 @@ impl NotificationService {
 
             if let Some(service) = service_guard.as_mut() {
                 for (_index, event) in events.iter().enumerate() {
-                    if let Err(e) = service.schedule_event_notifications(&event).await {
+                    if let Err(e) = service.schedule_event_notifications(app_handle_arc.clone(), &event).await {
                         eprintln!(
                             "Failed to schedule notification for event {}: {}",
                             event.id, e
@@ -291,15 +308,8 @@ impl NotificationService {
     }
 
     // Method to schedule notifications for recurring events //
-    pub async fn schedule_recurring_event_notifications(
-        &mut self,
-        event: &CalendarEvent,
-        recurrence: &str,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        println!(
-            "Scheduling notifications for recurring event with rule: {}",
-            recurrence
-        );
+    pub async fn schedule_recurring_event_notifications(&mut self, app_handle_arc: Arc<AppHandle>, event: &CalendarEvent, recurrence: &str,) -> Result<(), Box<dyn std::error::Error>> {
+        println!("Scheduling notifications for recurring event with rule: {}", recurrence);
 
         // Initialize RRule parser
         let rrule_str = if recurrence.starts_with("RRULE:") {
@@ -375,7 +385,7 @@ impl NotificationService {
             };
 
             // Schedule the notification for this instance
-            if let Err(e) = self.schedule_event_notifications(&instance_event).await {
+            if let Err(e) = self.schedule_event_notifications(app_handle_arc.clone(), &instance_event).await {
                 eprintln!(
                     "Failed to schedule notification for recurring instance {}: {}",
                     instance_event.id, e

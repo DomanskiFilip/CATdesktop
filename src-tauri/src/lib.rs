@@ -23,6 +23,8 @@ use crate::notification_service::NotificationService;
 use crate::weather_service::get_weekly_weather;
 #[cfg(not(target_os = "android"))]
 use auto_launch::AutoLaunchBuilder;
+use base64::Engine;
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::sync::Arc;
@@ -32,8 +34,6 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex;
-use once_cell::sync::Lazy;
-use base64::Engine;
 
 pub type AppConfigState = Arc<crate::api_utils::AppConfig>;
 pub type NotificationServiceState = Arc<Mutex<Option<NotificationService>>>;
@@ -61,12 +61,14 @@ pub struct TokenBundle {
     pub database_token: Option<String>,
 }
 
-static TOKEN_CACHE: once_cell::sync::Lazy<Mutex<TokenBundle>> = once_cell::sync::Lazy::new(|| Mutex::new(TokenBundle {
-    access_token: None,
-    refresh_token: None,
-    user_id: None,
-    database_token: None,
-}));
+static TOKEN_CACHE: once_cell::sync::Lazy<Mutex<TokenBundle>> = once_cell::sync::Lazy::new(|| {
+    Mutex::new(TokenBundle {
+        access_token: None,
+        refresh_token: None,
+        user_id: None,
+        database_token: None,
+    })
+});
 
 #[tauri::command]
 async fn set_tokens_for_autologin(tokens_json: String) {
@@ -99,17 +101,23 @@ async fn read_tokens_from_cache() -> Option<(String, String, Option<[u8; 32]>)> 
     let access_token = cache.access_token.clone().unwrap_or_default();
     let refresh_token = cache.refresh_token.clone().unwrap_or_default();
     let database_token = cache.database_token.as_ref().and_then(|b64| {
-        base64::engine::general_purpose::STANDARD.decode(b64).ok().and_then(|bytes| {
-            if bytes.len() == 32 {
-                let mut arr = [0u8; 32];
-                arr.copy_from_slice(&bytes);
-                Some(arr)
-            } else {
-                None
-            }
-        })
+        base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .ok()
+            .and_then(|bytes| {
+                if bytes.len() == 32 {
+                    let mut arr = [0u8; 32];
+                    arr.copy_from_slice(&bytes);
+                    Some(arr)
+                } else {
+                    None
+                }
+            })
     });
-    println!("Tokens loaded from cache: access_token='{}', refresh_token='{}', database_token='{:?}'", access_token, refresh_token, database_token);
+    println!(
+        "Tokens loaded from cache: access_token='{}', refresh_token='{}', database_token='{:?}'",
+        access_token, refresh_token, database_token
+    );
     Some((access_token, refresh_token, database_token))
 }
 
@@ -125,7 +133,9 @@ async fn set_user_id_for_backend(user_id: String) {
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn get_current_user_id_from_cache() -> Result<String, String> {
     let cache = USER_ID_CACHE.lock().await;
-    cache.clone().ok_or("User ID not set in backend cache".to_string())
+    cache
+        .clone()
+        .ok_or("User ID not set in backend cache".to_string())
 }
 
 // Check login status command
@@ -139,7 +149,11 @@ async fn check_login_status(app_handle: tauri::AppHandle) -> Result<bool, String
 
 // login user command
 #[tauri::command]
-async fn login_user(app_handle: tauri::AppHandle, email: String, password: String,) -> Result<String, String> {
+async fn login_user(
+    app_handle: tauri::AppHandle,
+    email: String,
+    password: String,
+) -> Result<String, String> {
     // Wrap in Arc for the async tasks
     let app_handle_arc = Arc::new(app_handle);
 
@@ -251,18 +265,24 @@ async fn save_event(app_handle: tauri::AppHandle, event: String) -> Result<(), S
 
 #[tauri::command]
 async fn get_events(app_handle: tauri::AppHandle) -> Result<Vec<String>, String> {
-    database_utils::get_events(&app_handle).await.map_err(|e| e.to_string())
+    database_utils::get_events(&app_handle)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn delete_event(app_handle: tauri::AppHandle, id: String) -> Result<(), String> {
-    database_utils::delete_event(&app_handle, id).await.map_err(|e| e.to_string())
+    database_utils::delete_event(&app_handle, id)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 // clean old events comand
 #[tauri::command]
 async fn clean_old_events(app_handle: tauri::AppHandle) -> Result<(), String> {
-    database_utils::clean_old_events(&app_handle).await.map_err(|e| e.to_string())
+    database_utils::clean_old_events(&app_handle)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 // google oauth2 functionalities
@@ -303,7 +323,11 @@ async fn setup_auto_launch() -> Result<(), String> {
 
 // save user coordinates command
 #[tauri::command]
-async fn set_user_coordinates(state: State<'_, Mutex<UserLocation>>, latitude: f64, longitude: f64,) -> Result<(), String> {
+async fn set_user_coordinates(
+    state: State<'_, Mutex<UserLocation>>,
+    latitude: f64,
+    longitude: f64,
+) -> Result<(), String> {
     let mut loc = state.lock().await;
     loc.latitude = latitude;
     loc.longitude = longitude;
@@ -311,7 +335,11 @@ async fn set_user_coordinates(state: State<'_, Mutex<UserLocation>>, latitude: f
 }
 
 #[tauri::command]
-async fn set_notification_service(app_handle: tauri::AppHandle, enabled: bool, lead_minutes: Option<u32>,) -> Result<(), String> {
+async fn set_notification_service(
+    app_handle: tauri::AppHandle,
+    enabled: bool,
+    lead_minutes: Option<u32>,
+) -> Result<(), String> {
     user_utils::set_notification_service(app_handle, enabled, lead_minutes)
         .await
         .map_err(|e| format!("Failed to set notification service: {}", e))?;
@@ -319,7 +347,10 @@ async fn set_notification_service(app_handle: tauri::AppHandle, enabled: bool, l
 }
 
 #[tauri::command]
-async fn set_notification_lead_time(app_handle: tauri::AppHandle, lead_minutes: u32,) -> Result<(), String> {
+async fn set_notification_lead_time(
+    app_handle: tauri::AppHandle,
+    lead_minutes: u32,
+) -> Result<(), String> {
     user_utils::set_notification_lead_time(app_handle, lead_minutes)
         .await
         .map_err(|e| format!("Failed to set notification lead time: {}", e))
@@ -327,7 +358,11 @@ async fn set_notification_lead_time(app_handle: tauri::AppHandle, lead_minutes: 
 
 // ai assistant comands //
 #[tauri::command]
-async fn process_ai_message(app_handle: AppHandle, query: String, conversation_history: String,) -> Result<String, String> {
+async fn process_ai_message(
+    app_handle: AppHandle,
+    query: String,
+    conversation_history: String,
+) -> Result<String, String> {
     let parsed_history: Option<Vec<ConversationMessage>> = if conversation_history.is_empty() {
         None
     } else {
@@ -368,7 +403,12 @@ async fn enrich_event(app_handle: AppHandle, event_json: String) -> Result<Strin
 
 // Tauri command to handle AI enrichment follow-up
 #[tauri::command]
-async fn enrichment_followup(app_handle: AppHandle, event_json: String, user_additional_info: String, clarification_history: Option<String>,) -> Result<String, String> {
+async fn enrichment_followup(
+    app_handle: AppHandle,
+    event_json: String,
+    user_additional_info: String,
+    clarification_history: Option<String>,
+) -> Result<String, String> {
     let event: CalendarEvent =
         serde_json::from_str(&event_json).map_err(|e| format!("Failed to parse event: {}", e))?;
     let service = AIEnrichmentService::new();
@@ -389,7 +429,8 @@ async fn save_event_from_ai(event_json: String, app_handle: AppHandle) -> Result
         serde_json::from_str(&event_json).map_err(|e| format!("Failed to parse event: {}", e))?;
 
     database_utils::save_event(&app_handle, serde_json::to_string(&event).unwrap())
-        .await.map_err(|e| format!("Failed to save event: {}", e))
+        .await
+        .map_err(|e| format!("Failed to save event: {}", e))
 }
 
 #[tauri::command]
@@ -456,7 +497,7 @@ async fn start_auto_login(app_handle_arc: Arc<AppHandle>) -> Result<bool, String
 }
 
 // Start notification service //
-async fn start_notification_service(app_handle_arc: Arc<AppHandle>,  user_logged_in: bool,) -> Result<(), String> {
+async fn start_notification_service(app_handle_arc: Arc<AppHandle>, user_logged_in: bool,) -> Result<(), String> {
     let notification_state = app_handle_arc.state::<NotificationServiceState>();
     let mut service_guard = notification_state.lock().await;
 
@@ -475,7 +516,7 @@ async fn start_notification_service(app_handle_arc: Arc<AppHandle>,  user_logged
 }
 
 // Start database sync service //
-async fn start_database_sync_service(app_handle_arc: Arc<AppHandle>,  user_logged_in: bool,) -> Result<(), String> {
+async fn start_database_sync_service(app_handle_arc: Arc<AppHandle>, user_logged_in: bool,) -> Result<(), String> {
     let config_state = app_handle_arc.state::<AppConfigState>();
     if !config_state.enable_database_sync {
         println!("Database sync service is disabled via configuration");
@@ -504,7 +545,7 @@ async fn start_database_sync_service(app_handle_arc: Arc<AppHandle>,  user_logge
     }
 }
 
-async fn start_google_sync_service(app_handle_arc: Arc<AppHandle>,  user_logged_in: bool,) -> Result<(), String> {
+async fn start_google_sync_service(app_handle_arc: Arc<AppHandle>, user_logged_in: bool,) -> Result<(), String> {
     let config_state = app_handle_arc.state::<AppConfigState>();
     if !config_state.enable_google_sync {
         println!("Google sync service is disabled via configuration");
@@ -531,19 +572,17 @@ async fn start_google_sync_service(app_handle_arc: Arc<AppHandle>,  user_logged_
 
 // Schedule event notification command //
 #[tauri::command]
-async fn schedule_event_notification(
-    event_json: String,
-    app_handle: AppHandle,
-) -> Result<String, String> {
+async fn schedule_event_notification(event_json: String, app_handle: AppHandle) -> Result<String, String> {
+    let app_handle_arc = Arc::new(app_handle);
     let event: crate::database_utils::CalendarEvent =
         serde_json::from_str(&event_json).map_err(|e| format!("Failed to parse event: {}", e))?;
 
-    let notification_state = app_handle.state::<NotificationServiceState>();
+    let notification_state = app_handle_arc.state::<NotificationServiceState>();
     let mut service_guard = notification_state.lock().await;
 
     if let Some(service) = service_guard.as_mut() {
         service
-            .schedule_event_notifications(&event)
+            .schedule_event_notifications(app_handle_arc.clone(), &event)
             .await
             .map_err(|e| format!("Failed to schedule notification: {}", e))?;
         Ok("Notification scheduled successfully".to_string())
@@ -648,7 +687,7 @@ pub fn run() {
 pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
     let app_config = Arc::new(crate::api_utils::AppConfig::new()?);
     #[allow(unused_mut)] // silence unused mut warning on desktop platforms
-    let mut builder = tauri::Builder::default();
+    let mut builder = tauri::Builder::default().plugin(tauri_plugin_notification::init());
 
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
@@ -659,6 +698,7 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_machine_uid::init())
         .plugin(tauri_plugin_keystore::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(app_config.clone() as AppConfigState)
         .manage(tokio::sync::Mutex::new(UserLocation::default()))
         .manage(Arc::new(Mutex::new(None::<NotificationService>)) as NotificationServiceState)
@@ -693,11 +733,7 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
             set_notification_lead_time,
         ])
         .setup(|app| {
-            // Request notification permissions on macOS
-            #[cfg(target_os = "macos")]
-            {
-                tauri::api::notification::request_permission();
-            }
+            use tauri_plugin_notification::NotificationExt;
 
             // Initialize database on app startup
             database_utils::init_db(&app.handle()).map_err(|e| e.to_string())?;

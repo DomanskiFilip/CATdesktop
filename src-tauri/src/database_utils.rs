@@ -1,16 +1,16 @@
-use crate::encryption_utils::{ decrypt_user_data_base, encrypt_user_data_base };
+use crate::encryption_utils::{decrypt_user_data_base, encrypt_user_data_base};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-use crate::user_utils::{ get_current_user_id };
+use crate::user_utils::get_current_user_id;
 #[cfg(any(target_os = "android", target_os = "ios"))]
-use crate::user_utils::{ get_current_user_id_mobile };
-use base64::{ engine::general_purpose, Engine };
-use chrono::{ DateTime, Local, TimeZone };
+use crate::user_utils::get_current_user_id_mobile;
+use base64::{engine::general_purpose, Engine};
+use chrono::{DateTime, Local, TimeZone};
 use rusqlite::Error as SqliteError;
-use rusqlite::{ Connection, Result };
-use serde::{ Deserialize, Serialize };
+use rusqlite::{Connection, Result};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use tauri::{ AppHandle, Manager };
+use tauri::{AppHandle, Manager};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CalendarEvent {

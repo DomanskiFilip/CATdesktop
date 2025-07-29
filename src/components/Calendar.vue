@@ -720,6 +720,18 @@ onBeforeUnmount(() => {
   }
 })
 
+// Listen for click on notification to open smart features
+onMounted(() => {
+  listen('open-smart-features', (event) => {
+    const eventId = event.payload as string
+    const foundEvent = events.value.find(e => e.id === eventId)
+    if (foundEvent) {
+      smartFeaturesEvent.value = foundEvent
+      showSmartFeatures.value = true
+    }
+  })
+})
+
 // Initialize calendar on component mount
 onMounted(async () => {
   try {

@@ -1,8 +1,8 @@
-use rand::Rng;
-use std::fs;
-use tauri::{ AppHandle, Manager };
 #[cfg(target_os = "android")]
 use base64::Engine;
+use rand::Rng;
+use std::fs;
+use tauri::{AppHandle, Manager};
 
 #[cfg(not(target_os = "android"))]
 use crate::encryption_utils::get_encryption_key;
@@ -23,7 +23,12 @@ fn generate_nonce() -> [u8; 12] {
 }
 
 #[cfg(not(target_os = "android"))]
-pub async fn save_tokens_to_file(app_handle: &AppHandle, access_token: &str, refresh_token: &str, database_token: Option<&[u8; 32]>,) -> Result<(), String> {
+pub async fn save_tokens_to_file(
+    app_handle: &AppHandle,
+    access_token: &str,
+    refresh_token: &str,
+    database_token: Option<&[u8; 32]>,
+) -> Result<(), String> {
     use aes_gcm::aead::Aead;
     use aes_gcm::KeyInit;
     use aes_gcm::{Aes256Gcm, Key, Nonce};
@@ -33,8 +38,7 @@ pub async fn save_tokens_to_file(app_handle: &AppHandle, access_token: &str, ref
     let key = Key::<aes_gcm::aes::Aes256>::from_slice(&key);
     let cipher = Aes256Gcm::new(key);
 
-    let db_token_b64 = database_token
-        .map(|t| base64::engine::general_purpose::STANDARD.encode(t));
+    let db_token_b64 = database_token.map(|t| base64::engine::general_purpose::STANDARD.encode(t));
 
     let data = serde_json::json!({
         "access_token": access_token,
@@ -60,7 +64,9 @@ pub async fn save_tokens_to_file(app_handle: &AppHandle, access_token: &str, ref
 }
 
 #[cfg(not(target_os = "android"))]
-pub async fn read_tokens_from_file(app_handle: &AppHandle) -> Result<(String, String, Option<[u8; 32]>), String> {
+pub async fn read_tokens_from_file(
+    app_handle: &AppHandle,
+) -> Result<(String, String, Option<[u8; 32]>), String> {
     use aes_gcm::aead::Aead;
     use aes_gcm::KeyInit;
     use aes_gcm::{Aes256Gcm, Key, Nonce};
@@ -105,15 +111,27 @@ pub async fn read_tokens_from_file(app_handle: &AppHandle) -> Result<(String, St
 
 // On Android/iOS, use the plugin from JS/TS, not Rust!
 #[cfg(target_os = "android")]
-pub async fn save_tokens_to_file(_: &AppHandle, _: &str, _: &str, _: Option<&[u8; 32]>) -> Result<(), String> {
+pub async fn save_tokens_to_file(
+    _: &AppHandle,
+    _: &str,
+    _: &str,
+    _: Option<&[u8; 32]>,
+) -> Result<(), String> {
     // No-op: tokens are set via set_tokens_for_autologin from the frontend
     Ok(())
 }
 
 #[cfg(target_os = "android")]
-pub async fn read_tokens_from_file(_: &AppHandle) -> Result<(String, String, Option<[u8; 32]>), String> {
-    let (access_token, refresh_token, database_token) = crate::read_tokens_from_cache().await.ok_or("No tokens in cache".to_string())?;
-    println!("Reading tokens from cache on Android: {:?}, {:?}, {:?}", access_token, refresh_token, database_token);
+pub async fn read_tokens_from_file(
+    _: &AppHandle,
+) -> Result<(String, String, Option<[u8; 32]>), String> {
+    let (access_token, refresh_token, database_token) = crate::read_tokens_from_cache()
+        .await
+        .ok_or("No tokens in cache".to_string())?;
+    println!(
+        "Reading tokens from cache on Android: {:?}, {:?}, {:?}",
+        access_token, refresh_token, database_token
+    );
     Ok((access_token, refresh_token, database_token))
 }
 

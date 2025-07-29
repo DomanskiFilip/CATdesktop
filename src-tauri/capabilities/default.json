@@ -16,6 +16,7 @@
     "keystore:default",
     "keystore:allow-store",
     "biometric:default",
-    "biometric:allow-status"
+    "biometric:allow-status",
+    "notification:default"
   ]
 }

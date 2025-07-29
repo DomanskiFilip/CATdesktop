@@ -1,20 +1,20 @@
-use crate::database_utils::{ get_db_connection, save_event, CalendarEvent };
+use crate::database_utils::{get_db_connection, save_event, CalendarEvent};
 use crate::encryption_utils::decrypt_user_data_base;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-use crate::user_utils::{ get_current_user_id };
+use crate::user_utils::get_current_user_id;
 #[cfg(any(target_os = "android", target_os = "ios"))]
-use crate::user_utils::{ get_current_user_id_mobile };
+use crate::user_utils::get_current_user_id_mobile;
 use base64::Engine;
 use chrono::Timelike;
 use reqwest::Client;
 use serde_json::json;
 use serde_json::Value;
-use std::sync::atomic::{ AtomicBool, Ordering };
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::Emitter;
-use tauri::{ AppHandle, Manager };
+use tauri::{AppHandle, Manager};
 use tokio::task::JoinHandle;
-use tokio::time::{ self, Duration };
+use tokio::time::{self, Duration};
 
 pub struct GoogleSyncService {
     config: Arc<crate::api_utils::AppConfig>,
@@ -83,14 +83,14 @@ impl GoogleSyncService {
                     {
                         match get_current_user_id(&app_handle_arc) {
                             Ok(_) => true,
-                            Err(_) => false
+                            Err(_) => false,
                         }
                     }
                     #[cfg(any(target_os = "android", target_os = "ios"))]
                     {
                         match get_current_user_id_mobile().await {
                             Ok(_) => true,
-                            Err(_) => false
+                            Err(_) => false,
                         }
                     }
                 };
@@ -118,7 +118,11 @@ impl GoogleSyncService {
     }
 
     // Method to sync local events to Google Calendar (push unsynced_google events) //
-    pub async fn sync_to_google(&self, app_handle_arc: &Arc<AppHandle>, user_logged_in: bool,) -> Result<(), String> {
+    pub async fn sync_to_google(
+        &self,
+        app_handle_arc: &Arc<AppHandle>,
+        user_logged_in: bool,
+    ) -> Result<(), String> {
         if !user_logged_in {
             println!("User not logged in, skipping sync to Google.");
             return Ok(());
@@ -372,7 +376,11 @@ impl GoogleSyncService {
     }
 
     // Method to sync from Google Calendar to local DB (pull events) //
-    pub async fn sync_from_google(&self, app_handle_arc: &Arc<AppHandle>, user_logged_in: bool,) -> Result<(), String> {
+    pub async fn sync_from_google(
+        &self,
+        app_handle_arc: &Arc<AppHandle>,
+        user_logged_in: bool,
+    ) -> Result<(), String> {
         if !user_logged_in {
             println!("User not logged in, skipping sync from Google.");
             return Ok(());
