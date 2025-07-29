@@ -1,5 +1,6 @@
 <template>
   <section id="smart-features-container">
+    <!-- Header -->
     <section id="smart-features-header">
       <div v-if="event">
         <h2>Smart Features for Event:</h2>
@@ -8,51 +9,85 @@
       </div>
       <button id="close" @click="$emit('close')"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/></svg></button>
     </section>
-    <span v-if="!aiResponceState" id="loader"></span>
-    <section v-if="aiResponceState && aiResponce" id="ai-responce-container">
-      <p>{{ aiResponce?.response_text }}</p>
-      <MiniAiChat v-if="aiResponce.info_needed && aiResponce.info_needed.length > 0" :clarifyingQuestion="clarifyingQuestion" @answered="handleMiniAnswer" />
-    </section>
-    <section v-if="routeReady" id="map-container">
-      <section id="button-container">
-        <button @click="setMode('car')"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M240-200v40q0 17-11.5 28.5T200-120h-40q-17 0-28.5-11.5T120-160v-320l84-240q6-18 21.5-29t34.5-11h440q19 0 34.5 11t21.5 29l84 240v320q0 17-11.5 28.5T800-120h-40q-17 0-28.5-11.5T720-160v-40H240Zm-8-360h496l-42-120H274l-42 120Zm-32 80v200-200Zm100 160q25 0 42.5-17.5T360-380q0-25-17.5-42.5T300-440q-25 0-42.5 17.5T240-380q0 25 17.5 42.5T300-320Zm360 0q25 0 42.5-17.5T720-380q0-25-17.5-42.5T660-440q-25 0-42.5 17.5T600-380q0 25 17.5 42.5T660-320Zm-460 40h560v-200H200v200Z"/></svg></button>
-        <button @click="setMode('transit')"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M240-120q-17 0-28.5-11.5T200-160v-82q-18-20-29-44.5T160-340v-380q0-83 77-121.5T480-880q172 0 246 37t74 123v380q0 29-11 53.5T760-242v82q0 17-11.5 28.5T720-120h-40q-17 0-28.5-11.5T640-160v-40H320v40q0 17-11.5 28.5T280-120h-40Zm242-640h224-448 224Zm158 280H240h480-80Zm-400-80h480v-120H240v120Zm100 240q25 0 42.5-17.5T400-380q0-25-17.5-42.5T340-440q-25 0-42.5 17.5T280-380q0 25 17.5 42.5T340-320Zm280 0q25 0 42.5-17.5T680-380q0-25-17.5-42.5T620-440q-25 0-42.5 17.5T560-380q0 25 17.5 42.5T620-320ZM258-760h448q-15-17-64.5-28.5T482-800q-107 0-156.5 12.5T258-760Zm62 480h320q33 0 56.5-23.5T720-360v-120H240v120q0 33 23.5 56.5T320-280Z"/></svg></button>
-        <form @submit.prevent="submitManualOrigin">
-          <input v-model="manualOrigin" type="text" placeholder="Enter start location" class="location-input"/>
-          <input v-model="manualDestination" type="text" placeholder="Enter end location" class="location-input"/>
-        </form>
-        <button @click="manualOrigin = ''; useManualOrigin = false; manualDestination = ''; useManualDestination = false"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/></svg></button>
-      </section>
-      <!-- Google Maps Map -->
-      <div v-show="mode === 'car' || mode === 'transit'" :key="mode + '-' + (useManualOrigin ? manualOrigin : (destinationLocation ? destinationLocation : (props.coordinates ? props.coordinates.lat + ',' + props.coordinates.lng : '')))" id="google-map"></div>
-      <div v-if="mode === 'transit' && transitSteps.length" class="transit-steps" ref="transitStepsRef">
-        <h3>Transit Steps:</h3>
-        <ul>
-          <li v-for="(step, idx) in transitSteps" :key="idx">
-            <span v-if="step.travel_mode === 'WALKING'">
-              <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-theme)"><path d="M552-96v-213l-76-75-32 160-252-51 14-70 181 36 52-263-79 34v106h-72v-154l185-78q9-4 18.5-6t19.5-2q27 0 48.5 12.5T595-623l14 23q30 51 68 73.5t91 22.5v72q-57 0-106.5-25T577-528l-23 120 70 70v242h-72Zm24-600q-35 0-59.5-24.5T492-780q0-35 24.5-59.5T576-864q35 0 59.5 24.5T660-780q0 35-24.5 59.5T576-696Z"/></svg>
-              <span class="steps-color">Walk:</span> {{ step.html_instructions ? step.html_instructions.replace(/<[^>]+>/g, '') : '' }}
-              ({{ step.distance?.text || '' }}, {{ step.duration?.text || '' }})
-            </span>
-            <span v-else-if="step.travel_mode === 'TRANSIT' && step.transit">
-              <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-theme)"><path d="M240-120q-17 0-28.5-11.5T200-160v-82q-18-20-29-44.5T160-340v-380q0-83 77-121.5T480-880q172 0 246 37t74 123v380q0 29-11 53.5T760-242v82q0 17-11.5 28.5T720-120h-40q-17 0-28.5-11.5T640-160v-40H320v40q0 17-11.5 28.5T280-120h-40Zm242-640h224-448 224Zm158 280H240h480-80Zm-400-80h480v-120H240v120Zm100 240q25 0 42.5-17.5T400-380q0-25-17.5-42.5T340-440q-25 0-42.5 17.5T280-380q0 25 17.5 42.5T340-320Zm280 0q25 0 42.5-17.5T680-380q0-25-17.5-42.5T620-440q-25 0-42.5 17.5T560-380q0 25 17.5 42.5T620-320ZM258-760h448q-15-17-64.5-28.5T482-800q-107 0-156.5 12.5T258-760Zm62 480h320q33 0 56.5-23.5T720-360v-120H240v120q0 33 23.5 56.5T320-280Z"/></svg>
-              <span class="steps-color">Take:</span> {{ step.transit.headsign || 'Transit' }}
-              <span class="steps-color">from</span> {{ step.transit.departure_stop?.name || '' }} to {{ step.transit.arrival_stop?.name || '' }}
-              ({{ step.distance?.text || '' }}, {{ step.duration?.text || '' }})
-              <template v-if="step.transit.line">
-                <span class="steps-color">— Line:</span> {{ step.transit.line.short_name || step.transit.line.name || '' }}
-                <span v-if="step.transit.line.vehicle">({{ step.transit.line.vehicle?.name }})</span>
-              </template>
-              <template v-if="step.transit.departure_time && step.transit.arrival_time">
-                <br>
-                <span class="steps-color">Departs:</span> {{ step.transit.departure_time.text }},
-                <span class="steps-color">Arrives:</span> {{ step.transit.arrival_time.text }}
-              </template>
-            </span>
-          </li>
-        </ul>
+    <!-- Tabs -->
+    <div class="tabs">
+      <button :class="{active: activeTab === 'email'}" @click="activeTab = 'email'">Email</button>
+      <button :class="{active: activeTab === 'map'}" @click="activeTab = 'map'">Map</button>
+    </div>
+    <!-- Email Tab -->
+     <section v-if="activeTab === 'email'" id="tab-section">
+      <h3>Email Participants</h3>
+      <div class="participants-list">
+        <span v-for="email in participants" :key="email">
+          {{ email }}
+          <button @click="removeParticipant(email)">Remove</button>
+        </span>
       </div>
+      <input v-model="newParticipant" placeholder="Add participant email" @keyup.enter="addParticipant" id="participants-input"/>
+      <span v-if="emailError" class="error">{{ emailError }}</span>
+      <button @click="addParticipant" id="participants-btn">Add</button>
+      <section id="ai-responce-container">
+        <MiniAiChat :clarifyingQuestion="'Write an email to participants based on event description or notify you will be late.'" @answered="handleEmailAi"/>
+        <div style="position: relative; width: 100%;">
+          <button id="copy-email-btn" @click="copyEmailContent">
+            <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M360-240q-29.7 0-50.85-21.15Q288-282.3 288-312v-480q0-29.7 21.15-50.85Q330.3-864 360-864h384q29.7 0 50.85 21.15Q816-821.7 816-792v480q0 29.7-21.15 50.85Q773.7-240 744-240H360Zm0-72h384v-480H360v480ZM216-96q-29.7 0-50.85-21.15Q144-138.3 144-168v-552h72v552h456v72H216Zm144-216v-480 480Z"/></svg>
+          </button>
+          <textarea v-model="emailContent" placeholder="Email content generated by AI or edit manually" id="email-content"></textarea>
+        </div>
+      </section>
+      <span v-if="sendEmailError" class="error">{{ sendEmailError }}</span>
+      <span v-if="emailSuccess" class="error" style="color: var(--color-success); border-left-color: var(--color-success); background-color: rgba(39, 174, 96, 0.1);">{{ emailSuccess }}</span>
+      <button @click="sendEmail" :class="{ inactive: isSending || !participants.length || !emailContent.trim() }" id="send-email-btn">Send Email</button>
     </section>
+    <!-- Map Tab -->
+    <section v-else id="tab-section">
+      <span v-if="!aiResponceState" id="loader"></span>
+      <section v-if="aiResponceState && aiResponce" id="ai-responce-container">
+        <p>{{ aiResponce?.response_text }}</p>
+        <MiniAiChat v-if="aiResponce.info_needed && aiResponce.info_needed.length > 0" :clarifyingQuestion="clarifyingQuestion" @answered="handleMiniAnswer" />
+      </section>
+      <section v-if="routeReady" id="map-container">
+        <section id="button-container">
+          <button @click="setMode('car')"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M240-200v40q0 17-11.5 28.5T200-120h-40q-17 0-28.5-11.5T120-160v-320l84-240q6-18 21.5-29t34.5-11h440q19 0 34.5 11t21.5 29l84 240v320q0 17-11.5 28.5T800-120h-40q-17 0-28.5-11.5T720-160v-40H240Zm-8-360h496l-42-120H274l-42 120Zm-32 80v200-200Zm100 160q25 0 42.5-17.5T360-380q0-25-17.5-42.5T300-440q-25 0-42.5 17.5T240-380q0 25 17.5 42.5T300-320Zm360 0q25 0 42.5-17.5T720-380q0-25-17.5-42.5T660-440q-25 0-42.5 17.5T600-380q0 25 17.5 42.5T660-320Zm-460 40h560v-200H200v200Z"/></svg></button>
+          <button @click="setMode('transit')"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M240-120q-17 0-28.5-11.5T200-160v-82q-18-20-29-44.5T160-340v-380q0-83 77-121.5T480-880q172 0 246 37t74 123v380q0 29-11 53.5T760-242v82q0 17-11.5 28.5T720-120h-40q-17 0-28.5-11.5T640-160v-40H320v40q0 17-11.5 28.5T280-120h-40Zm242-640h224-448 224Zm158 280H240h480-80Zm-400-80h480v-120H240v120Zm100 240q25 0 42.5-17.5T400-380q0-25-17.5-42.5T340-440q-25 0-42.5 17.5T280-380q0 25 17.5 42.5T340-320Zm280 0q25 0 42.5-17.5T680-380q0-25-17.5-42.5T620-440q-25 0-42.5 17.5T560-380q0 25 17.5 42.5T620-320ZM258-760h448q-15-17-64.5-28.5T482-800q-107 0-156.5 12.5T258-760Zm62 480h320q33 0 56.5-23.5T720-360v-120H240v120q0 33 23.5 56.5T320-280Z"/></svg></button>
+          <form @submit.prevent="submitManualOrigin">
+            <input v-model="manualOrigin" type="text" placeholder="Enter start location" class="location-input"/>
+            <input v-model="manualDestination" type="text" placeholder="Enter end location" class="location-input"/>
+          </form>
+          <button @click="manualOrigin = ''; useManualOrigin = false; manualDestination = ''; useManualDestination = false"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/></svg></button>
+        </section>
+        <!-- Google Maps Map -->
+        <div v-show="mode === 'car' || mode === 'transit'" :key="mode + '-' + (useManualOrigin ? manualOrigin : (destinationLocation ? destinationLocation : (props.coordinates ? props.coordinates.lat + ',' + props.coordinates.lng : '')))" id="google-map"></div>
+        <div v-if="mode === 'transit' && transitSteps.length" class="transit-steps" ref="transitStepsRef">
+          <h3>Transit Steps:</h3>
+          <ul>
+            <li v-for="(step, idx) in transitSteps" :key="idx">
+              <span v-if="step.travel_mode === 'WALKING'">
+                <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-theme)"><path d="M552-96v-213l-76-75-32 160-252-51 14-70 181 36 52-263-79 34v106h-72v-154l185-78q9-4 18.5-6t19.5-2q27 0 48.5 12.5T595-623l14 23q30 51 68 73.5t91 22.5v72q-57 0-106.5-25T577-528l-23 120 70 70v242h-72Zm24-600q-35 0-59.5-24.5T492-780q0-35 24.5-59.5T576-864q35 0 59.5 24.5T660-780q0 35-24.5 59.5T576-696Z"/></svg>
+                <span class="steps-color">Walk:</span> {{ step.html_instructions ? step.html_instructions.replace(/<[^>]+>/g, '') : '' }}
+                ({{ step.distance?.text || '' }}, {{ step.duration?.text || '' }})
+              </span>
+              <span v-else-if="step.travel_mode === 'TRANSIT' && step.transit">
+                <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-theme)"><path d="M240-120q-17 0-28.5-11.5T200-160v-82q-18-20-29-44.5T160-340v-380q0-83 77-121.5T480-880q172 0 246 37t74 123v380q0 29-11 53.5T760-242v82q0 17-11.5 28.5T720-120h-40q-17 0-28.5-11.5T640-160v-40H320v40q0 17-11.5 28.5T280-120h-40Zm242-640h224-448 224Zm158 280H240h480-80Zm-400-80h480v-120H240v120Zm100 240q25 0 42.5-17.5T400-380q0-25-17.5-42.5T340-440q-25 0-42.5 17.5T280-380q0 25 17.5 42.5T340-320Zm280 0q25 0 42.5-17.5T680-380q0-25-17.5-42.5T620-440q-25 0-42.5 17.5T560-380q0 25 17.5 42.5T620-320ZM258-760h448q-15-17-64.5-28.5T482-800q-107 0-156.5 12.5T258-760Zm62 480h320q33 0 56.5-23.5T720-360v-120H240v120q0 33 23.5 56.5T320-280Z"/></svg>
+                <span class="steps-color">Take:</span> {{ step.transit.headsign || 'Transit' }}
+                <span class="steps-color">from</span> {{ step.transit.departure_stop?.name || '' }} to {{ step.transit.arrival_stop?.name || '' }}
+                ({{ step.distance?.text || '' }}, {{ step.duration?.text || '' }})
+                <template v-if="step.transit.line">
+                  <span class="steps-color">— Line:</span> {{ step.transit.line.short_name || step.transit.line.name || '' }}
+                  <span v-if="step.transit.line.vehicle">({{ step.transit.line.vehicle?.name }})</span>
+                </template>
+                <template v-if="step.transit.departure_time && step.transit.arrival_time">
+                  <br>
+                  <span class="steps-color">Departs:</span> {{ step.transit.departure_time.text }},
+                  <span class="steps-color">Arrives:</span> {{ step.transit.arrival_time.text }}
+                </template>
+              </span>
+            </li>
+          </ul>
+        </div>
+      </section>
+    </section>
+    
   </section>
 </template>
 
@@ -84,6 +119,14 @@ const destinationLocation = ref<string | null>(null)
 const eventTimestamp = props.event?.time ? new Date(props.event.time) : new Date()
 const apiKey = "AIzaSyCq_gPC_WgOecqVQ0JJKo221BRlHuasJ-4";
 const clarificationHistory = ref<string[]>([])
+const activeTab = ref<'map' | 'email'>('email')
+const emailContent = ref('')
+const participants = ref<string[]>(props.event?.participants || [])
+const newParticipant = ref('')
+const isSending = ref(false)
+const emailError = ref<string | null>(null)
+const sendEmailError = ref<string | null>(null)
+const emailSuccess = ref<string | null>(null)
 
 // set the mode of the map
 const setMode = (newMode: string) => {
@@ -226,6 +269,69 @@ const renderMap = async () => {
   )
 }
 
+// == Email functionality == //
+// Add participant to list
+async function addParticipant() {
+  const email = newParticipant.value.trim()
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  if (!email || !emailRegex.test(email)) {
+    emailError.value = 'Please enter a valid email address.'
+    return
+  }
+  if (participants.value.includes(email)) {
+    emailError.value = 'This email is already added.'
+    return
+  }
+  participants.value.push(email)
+  newParticipant.value = ''
+  emailError.value = ''
+  props.event.participants = participants.value;
+  await invoke('save_event', { event: JSON.stringify(props.event) });
+  await invoke('trigger_sync');
+}
+
+// remove participants from the list
+async function removeParticipant(email: string) {
+  participants.value = participants.value.filter(e => e !== email)
+  props.event.participants = participants.value;
+  await invoke('save_event', { event: JSON.stringify(props.event) });
+  await invoke('trigger_sync');
+}
+
+// Use MiniAiChat to generate email
+function handleEmailAi(answer: string) {
+  emailContent.value = answer
+}
+
+function copyEmailContent() {
+  navigator.clipboard.writeText(emailContent.value)
+}
+
+// Send email to all participants
+async function sendEmail() {
+  sendEmailError.value = ''
+  emailSuccess.value = ''
+  if (!participants.value.length || !emailContent.value.trim()) {
+    sendEmailError.value = 'Please add participants and enter email content before sending.'
+    isSending.value = false
+    return
+  }
+  isSending.value = true
+  try {
+    await invoke('send_event_email', {
+      eventJson: JSON.stringify({ ...props.event, participants: participants.value }),
+      emailContent: emailContent.value
+    })
+    emailSuccess.value = 'Email sent successfully!'
+    sendEmailError.value = ''
+  } catch (err) {
+    sendEmailError.value = typeof err === 'string' ? err : 'Failed to send email.'
+    emailSuccess.value = ''
+  }
+  isSending.value = false
+}
+
+// == watchers and computed properties == //
 // Watch for manual origin changes
 watch(manualOrigin, (val) => {
   useManualOrigin.value = !!val.trim()
@@ -297,37 +403,37 @@ watch(
 )
 
 // Initial map rendering
-onMounted(async () => {
-  await loadGoogleMapsApi()
-  map = null
-  directionsRenderer = null
-  directionsService = null
-  renderMap()
-  aiResponceState.value = false
-  try {
-    const response = await invoke('enrich_event', {
-      eventJson: JSON.stringify(props.event)
-    })
-    aiResponce.value = JSON.parse(response as string)
-    clarifyingQuestion.value = Array.isArray(aiResponce.value.info_needed) && aiResponce.value.info_needed.length > 0
-      ? `Please provide: ${aiResponce.value.info_needed.join(', ')}`
-      : ''
-    destinationLocation.value = aiResponce.value.location || null
-    routeReady.value = !!destinationLocation.value
-    aiResponceState.value = true
+watch(
+  activeTab,
+  async (tab) => {
+    if (tab === 'map') {
+      aiResponceState.value = false
+      try {
+        const response = await invoke('enrich_event', {
+          eventJson: JSON.stringify(props.event)
+        })
+        aiResponce.value = JSON.parse(response as string)
+        clarifyingQuestion.value = Array.isArray(aiResponce.value.info_needed) && aiResponce.value.info_needed.length > 0
+          ? `Please provide: ${aiResponce.value.info_needed.join(', ')}`
+          : ''
+        destinationLocation.value = aiResponce.value.location || null
+        routeReady.value = !!destinationLocation.value
+        aiResponceState.value = true
 
-    // Scroll to smart features after response is loaded
-    await nextTick()
-    const container = document.getElementById('smart-features-container')
-    if (container) {
-      container.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        // Scroll to smart features after response is loaded
+        await nextTick()
+        const container = document.getElementById('smart-features-container')
+        if (container) {
+          container.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }
+      } catch (err) {
+        aiError.value = 'Failed to enrich event'
+        console.error(err)
+        aiResponceState.value = true
+      }
     }
-  } catch (err) {
-    aiError.value = 'Failed to enrich event'
-    console.error(err)
-    aiResponceState.value = true
   }
-})
+)
 </script>
 
 <style scoped>
@@ -371,12 +477,45 @@ onMounted(async () => {
   margin-left: auto;
 }
 
+.tabs {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border-bottom: 1px solid var(--color-theme);
+}
+
+.tabs button {
+  padding: 0.5rem 1rem;
+  border: none;
+  background: var(--color-shadow);
+  color: var(--color-text);
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.tabs button.active {
+  background: var(--color-theme);
+  color: var(--color-main);
+}
+
+#tab-section {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
 #ai-responce-container {
-  width: 60%;
+  width: 80%;
   display: flex;
   flex-direction: column;
   gap: 1rem;
   justify-content: center;
+  align-items: center;
   margin-top: 1rem;
   margin-bottom: 1rem;
 }
@@ -465,6 +604,93 @@ onMounted(async () => {
 
 .steps-color {
   color: var(--color-theme);
+}
+
+#participants-input {
+  width: 20rem;
+  padding: 0.5rem;
+  border: 1px solid var(--color-theme);
+  border-radius: 4px;
+  background-color: var(--color-shadow);
+  color: var(--color-text);
+}
+
+#participants-btn {
+  padding: 0.5rem 1rem;
+  border: none;
+  background: var(--color-theme);
+  color: var(--color-main);
+  cursor: pointer;
+  border-radius: 4px;
+  margin: 1rem;
+}
+
+#participants-btn:active {
+  background-color: var(--color-main);
+  color: var(--color-theme);
+}
+
+#email-content {
+  position: relative;
+  width: 100%;
+  height: 200px;
+  padding: 0.5rem;
+  border: 1px solid var(--color-theme);
+  border-radius: 4px;
+  background-color: var(--color-shadow);
+  color: var(--color-text);
+  overflow-y: auto;
+  resize: none; 
+}
+
+#send-email-btn {
+  padding: 0.5rem 1rem;
+  border: none;
+  background: var(--color-theme);
+  color: var(--color-main);
+  cursor: pointer;
+  border-radius: 4px;
+  margin-top: 1rem;
+}
+
+#copy-email-btn {
+  padding: 0.5rem;
+  border: none;
+  background: var(--color-theme);
+  color: var(--color-main);
+  cursor: pointer;
+  border-radius: 4px;
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  margin-top: 0;
+  z-index: 20;
+}
+
+#copy-email-btn:active {
+  background-color: var(--color-main);
+  color: var(--color-theme);
+}
+
+.inactive {
+  opacity: 0.5;
+  pointer-events: auto;
+  cursor: not-allowed;
+}
+
+.participants-list {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+
+.participants-list button {
+  margin-left: 0.25rem;
+  background: none;
+  border: none;
+  color: var(--color-theme);
+  cursor: pointer;
 }
 
 /* Mobile */

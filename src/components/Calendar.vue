@@ -315,7 +315,7 @@ const getEventsForDate = (date: CalendarDay) => {
       eventDate.getMonth() === date.date?.getMonth() &&
       eventDate.getFullYear() === date.date?.getFullYear();
     // Recurring event on this date
-    const isRecurring = event.recurrence && occursOnDate(event, date.date);
+    const isRecurring = event.recurrence && occursOnDate(event, date.date as Date);
     return isNormal || isRecurring;
   })
 }

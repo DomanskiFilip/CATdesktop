@@ -59,8 +59,6 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
     let client = Client::new();
 
     // Prepare the initial payload with access token and device info
-    println!("Sending access token: {}", access_token);
-    println!("Device info: {:?}", device_info);
     let mut payload = serde_json::json!({
         "body": serde_json::json!({
             "access_token": access_token,
@@ -124,7 +122,6 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
                     .map_err(|e| e.to_string())?;
 
                 let text = response.text().await.map_err(|e| e.to_string())?;
-                println!("Server response after autologin: {}", text);
                 let lambda_resp: LambdaResponse =
                     serde_json::from_str(&text).map_err(|e| e.to_string())?;
 

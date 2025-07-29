@@ -66,12 +66,7 @@ impl AIAssistantService {
         Self
     }
 
-    pub async fn process_user_query(
-        &self,
-        query: String,
-        app_handle: &AppHandle,
-        conversation_history: Option<Vec<ConversationMessage>>,
-    ) -> Result<LLMResponse, String> {
+    pub async fn process_user_query(&self, query: String, app_handle: &AppHandle, conversation_history: Option<Vec<ConversationMessage>>,) -> Result<LLMResponse, String> {
         println!("📝 User Query: {}", query);
 
         // Check for canned responses first
@@ -125,13 +120,7 @@ impl AIAssistantService {
         }
     }
 
-    async fn create_enhanced_prompt(
-        &self,
-        query: &str,
-        app_handle: &AppHandle,
-        conversation_history: Option<Vec<ConversationMessage>>,
-        location_state: tauri::State<'_, tokio::sync::Mutex<UserLocation>>,
-    ) -> Result<serde_json::Value, String> {
+    async fn create_enhanced_prompt(&self, query: &str, app_handle: &AppHandle, conversation_history: Option<Vec<ConversationMessage>>,  location_state: tauri::State<'_, tokio::sync::Mutex<UserLocation>>,) -> Result<serde_json::Value, String> {
         let recent_events = self.get_recent_events(app_handle).await?;
 
         // Format events with IDs for AI context
@@ -203,11 +192,7 @@ impl AIAssistantService {
         Ok(prompt_json)
     }
 
-    async fn invoke_lambda_endpoint(
-        &self,
-        prompt: serde_json::Value,
-        app_handle: &AppHandle,
-    ) -> Result<LLMResponse, String> {
+    async fn invoke_lambda_endpoint(&self, prompt: serde_json::Value, app_handle: &AppHandle,) -> Result<LLMResponse, String> {
         // Get user ID
         let user_id: String = {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -365,10 +350,7 @@ impl AIAssistantService {
         Ok(llm_response)
     }
 
-    async fn get_recent_events(
-        &self,
-        app_handle: &AppHandle,
-    ) -> Result<Vec<CalendarEvent>, String> {
+    async fn get_recent_events(&self, app_handle: &AppHandle,) -> Result<Vec<CalendarEvent>, String> {
         let events_json = get_events(app_handle)
             .await
             .map_err(|e| format!("Failed to get events: {}", e))?;
@@ -398,11 +380,7 @@ impl AIAssistantService {
     }
 }
 
-pub async fn process_user_query(
-    app_handle: &AppHandle,
-    query: String,
-    conversation_history: Option<Vec<ConversationMessage>>,
-) -> Result<LLMResponse, String> {
+pub async fn process_user_query(app_handle: &AppHandle, query: String, conversation_history: Option<Vec<ConversationMessage>>,) -> Result<LLMResponse, String> {
     let ai_service = AIAssistantService::new();
     ai_service
         .process_user_query(query, app_handle, conversation_history)

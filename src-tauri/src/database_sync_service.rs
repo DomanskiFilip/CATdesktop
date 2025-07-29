@@ -134,11 +134,7 @@ impl DbSyncService {
     }
 
     // Method to sync events to DynamoDB (upload changes) //
-    pub async fn sync_to_dynamodb(
-        &self,
-        app_handle_arc: &Arc<AppHandle>,
-        user_logged_in: bool,
-    ) -> Result<(), String> {
+    pub async fn sync_to_dynamodb(&self, app_handle_arc: &Arc<AppHandle>, user_logged_in: bool,) -> Result<(), String> {
         // Verify user is actually logged in before proceeding
         if !user_logged_in {
             println!("User not logged in, skipping notification scheduling.");
@@ -178,7 +174,7 @@ impl DbSyncService {
                 .and_hms_opt(0, 0, 0)
                 .unwrap();
             let mut unsynced = conn.prepare(
-                "SELECT id, user_id, description, time, alarm, synced, synced_google, deleted, recurrence FROM events 
+                "SELECT id, user_id, description, time, alarm, synced, synced_google, deleted, recurrence, participants FROM events 
                 WHERE user_id = ? AND ((synced = 0) OR (deleted = 1 AND synced = 0)) AND time >= ?"
             ).map_err(|e| format!("Failed to prepare statement: {}", e))?;
 
@@ -212,11 +208,7 @@ impl DbSyncService {
     }
 
     // Method to sync from DynamoDB to local (download changes) //
-    pub async fn sync_from_dynamodb(
-        &self,
-        app_handle_arc: &Arc<AppHandle>,
-        user_logged_in: bool,
-    ) -> Result<(), String> {
+    pub async fn sync_from_dynamodb(&self, app_handle_arc: &Arc<AppHandle>, user_logged_in: bool,) -> Result<(), String> {
         if !user_logged_in {
             println!("User not logged in, skipping sync from DynamoDB.");
             return Ok(());
@@ -249,7 +241,6 @@ impl DbSyncService {
         };
         let device_info = get_device_info(&app_handle_arc);
 
-        // --- Add access token to payload ---
         let mut payload = json!({
             "body": json!({
                 "email": user_id
@@ -323,9 +314,7 @@ impl DbSyncService {
                 }
                 if let Some(body) = lambda_response.get("body").and_then(|v| v.as_str()) {
                     if let Ok(body_json) = serde_json::from_str::<serde_json::Value>(body) {
-                        if let Some(events_array) =
-                            body_json.get("events").and_then(|v| v.as_array())
-                        {
+                        if let Some(events_array) = body_json.get("events").and_then(|v| v.as_array()) {
                             self.merge_remote_events(app_handle_arc, events_array)
                                 .await
                                 .map_err(|e| format!("Failed to merge remote events: {}", e))?;
@@ -345,11 +334,7 @@ impl DbSyncService {
     }
 
     // Helper method -> send events to DynamoDB //
-    async fn send_to_dynamodb(
-        &self,
-        app_handle_arc: &Arc<AppHandle>,
-        events: &[CalendarEvent],
-    ) -> Result<(), String> {
+    async fn send_to_dynamodb(&self, app_handle_arc: &Arc<AppHandle>, events: &[CalendarEvent],) -> Result<(), String> {
         // Get user ID
         let user_id: String = {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -386,7 +371,8 @@ impl DbSyncService {
                     "alarm": event.alarm,
                     "synced_google": event.synced_google,
                     "deleted": event.deleted,
-                    "recurrence": event.recurrence.clone().unwrap_or_else(|| "none".to_string())
+                    "recurrence": event.recurrence.clone().unwrap_or_else(|| "none".to_string()),
+                    "participants": event.participants.clone().unwrap_or_default()
                 })).collect::<Vec<_>>()
             }).to_string(),
             "deviceInfo": device_info,
@@ -419,7 +405,6 @@ impl DbSyncService {
                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                     // Retry with new token (always read from file)
                     if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle_arc).await {
-                        println!("New access token after auto-login: {}", access_token);
                         payload["access_token"] = serde_json::json!(access_token);
                         let retry_response = self
                             .client
@@ -481,11 +466,7 @@ impl DbSyncService {
     }
 
     // Helper method -> mark events synced //
-    fn mark_events_synced(
-        &self,
-        conn: &rusqlite::Connection,
-        events: &[CalendarEvent],
-    ) -> Result<(), String> {
+    fn mark_events_synced(&self, conn: &rusqlite::Connection, events: &[CalendarEvent],) -> Result<(), String> {
         let mut synced = conn
             .prepare("UPDATE events SET synced = TRUE WHERE id = ?")
             .map_err(|e| e.to_string())?;
@@ -500,11 +481,7 @@ impl DbSyncService {
     }
 
     // Helper method -> merge remote events into local database //
-    async fn merge_remote_events(
-        &self,
-        app_handle: &AppHandle,
-        remote_events: &[Value],
-    ) -> Result<(), String> {
+    async fn merge_remote_events(&self, app_handle: &AppHandle, remote_events: &[Value],) -> Result<(), String> {
         for event_data in remote_events.iter().cloned() {
             let event_id = event_data["id"].as_str().unwrap_or("").to_string();
             let user_id = event_data["email"].as_str().unwrap_or("").to_string();
@@ -536,6 +513,24 @@ impl DbSyncService {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
 
+            // Handle participants
+             let participants_from_dynamo = event_data.get("participants")
+                .and_then(|v| {
+                    if v.is_array() {
+                        Some(
+                            v.as_array()
+                                .unwrap()
+                                .iter()
+                                .filter_map(|p| p.as_str().map(|s| s.to_string()))
+                                .collect::<Vec<String>>()
+                        )
+                    } else {
+                        None
+                    }
+                });
+
+            let participants_for_json = participants_from_dynamo.clone();
+
             let event_json = json!({
                 "id": event_data["id"],
                 "user_id": event_data["email"],
@@ -545,8 +540,11 @@ impl DbSyncService {
                 "deleted": incoming_deleted,
                 "synced": event_data.get("synced").and_then(|v| v.as_bool()).unwrap_or(false),
                 "synced_google": event_data.get("synced_google").and_then(|v| v.as_bool()).unwrap_or(false),
-                "recurrence": event_data.get("recurrence").and_then(|v| v.as_str()).map(String::from)
+                "recurrence": event_data.get("recurrence").and_then(|v| v.as_str()).map(String::from),
+                "participants": participants_for_json.unwrap_or_default(),
             });
+
+            let participants_for_db = participants_from_dynamo.clone();
 
             let app_handle = app_handle.clone();
             let event_json_string = event_json.to_string();
@@ -555,17 +553,26 @@ impl DbSyncService {
                 let conn = get_db_connection(&app_handle)
                     .map_err(|e| format!("Database connection failed: {}", e))?;
 
-                let mut query = conn
+                let mut delete_query = conn
                     .prepare("SELECT deleted FROM events WHERE id = ?1 AND user_id = ?2")
                     .map_err(|e| format!("Failed to prepare check statement: {}", e))?;
                 let mut should_save = true;
-                let existing_deleted: Option<bool> = query
+                let existing_deleted: Option<bool> = delete_query
                     .query_row([event_id.as_str(), user_id.as_str()], |row| row.get(0))
                     .ok();
 
-                if let Some(existing_deleted) = existing_deleted {
-                    // Only update if deleted status is different
-                    if existing_deleted == incoming_deleted {
+                let mut participants_query = conn
+                    .prepare("SELECT participants FROM events WHERE id = ?1 AND user_id = ?2")
+                    .map_err(|e| format!("Failed to prepare participants check: {}", e))?;
+                let existing_participants: Option<String> = participants_query
+                    .query_row([event_id.as_str(), user_id.as_str()], |row| row.get(0))
+                    .ok();
+
+                if let (Some(existing_deleted), Some(existing_participants)) = (existing_deleted, existing_participants) {
+                    // Only update if deleted status OR participants are different
+                    let incoming_participants_json = serde_json::to_string(&participants_for_db).unwrap_or("[]".to_string());
+                    let participants_changed = existing_participants != incoming_participants_json;
+                    if existing_deleted == incoming_deleted && !participants_changed {
                         should_save = false;
                     }
                 }
@@ -579,7 +586,7 @@ impl DbSyncService {
             .map_err(|e| format!("Join error: {}", e))?;
 
             if let Err(e) = result {
-                println!("Failed to save event {}: {}", event_id_for_log, e);
+                println!("❌ Failed to save event {}: {}", event_id_for_log, e);
             }
         }
         Ok(())

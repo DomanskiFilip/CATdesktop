@@ -23,6 +23,7 @@ pub struct CalendarEvent {
     pub synced_google: bool,
     pub deleted: bool,
     pub recurrence: Option<String>,
+    pub participants: Option<Vec<String>>,
 }
 
 impl CalendarEvent {
@@ -84,6 +85,15 @@ impl CalendarEvent {
             })?
             .with_timezone(&Local);
 
+        let participants_json: Option<String> = row.get(9)?;
+        let participants = participants_json
+            .and_then(|json| {
+                match serde_json::from_str::<Vec<String>>(&json) {
+                    Ok(vec) => Some(vec),
+                    Err(_) => None,
+                }
+            });
+
         Ok(CalendarEvent {
             id: row.get(0)?,
             user_id: row.get(1)?,
@@ -101,6 +111,7 @@ impl CalendarEvent {
                     other => other.map(|s| s.to_string()),
                 }
             },
+            participants,
         })
     }
 }
@@ -147,7 +158,8 @@ pub fn init_db(app_handle: &AppHandle) -> Result<(), SqliteError> {
             synced BOOLEAN DEFAULT FALSE,
             synced_google BOOLEAN DEFAULT FALSE,
             deleted BOOLEAN DEFAULT FALSE,
-            recurrence TEXT DEFAULT NULL
+            recurrence TEXT DEFAULT NULL,
+            participants TEXT DEFAULT NULL
         )",
     )?;
 
@@ -157,7 +169,6 @@ pub fn init_db(app_handle: &AppHandle) -> Result<(), SqliteError> {
 // Function to save events //
 pub async fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), String> {
     let mut event = CalendarEvent::from_json(&event_json)?;
-
     // Get current user ID and assign to event
     let user_id = {
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -234,11 +245,9 @@ pub async fn save_event(app_handle: &AppHandle, event_json: String) -> Result<()
             Err(e) => return Err(format!("Failed to encrypt event data: {}", e)),
         };
 
-    println!("📝 Parsed event: {:?}", event);
-
     tx.execute(
-        "INSERT OR REPLACE INTO events (id, user_id, description, time, alarm, synced, synced_google, deleted, recurrence)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        "INSERT OR REPLACE INTO events (id, user_id, description, time, alarm, synced, synced_google, deleted, recurrence, participants)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         (
             &event.id,
             &event.user_id,
@@ -249,6 +258,7 @@ pub async fn save_event(app_handle: &AppHandle, event_json: String) -> Result<()
             synced_google,
             deleted,
             event.recurrence.as_deref(),
+            Some(match &event.participants { Some(p) => serde_json::to_string(p).unwrap_or("[]".to_string()), None => "[]".to_string(),}),
         ),
     ).map_err(|e| format!("Execute error: {}", e.to_string()))?;
 
@@ -293,7 +303,7 @@ pub async fn get_events(app_handle: &AppHandle) -> Result<Vec<String>, SqliteErr
     };
 
     let mut query = conn.prepare(
-        "SELECT id, user_id, description, time, alarm, synced, synced_google, deleted, recurrence
+        "SELECT id, user_id, description, time, alarm, synced, synced_google, deleted, recurrence, participants
         FROM events 
         WHERE deleted = FALSE
         AND user_id = ?1

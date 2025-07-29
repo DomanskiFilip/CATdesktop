@@ -252,7 +252,7 @@ impl NotificationService {
                 let next_24_hours = now + Duration::hours(24);
                 
                 let mut query = conn.prepare(
-                    "SELECT id, user_id, description, time, alarm, synced, synced_google, deleted, recurrence
+                    "SELECT id, user_id, description, time, alarm, synced, synced_google, deleted, recurrence, participants
                     FROM events 
                     WHERE deleted = FALSE AND alarm = TRUE AND time > ?1 AND time <= ?2 AND user_id = ?3"
                 ).map_err(|e| e.to_string())?;
@@ -382,6 +382,7 @@ impl NotificationService {
                 synced_google: event.synced_google,
                 deleted: event.deleted,
                 recurrence: None::<String>,
+                participants: None,
             };
 
             // Schedule the notification for this instance
