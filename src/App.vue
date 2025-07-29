@@ -86,7 +86,6 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, emit } from '@tauri-apps/api/event'
 import { platform } from '@tauri-apps/plugin-os'
 import { retrieve as keystoreRetrieve } from '@impierce/tauri-plugin-keystore'
-import { useRouter } from 'vue-router'
 import TitleBar from './components/TitleBar.vue'
 import Oauth from './components/Oauth.vue'
 import Location from './components/Location.vue'
@@ -193,16 +192,6 @@ const handleLocationUpdate = async (coordinates: { lat: number, lng: number } | 
 const handleLocationNameUpdate = (name: string) => {
   currentLocationName.value = name
 }
-
-const router = useRouter()
-
-onMounted(() => {
-  listen('open-smart-features', (event) => {
-    // Always navigate to calendar page
-    router.push({ name: 'Calendar' })
-    // Optionally, you can emit a custom event to Calendar.vue if needed
-  })
-})
 
 onMounted(async () => {
   // Listen for backend auto-login events

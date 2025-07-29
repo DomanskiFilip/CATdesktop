@@ -43,17 +43,26 @@
               <svg v-if="isAlarmOn(hour)" xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M96-528q0-88.39 35.5-162.19Q167-764 230-818l51 50q-52 43-82.5 105.5T168-528H96Zm696 0q0-73-30.5-135.5T678-769l52-51q62 53 98 128.5T864-528h-72ZM192-216v-72h48v-240q0-87 53.5-153T432-763v-53q0-20 14-34t34-14q20 0 34 14t14 34v53q85 16 138.5 82T720-528v240h48v72H192Zm288-276Zm-.21 396Q450-96 429-117.15T408-168h144q0 30-21.21 51t-51 21ZM312-288h336v-240q0-70-49-119t-119-49q-70 0-119 49t-49 119v240Z"/></svg>
               <svg v-else xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M192-216v-72h48v-240q0-87 53.5-153T432-763v-53q0-20 14-34t34-14q20 0 34 14t14 34v53q85 16 138.5 82T720-528v240h48v72H192Zm288-276Zm-.21 396Q450-96 429-117.15T408-168h144q0 30-21.21 51t-51 21ZM312-288h336v-240q0-70-49-119t-119-49q-70 0-119 49t-49 119v240Z"/></svg>
              </button>
-             <button class="delete-btn" @click="deleteEvent(hour)" title="delete event" v-if="hasEventAtHour(hour) && !isInPast(hour) && !isNow(hour)">
-              <svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z"/></svg>
-             </button>
-             <button class="smart-features-btn" @click="openSmartFeatures(hour)" title="Smart Features" v-if="hasEventAtHour(hour) && !isInPast(hour) && !isNow(hour)">
-               <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M323-160q-11 0-20.5-5.5T288-181l-78-139h58l40 80h92v-40h-68l-40-80H188l-57-100q-2-5-3.5-10t-1.5-10q0-4 5-20l57-100h104l40-80h68v-40h-92l-40 80h-58l78-139q5-10 14.5-15.5T323-800h97q17 0 28.5 11.5T460-760v160h-60l-40 40h100v120h-88l-40-80h-92l-40 40h108l40 80h112v200q0 17-11.5 28.5T420-160h-97Zm217 0q-17 0-28.5-11.5T500-200v-200h112l40-80h108l-40-40h-92l-40 80h-88v-120h100l-40-40h-60v-160q0-17 11.5-28.5T540-800h97q11 0 20.5 5.5T672-779l78 139h-58l-40-80h-92v40h68l40 80h104l57 100q2 5 3.5 10t1.5 10q0 4-5 20l-57 100H668l-40 80h-68v40h92l40-80h58l-78 139q-5 10-14.5 15.5T637-160h-97Z"/></svg>
+             <button class="reocuring-events-btn" :class="{ 'recurring-highlight': findEventAtHour(hour)?.recurrence }" @click="reocuringEvents(hour)" title="schedule reocuring time" v-if="hasEventAtHour(hour) && !isInPast(hour) && !isNow(hour)">
+               <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M227-346q-16-30-25.5-63.5T192-480q0-121 85-206t209-82l-57-57 51-51 144 144-144 144-51-51 57-57q-94-2-158 62t-64 154q0 22 4 42t12 39l-53 53ZM480-84 336-228l144-144 51 51-57 57q94 2 158-62t64-154q0-22-4-42t-12-39l53-53q16 30 25.5 63.5T768-480q0 120-85 205.5T474-192l57 57-51 51Z"/></svg>
             </button>
-             <button v-if="!isNow(hour)" class="expand" @click="toggleExpand(hour)" title="expand/collapse">
-              <svg v-if="!expand[hour]" xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M480-344 240-584l56-56 184 184 184-184 56 56-240 240Z"/></svg>
-              <svg v-else xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M480-528 296-344l-56-56 240-240 240 240-56 56-184-184Z"/></svg>
-             </button>
-              
+            <div v-if="recurrenceDropdown.visible && recurrenceDropdown.hour === hour" class="recurrence-dropdown" tabindex="0" @blur="handleDropdownBlur">
+              <ul>
+                <li v-for="option in recurrenceOptions" :key="option.value">
+                  <button @click="pickRecurrence(option.value)">{{ option.label }}</button>
+                </li>
+              </ul>
+            </div>
+            <button class="delete-btn" @click="deleteEvent(hour)" title="delete event" v-if="hasEventAtHour(hour) && !isInPast(hour) && !isNow(hour)">
+            <svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z"/></svg>
+            </button>
+            <button class="smart-features-btn" @click="openSmartFeatures(hour)" title="Smart Features" v-if="hasEventAtHour(hour) && !isInPast(hour) && !isNow(hour)">
+              <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M323-160q-11 0-20.5-5.5T288-181l-78-139h58l40 80h92v-40h-68l-40-80H188l-57-100q-2-5-3.5-10t-1.5-10q0-4 5-20l57-100h104l40-80h68v-40h-92l-40 80h-58l78-139q5-10 14.5-15.5T323-800h97q17 0 28.5 11.5T460-760v160h-60l-40 40h100v120h-88l-40-80h-92l-40 40h108l40 80h112v200q0 17-11.5 28.5T420-160h-97Zm217 0q-17 0-28.5-11.5T500-200v-200h112l40-80h108l-40-40h-92l-40 80h-88v-120h100l-40-40h-60v-160q0-17 11.5-28.5T540-800h97q11 0 20.5 5.5T672-779l78 139h-58l-40-80h-92v40h68l40 80h104l57 100q2 5 3.5 10t1.5 10q0 4-5 20l-57 100H668l-40 80h-68v40h92l40-80h58l-78 139q-5 10-14.5 15.5T637-160h-97Z"/></svg>
+          </button>
+            <button v-if="!isNow(hour)" class="expand" @click="toggleExpand(hour)" title="expand/collapse">
+            <svg v-if="!expand[hour]" xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M480-344 240-584l56-56 184 184 184-184 56 56-240 240Z"/></svg>
+            <svg v-else xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M480-528 296-344l-56-56 240-240 240 240-56 56-184-184Z"/></svg>
+            </button>
           </span>
           <!-- Hidden textarea for editing (shows when clicking the display div) -->
           <textarea v-show="activeEditor === `editor-${getHourKey(hour)}`" 
@@ -103,6 +112,7 @@ interface CalendarEvent {
   alarm: boolean;
   synced: boolean;
   deleted: boolean;
+  recurrence: string | null;
 }
 
 // interface for daily weather data
@@ -135,6 +145,15 @@ const weather = ref<Record<string, DailyWeather> | 'no data'>('no data')
 const showSmartFeatures = ref(false)
 const smartFeaturesEvent = ref<CalendarEvent | null>(null)
 const smartFeaturesRef = ref<InstanceType<typeof SmartFeatures> | null>(null)
+const recurrenceDropdown = ref<{ hour: number | null, visible: boolean }>({ hour: null, visible: false })
+
+const recurrenceOptions = [
+  { label: 'Daily', value: 'FREQ=DAILY' },
+  { label: 'Weekly', value: 'FREQ=WEEKLY' },
+  { label: 'Monthly', value: 'FREQ=MONTHLY' },
+  { label: 'Yearly', value: 'FREQ=YEARLY' }
+]
+
 // for mobile
 const cachedUserId = ref<string | null>(null);
 
@@ -236,10 +255,14 @@ const findEventAtHour = (hour: number, date: Date = currentDate.value): Calendar
   return events.value.find(event => {
     const eventDate = new Date(event.time)
     const eventHour = eventDate.getHours()
-    return eventHour === hour &&
-           eventDate.getDate() === date.getDate() &&
-           eventDate.getMonth() === date.getMonth() &&
-           eventDate.getFullYear() === date.getFullYear()
+    // Direct match for normal events
+    const isNormal = eventHour === hour &&
+      eventDate.getDate() === date.getDate() &&
+      eventDate.getMonth() === date.getMonth() &&
+      eventDate.getFullYear() === date.getFullYear()
+    // Recurring event match
+    const isRecurring = event.recurrence && occursOnDate(event, date) && eventHour === hour
+    return isNormal || isRecurring
   })
 }
 
@@ -260,14 +283,40 @@ const hasEventAtHour = (hour: number) => {
   return !!findEventAtHour(hour)
 }
 
+// Utility/Helper function -> Get reocuring events
+function occursOnDate(event: CalendarEvent, date: Date): boolean {
+  if (!event.recurrence) return false;
+  const eventDate = new Date(event.time);
+  // Simple logic for daily/weekly/monthly/yearly
+  if (event.recurrence === 'FREQ=DAILY') {
+    return date >= eventDate;
+  }
+  if (event.recurrence === 'FREQ=WEEKLY') {
+    return date >= eventDate && date.getDay() === eventDate.getDay();
+  }
+  if (event.recurrence === 'FREQ=MONTHLY') {
+    return date >= eventDate && date.getDate() === eventDate.getDate();
+  }
+  if (event.recurrence === 'FREQ=YEARLY') {
+    return date >= eventDate &&
+      date.getDate() === eventDate.getDate() &&
+      date.getMonth() === eventDate.getMonth();
+  }
+  return false;
+}
+
 // Utility function -> Get events for specific date
 const getEventsForDate = (date: CalendarDay) => {
   if (!date.date) return []
   return events.value.filter(event => {
     const eventDate = new Date(event.time)
-    return eventDate.getDate() === date.date?.getDate() &&
-           eventDate.getMonth() === date.date?.getMonth() &&
-           eventDate.getFullYear() === date.date?.getFullYear()
+    // Normal event on this date
+    const isNormal = eventDate.getDate() === date.date?.getDate() &&
+      eventDate.getMonth() === date.date?.getMonth() &&
+      eventDate.getFullYear() === date.date?.getFullYear();
+    // Recurring event on this date
+    const isRecurring = event.recurrence && occursOnDate(event, date.date);
+    return isNormal || isRecurring;
   })
 }
 
@@ -353,6 +402,58 @@ const openSmartFeatures = (hour: number) => {
 const closeSmartFeatures = () => {
   showSmartFeatures.value = false
   smartFeaturesEvent.value = null
+}
+
+// Open/close recurrence dropdown and toggle recurrence
+// Open/close recurrence dropdown and toggle recurrence
+const reocuringEvents = (hour: number) => {
+  // If dropdown is already open for this hour, close it
+  if (recurrenceDropdown.value.visible && recurrenceDropdown.value.hour === hour) {
+    recurrenceDropdown.value = { hour: null, visible: false }
+    return
+  }
+
+  const event = findEventAtHour(hour)
+  if (!event) return
+
+  // If recurrence is already set, clicking disables it
+  if (event.recurrence) {
+    event.recurrence = null
+    saveEvent(event)
+    recurrenceDropdown.value = { hour: null, visible: false }
+    invoke('schedule_event_notification', { eventJson: JSON.stringify(event) })
+    return
+  }
+
+  // Otherwise, open dropdown
+  recurrenceDropdown.value = { hour, visible: true }
+}
+
+// Close dropdown if clicked outside
+const handleClickOutside = (event: MouseEvent) => {
+  const dropdown = document.querySelector('.recurrence-dropdown')
+  if (dropdown && !dropdown.contains(event.target as Node)) {
+    recurrenceDropdown.value = { hour: null, visible: false }
+  }
+}
+
+// Handler for picking recurrence option
+const pickRecurrence = async (option: string) => {
+  const hour = recurrenceDropdown.value.hour
+  if (hour === null) return
+  const event = findEventAtHour(hour)
+  if (!event) return
+
+  event.recurrence = option
+  saveEvent(event)
+  recurrenceDropdown.value = { hour: null, visible: false }
+  // Schedule notifications for recurring event
+  await invoke('schedule_event_notification', { eventJson: JSON.stringify(event) })
+}
+
+// Close dropdown if clicked outside
+const handleDropdownBlur = () => {
+  recurrenceDropdown.value = { hour: null, visible: false }
 }
 
 // == Event logic == //
@@ -718,22 +819,12 @@ onBeforeUnmount(() => {
   for (const timeout of pendingSaves.values()) {
     clearTimeout(timeout)
   }
-})
-
-// Listen for click on notification to open smart features
-onMounted(() => {
-  listen('open-smart-features', (event) => {
-    const eventId = event.payload as string
-    const foundEvent = events.value.find(e => e.id === eventId)
-    if (foundEvent) {
-      smartFeaturesEvent.value = foundEvent
-      showSmartFeatures.value = true
-    }
-  })
+  document.removeEventListener('mousedown', handleClickOutside)
 })
 
 // Initialize calendar on component mount
 onMounted(async () => {
+  document.addEventListener('mousedown', handleClickOutside)
   try {
     renderCalendar()
     // Try auto-launch setup but don't fail if it doesn't work
@@ -1157,6 +1248,43 @@ padding: 0.1rem;
 
 .expand {
   margin-left: auto;
+}
+
+.recurrence-dropdown {
+  position: absolute;
+  z-index: 100;
+  background: var(--color-main);
+  border: 1px solid var(--color-theme);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  padding: 0.5rem;
+  top: 2rem;
+  left: 2.2rem;
+}
+
+.recurrence-dropdown ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.recurrence-dropdown li button {
+  background: transparent;
+  border: none;
+  color: var(--color-text);
+  padding: 0.3rem 1rem;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+.recurrence-dropdown li button:hover {
+  background: var(--color-theme);
+  color: var(--color-dark);
+}
+
+.recurring-highlight svg {
+  fill: var(--color-theme);
 }
 
 /* Mobile */
