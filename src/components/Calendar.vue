@@ -543,7 +543,7 @@ const deleteEvent = async (hour: number) => {
 const scheduleNativeNotification = async (event: CalendarEvent) => {
   try {
     await invoke('schedule_event_notification', { 
-      event_json: JSON.stringify(event) 
+      eventJson: JSON.stringify(event) 
     })
   } catch (error) {
     console.error('Failed to schedule notification:', error)
@@ -1026,6 +1026,8 @@ border-color: var(--color-theme);
 .hour textarea, .hour .link-display {
 width: 100%;
 height: 2rem;
+min-width: 2rem;
+max-width: 100%; 
 font-size: 1rem;
 font-family:
   Inter,
@@ -1056,6 +1058,8 @@ cursor: text; /* Show text cursor */
 line-height: 1.5;
 vertical-align: middle;
 box-sizing: border-box;
+white-space: pre-wrap;
+word-break: break-word;
 }
 
 .hour .link-display:empty::before {

@@ -24,7 +24,6 @@ struct Body {
 }
 
 // Function to handle auto-login using AWS Lambda //
-
 pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
     println!("Starting auto-login process...");
     let config = AppConfig::new()?;
@@ -41,7 +40,7 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
     };
 
     #[cfg(not(target_os = "android"))]
-    let (access_token, refresh_token, database_token) = match read_tokens_from_file(&app_handle) {
+    let (access_token, refresh_token, database_token) = match read_tokens_from_file(&app_handle).await {
         Ok(tokens) => tokens,
         Err(e) => {
             println!("No tokens found or failed to read tokens: {}", e);
@@ -58,6 +57,8 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
     let client = Client::new();
 
     // Prepare the initial payload with access token and device info
+    println!("Sending access token: {}", access_token);
+    println!("Device info: {:?}", device_info);
     let mut payload = serde_json::json!({
         "body": serde_json::json!({
             "access_token": access_token,
@@ -97,10 +98,8 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
         }
         201 => {
             // Access token expired, send refresh token
-            println!(
-                "Access token expired. Server response: {}",
-                lambda_resp.body
-            );
+            println!("Access token expired. Server response: {}", lambda_resp.body);
+            println!("Attempting to refresh access token... refresh_token: {}", refresh_token);
             if let Some(refresh_token) = Some(refresh_token) {
                 payload = serde_json::json!({
                     "body": serde_json::json!({
@@ -118,8 +117,8 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
                     .map_err(|e| e.to_string())?;
 
                 let text = response.text().await.map_err(|e| e.to_string())?;
-                let lambda_resp: LambdaResponse =
-                    serde_json::from_str(&text).map_err(|e| e.to_string())?;
+                println!("Server response after autologin: {}", text);
+                let lambda_resp: LambdaResponse = serde_json::from_str(&text).map_err(|e| e.to_string())?;
 
                 if lambda_resp.status_code == 300 {
                     let body_json: serde_json::Value = serde_json::from_str(&lambda_resp.body)
@@ -136,38 +135,25 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
                     // Save new access token
                     let body: Body = serde_json::from_str(&lambda_resp.body).map_err(|e| e.to_string())?;
                     if let Some(new_access_token) = body.access_token {
-                        save_tokens_to_file(&app_handle, &new_access_token, &refresh_token, database_token.as_ref(),)
-                            .map_err(|e| format!("Failed to save tokens: {}", e))?;
+                        save_tokens_to_file(&app_handle, &new_access_token, &refresh_token, database_token.as_ref(),).await?;
                         println!("User is logged in successfully with refresh token.");
                         return Ok(true);
                     }
                 }
-                println!(
-                    "Failed to refresh access token. Server response: {}",
-                    lambda_resp.body
-                );
+                println!("Failed to refresh access token. Server response: {}", lambda_resp.body);
                 return Ok(false);
             }
-            println!(
-                "No refresh token available. Server response: {}",
-                lambda_resp.body
-            );
+            println!("No refresh token available. Server response: {}", lambda_resp.body);
             Ok(false)
         }
         301 => {
             // Refresh token expired or device mismatch
-            println!(
-                "Refresh token expired or device mismatch. Server response: {}",
-                lambda_resp.body
-            );
+            println!("Refresh token expired or device mismatch. Server response: {}", lambda_resp.body);
             Ok(false)
         }
         _ => {
             // Unexpected status code
-            println!(
-                "Unexpected status code: {}. Server response: {}",
-                lambda_resp.status_code, lambda_resp.body
-            );
+            println!("Unexpected status code: {}. Server response: {}", lambda_resp.status_code, lambda_resp.body);
             Ok(false)
         }
     }

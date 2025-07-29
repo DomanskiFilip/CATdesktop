@@ -474,9 +474,34 @@ onMounted(async () => {
   margin-bottom: 5rem;
   width: 95vw;
   align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 
 #main-page.is-mobile #main-content .content-section #calendar #smart-features-container #smart-features-header div h2 {
   text-align: center;
+}
+
+#main-page.is-mobile #main-content .content-section #calendar #smart-features-container #ai-responce-container {
+  padding: 0.7rem;
+  margin-top: 1rem;
+  margin-bottom: 5rem;
+  width: 95vw;
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+#main-page.is-mobile #main-content .content-section #calendar #smart-features-container #map-container #button-container form {
+  display: flex;
+  flex-direction: column;
+}
+
+#main-page.is-mobile #main-content .content-section #calendar #smart-features-container #map-container #button-container form  input{
+  width: 10rem;
 }
 </style>

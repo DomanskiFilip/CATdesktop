@@ -90,6 +90,7 @@ async fn set_tokens_for_autologin(tokens_json: String) {
             }
         }
     }
+    println!("Tokens set for autologin: {:?}", tokens_json);
 }
 
 #[cfg(target_os = "android")]
@@ -108,6 +109,7 @@ async fn read_tokens_from_cache() -> Option<(String, String, Option<[u8; 32]>)> 
             }
         })
     });
+    println!("Tokens loaded from cache: access_token='{}', refresh_token='{}', database_token='{:?}'", access_token, refresh_token, database_token);
     Some((access_token, refresh_token, database_token))
 }
 
@@ -454,10 +456,7 @@ async fn start_auto_login(app_handle_arc: Arc<AppHandle>) -> Result<bool, String
 }
 
 // Start notification service //
-async fn start_notification_service(
-    app_handle_arc: Arc<AppHandle>,
-    user_logged_in: bool,
-) -> Result<(), String> {
+async fn start_notification_service(app_handle_arc: Arc<AppHandle>,  user_logged_in: bool,) -> Result<(), String> {
     let notification_state = app_handle_arc.state::<NotificationServiceState>();
     let mut service_guard = notification_state.lock().await;
 
@@ -476,10 +475,7 @@ async fn start_notification_service(
 }
 
 // Start database sync service //
-async fn start_database_sync_service(
-    app_handle_arc: Arc<AppHandle>,
-    user_logged_in: bool,
-) -> Result<(), String> {
+async fn start_database_sync_service(app_handle_arc: Arc<AppHandle>,  user_logged_in: bool,) -> Result<(), String> {
     let config_state = app_handle_arc.state::<AppConfigState>();
     if !config_state.enable_database_sync {
         println!("Database sync service is disabled via configuration");
@@ -508,10 +504,7 @@ async fn start_database_sync_service(
     }
 }
 
-async fn start_google_sync_service(
-    app_handle_arc: Arc<AppHandle>,
-    user_logged_in: bool,
-) -> Result<(), String> {
+async fn start_google_sync_service(app_handle_arc: Arc<AppHandle>,  user_logged_in: bool,) -> Result<(), String> {
     let config_state = app_handle_arc.state::<AppConfigState>();
     if !config_state.enable_google_sync {
         println!("Google sync service is disabled via configuration");

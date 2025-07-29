@@ -66,10 +66,7 @@ impl NotificationService {
     }
 
     // Helper method for schedule_event_notifications -> Remove notifications for an event //
-    pub async fn remove_event_notifications(
-        &mut self,
-        event_id: &str,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn remove_event_notifications(&mut self, event_id: &str,) -> Result<(), Box<dyn std::error::Error>> {
         // Cancel warning task
         if let Some(task) = self
             .scheduled_tasks
@@ -87,10 +84,7 @@ impl NotificationService {
     }
 
     // Helper method for check_and_schedule_all_notifications -> schedule notifications for a single event //
-    pub async fn schedule_event_notifications(
-        &mut self,
-        event: &CalendarEvent,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn schedule_event_notifications(&mut self, event: &CalendarEvent,) -> Result<(), Box<dyn std::error::Error>> {
         println!("Scheduling notifications for event!");
 
         // Check if the event has an alarm set
@@ -197,10 +191,7 @@ impl NotificationService {
     }
 
     // Method to check database and schedule notifications for all upcoming events //
-    pub async fn check_and_schedule_all_notifications(
-        app_handle_arc: &Arc<AppHandle>,
-        user_logged_in: bool,
-    ) -> Result<(), String> {
+    pub async fn check_and_schedule_all_notifications(app_handle_arc: &Arc<AppHandle>, user_logged_in: bool,) -> Result<(), String> {
         println!("Checking for upcoming events to schedule notifications...");
 
         // Verify user is actually logged in before proceeding

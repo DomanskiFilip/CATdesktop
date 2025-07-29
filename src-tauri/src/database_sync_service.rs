@@ -15,6 +15,8 @@ use std::time::Duration;
 use tauri::AppHandle;
 use tokio::task::JoinHandle;
 use tokio::time;
+use base64::engine::general_purpose;
+use base64::Engine;
 
 pub struct DbSyncService {
     config: Arc<AppConfig>,
@@ -195,7 +197,6 @@ impl DbSyncService {
             println!("No unsynced events found, skipping sync to DynamoDB.");
             return Ok(());
         }
-        println!("Events to sync: {:?}", events); // <--- Add this line
 
         // Batch send unsynced events to DynamoDB
         match self.send_to_dynamodb(app_handle_arc, &events).await {
@@ -211,11 +212,7 @@ impl DbSyncService {
     }
 
     // Method to sync from DynamoDB to local (download changes) //
-    pub async fn sync_from_dynamodb(
-        &self,
-        app_handle_arc: &Arc<AppHandle>,
-        user_logged_in: bool,
-    ) -> Result<(), String> {
+    pub async fn sync_from_dynamodb(&self, app_handle_arc: &Arc<AppHandle>, user_logged_in: bool,) -> Result<(), String> {
         if !user_logged_in {
             println!("User not logged in, skipping sync from DynamoDB.");
             return Ok(());
@@ -256,7 +253,7 @@ impl DbSyncService {
             "deviceInfo": device_info,
             "email": user_id
         });
-        if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle_arc) {
+        if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle_arc).await {
             payload["access_token"] = serde_json::json!(access_token);
         }
         let response = self
@@ -279,7 +276,7 @@ impl DbSyncService {
                     // Wait briefly to ensure token file is written
                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                     // Retry with new token (always read from file)
-                    if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle_arc) {
+                    if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle_arc).await {
                         payload["access_token"] = serde_json::json!(access_token);
                         let retry_response = self
                             .client
@@ -391,7 +388,7 @@ impl DbSyncService {
             "deviceInfo": device_info,
             "email": user_id
         });
-        if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle_arc) {
+        if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle_arc).await {
             payload["access_token"] = serde_json::json!(access_token);
         }
         // Use lambda endpoint from config
@@ -417,7 +414,7 @@ impl DbSyncService {
                     // Wait briefly to ensure token file is written
                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                     // Retry with new token (always read from file)
-                    if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle_arc) {
+                    if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle_arc).await {
                         println!("New access token after auto-login: {}", access_token);
                         payload["access_token"] = serde_json::json!(access_token);
                         let retry_response = self
@@ -499,41 +496,79 @@ impl DbSyncService {
     }
 
     // Helper method -> merge remote events into local database //
-    async fn merge_remote_events(
-        &self,
-        app_handle: &AppHandle,
-        remote_events: &[Value],
-    ) -> Result<(), String> {
-        let conn = get_db_connection(app_handle)
-            .map_err(|e| format!("Database connection failed: {}", e))?;
+    async fn merge_remote_events(&self, app_handle: &AppHandle, remote_events: &[Value],) -> Result<(), String> {
+        for event_data in remote_events.iter().cloned() {
+              let event_id = event_data["id"].as_str().unwrap_or("").to_string();
+              let user_id = event_data["email"].as_str().unwrap_or("").to_string();
+              let event_id_for_log = event_id.clone();
+              let mut description_plain = String::new();
+              if let Some(enc_desc) = event_data.get("description").and_then(|v| v.as_str()) {
+                  if let Ok(decoded) = general_purpose::STANDARD.decode(enc_desc) {
+                      match crate::encryption_utils::decrypt_user_data_base(app_handle, &user_id, &decoded) {
+                          Ok(decrypted) => {
+                              if let Ok(desc_str) = String::from_utf8(decrypted) {
+                                  description_plain = desc_str;
+                              } else {
+                                  description_plain = "[UNREADABLE EVENT]".to_string();
+                              }
+                          }
+                          Err(_) => {
+                              description_plain = "[UNREADABLE EVENT]".to_string();
+                          }
+                      }
+                  } else {
+                      description_plain = enc_desc.to_string();
+                  }
+              }
 
-        for event_data in remote_events {
-            let event_id = event_data["id"].as_str().unwrap_or("");
-            let user_id = event_data["email"].as_str().unwrap_or("");
-            let mut query = conn
-                .prepare("SELECT COUNT(*) FROM events WHERE id = ?1 AND user_id = ?2")
-                .map_err(|e| format!("Failed to prepare check statement: {}", e))?;
-            let exists: i64 = query
-                .query_row([event_id, user_id], |row| row.get(0))
-                .map_err(|e| format!("Failed to check for existing event: {}", e))?;
-            if exists > 0 {
-                continue; // Skip if already exists
-            }
+              let incoming_deleted = event_data.get("deleted").and_then(|v| v.as_bool()).unwrap_or(false);
 
-            let event_json = json!({
-                "id": event_data["id"],
-                "user_id": event_data["email"],
-                "description": event_data["description"],
-                "time": event_data["time"],
-                "alarm": event_data["alarm"],
-                "deleted": event_data.get("deleted").and_then(|v| v.as_bool()).unwrap_or(false),
-                "synced": true,
-                "synced_google": event_data["synced_google"],
-                "recurrence": event_data.get("recurrence").and_then(|v| v.as_str()).map(String::from)
-            });
-            let _ = save_event(app_handle, event_json.to_string());
-        }
+              let event_json = json!({
+                  "id": event_data["id"],
+                  "user_id": event_data["email"],
+                  "description": description_plain,
+                  "time": event_data["time"],
+                  "alarm": event_data["alarm"],
+                  "deleted": incoming_deleted,
+                  "synced": event_data.get("synced").and_then(|v| v.as_bool()).unwrap_or(false),
+                  "synced_google": event_data.get("synced_google").and_then(|v| v.as_bool()).unwrap_or(false),
+                  "recurrence": event_data.get("recurrence").and_then(|v| v.as_str()).map(String::from)
+              });
 
+              let app_handle = app_handle.clone();
+              let event_json_string = event_json.to_string();
+
+              let result = tokio::task::spawn_blocking(move || {
+                  let conn = get_db_connection(&app_handle)
+                      .map_err(|e| format!("Database connection failed: {}", e))?;
+
+                  let mut query = conn
+                      .prepare("SELECT deleted FROM events WHERE id = ?1 AND user_id = ?2")
+                      .map_err(|e| format!("Failed to prepare check statement: {}", e))?;
+                  let mut should_save = true;
+                  let existing_deleted: Option<bool> = query
+                      .query_row([event_id.as_str(), user_id.as_str()], |row| row.get(0))
+                      .ok();
+
+                  if let Some(existing_deleted) = existing_deleted {
+                      // Only update if deleted status is different
+                      if existing_deleted == incoming_deleted {
+                          should_save = false;
+                      }
+                  }
+                  if should_save {
+                      futures::executor::block_on(save_event(&app_handle, event_json_string))
+                  } else {
+                      Ok(())
+                  }
+              })
+              .await
+              .map_err(|e| format!("Join error: {}", e))?;
+
+              if let Err(e) = result {
+                  println!("Failed to save event {}: {}", event_id_for_log, e);
+              }
+          }
         Ok(())
     }
 }

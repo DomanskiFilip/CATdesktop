@@ -7,6 +7,8 @@ use argon2::{ Argon2, PasswordHasher };
 use argon2::password_hash::{ SaltString };
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use base64::Engine;
 
 // Structs (classes/objects) to deserialize the Lambda response
 #[derive(Deserialize)]
@@ -22,11 +24,7 @@ struct Body {
 }
 
 // Function to log in a user using AWS Lambda //
-pub async fn login_user_lambda(
-    app_handle: &AppHandle,
-    email: String,
-    password: String,
-) -> Result<String, String> {
+pub async fn login_user_lambda(app_handle: &AppHandle, email: String, password: String,) -> Result<String, String> {
     let config = AppConfig::new()?;
     let device_info = get_device_info(&app_handle);
 
@@ -101,7 +99,7 @@ pub async fn login_user_lambda(
 
     // Desktop: Save tokens to an encrypted file
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    save_tokens_to_file(&app_handle, &body.access_token, &body.refresh_token, Some(&db_token))
+    save_tokens_to_file(&app_handle, &body.access_token, &body.refresh_token, Some(&db_token)).await
         .map_err(|e| format!("Failed to save tokens: {}", e))?;
 
     // Build frontend response for all platforms
@@ -117,7 +115,8 @@ pub async fn login_user_lambda(
             "access_token": body.access_token,
             "refresh_token": body.refresh_token,
         });
-        frontend_response["user_id"] = serde_json::json!(email); // or actual user_id if available
+        frontend_response["user_id"] = serde_json::json!(email);
+        frontend_response["database_token"] = serde_json::json!(base64::engine::general_purpose::STANDARD.encode(db_token));
     }
 
     Ok(frontend_response.to_string())

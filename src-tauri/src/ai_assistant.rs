@@ -231,7 +231,7 @@ impl AIAssistantService {
 
         let client = reqwest::Client::new();
         let mut prompt_with_token = prompt.clone();
-        if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle) {
+        if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle).await {
             prompt_with_token["access_token"] = serde_json::json!(access_token);
             prompt_with_token["deviceInfo"] = device_info;
             prompt_with_token["email"] = serde_json::json!(user_id);
@@ -262,7 +262,7 @@ impl AIAssistantService {
                 // Wait briefly to ensure token file is written
                 tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
                 // Retry with new tokens
-                if let Ok((access_token, _refresh_token, _)) = read_tokens_from_file(app_handle) {
+                if let Ok((access_token, _refresh_token, _)) = read_tokens_from_file(app_handle).await {
                     prompt_with_token["access_token"] = serde_json::json!(access_token);
                     let retry_resp = client
                         .post(&url)

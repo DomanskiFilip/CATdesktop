@@ -132,7 +132,7 @@ impl AIEnrichmentService {
             "email": user_id,
         });
 
-        if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle) {
+        if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle).await {
             payload["access_token"] = serde_json::json!(access_token);
         }
 
@@ -156,7 +156,7 @@ impl AIEnrichmentService {
             "email": user_id,
         });
 
-        if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle) {
+        if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle).await {
             payload["access_token"] = serde_json::json!(access_token);
         }
 

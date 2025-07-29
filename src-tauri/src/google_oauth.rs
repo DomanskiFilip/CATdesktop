@@ -135,12 +135,7 @@ pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String,
                     Ok(id) => id,
                     Err(e) => {
                         println!("Failed to get user ID: {}", e);
-                        return Ok(LLMResponse {
-                            response_text: "You are not logged in. Please log in to use the assistant.".to_string(),
-                            extracted_events: None,
-                            action_taken: None,
-                            confidence: None,
-                        });
+                        return Ok(String::new());
                     }
                 }
             }
@@ -150,12 +145,7 @@ pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String,
                     Ok(id) => id,
                     Err(e) => {
                         println!("Failed to get user ID: {}", e);
-                        return Ok(LLMResponse {
-                          response_text: "You are not logged in. Please log in to use the assistant.".to_string(),
-                          extracted_events: None,
-                          action_taken: Some("none".to_string()),
-                          confidence: None,
-                      });
+                        return Ok(String::new());
                     }
                 }
             }

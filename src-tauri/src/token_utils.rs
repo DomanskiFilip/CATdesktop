@@ -1,6 +1,7 @@
 use rand::Rng;
 use std::fs;
 use tauri::{ AppHandle, Manager };
+#[cfg(target_os = "android")]
 use base64::Engine;
 
 #[cfg(not(target_os = "android"))]
@@ -22,7 +23,7 @@ fn generate_nonce() -> [u8; 12] {
 }
 
 #[cfg(not(target_os = "android"))]
-pub fn save_tokens_to_file(app_handle: &AppHandle, access_token: &str, refresh_token: &str, database_token: Option<&[u8; 32]>,) -> Result<(), String> {
+pub async fn save_tokens_to_file(app_handle: &AppHandle, access_token: &str, refresh_token: &str, database_token: Option<&[u8; 32]>,) -> Result<(), String> {
     use aes_gcm::aead::Aead;
     use aes_gcm::KeyInit;
     use aes_gcm::{Aes256Gcm, Key, Nonce};
@@ -59,7 +60,7 @@ pub fn save_tokens_to_file(app_handle: &AppHandle, access_token: &str, refresh_t
 }
 
 #[cfg(not(target_os = "android"))]
-pub fn read_tokens_from_file(app_handle: &AppHandle) -> Result<(String, String, Option<[u8; 32]>), String> {
+pub async fn read_tokens_from_file(app_handle: &AppHandle) -> Result<(String, String, Option<[u8; 32]>), String> {
     use aes_gcm::aead::Aead;
     use aes_gcm::KeyInit;
     use aes_gcm::{Aes256Gcm, Key, Nonce};
@@ -104,17 +105,15 @@ pub fn read_tokens_from_file(app_handle: &AppHandle) -> Result<(String, String, 
 
 // On Android/iOS, use the plugin from JS/TS, not Rust!
 #[cfg(target_os = "android")]
-pub fn save_tokens_to_file(_: &AppHandle, _: &str, _: &str, _: Option<&[u8; 32]>) -> Result<(), String> {
+pub async fn save_tokens_to_file(_: &AppHandle, _: &str, _: &str, _: Option<&[u8; 32]>) -> Result<(), String> {
     // No-op: tokens are set via set_tokens_for_autologin from the frontend
     Ok(())
 }
 
 #[cfg(target_os = "android")]
-pub fn read_tokens_from_file(_: &AppHandle) -> Result<(String, String, Option<[u8; 32]>), String> {
-    // On Android, read from the in-memory cache (populated by set_tokens_for_autologin)
-    let (access_token, refresh_token, database_token) =
-        tauri::async_runtime::block_on(crate::read_tokens_from_cache())
-            .ok_or("No tokens in cache".to_string())?;
+pub async fn read_tokens_from_file(_: &AppHandle) -> Result<(String, String, Option<[u8; 32]>), String> {
+    let (access_token, refresh_token, database_token) = crate::read_tokens_from_cache().await.ok_or("No tokens in cache".to_string())?;
+    println!("Reading tokens from cache on Android: {:?}, {:?}, {:?}", access_token, refresh_token, database_token);
     Ok((access_token, refresh_token, database_token))
 }
 

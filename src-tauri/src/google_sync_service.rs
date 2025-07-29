@@ -63,7 +63,6 @@ impl GoogleSyncService {
         let app_handle_ref = Arc::clone(&app_handle_arc);
 
         self.task_handle = Some(tokio::spawn(async move {
-            // Add a longer initial delay before first periodic sync
             tokio::time::sleep(Duration::from_secs(20)).await; // Wait 20s after initial sync
 
             let sync_interval = Duration::from_secs(240); // 4 minutes
@@ -119,11 +118,7 @@ impl GoogleSyncService {
     }
 
     // Method to sync local events to Google Calendar (push unsynced_google events) //
-    pub async fn sync_to_google(
-        &self,
-        app_handle_arc: &Arc<AppHandle>,
-        user_logged_in: bool,
-    ) -> Result<(), String> {
+    pub async fn sync_to_google(&self, app_handle_arc: &Arc<AppHandle>, user_logged_in: bool,) -> Result<(), String> {
         if !user_logged_in {
             println!("User not logged in, skipping sync to Google.");
             return Ok(());
@@ -377,11 +372,7 @@ impl GoogleSyncService {
     }
 
     // Method to sync from Google Calendar to local DB (pull events) //
-    pub async fn sync_from_google(
-        &self,
-        app_handle_arc: &Arc<AppHandle>,
-        user_logged_in: bool,
-    ) -> Result<(), String> {
+    pub async fn sync_from_google(&self, app_handle_arc: &Arc<AppHandle>, user_logged_in: bool,) -> Result<(), String> {
         if !user_logged_in {
             println!("User not logged in, skipping sync from Google.");
             return Ok(());
