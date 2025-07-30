@@ -19,7 +19,7 @@ impl AppConfig {
         let lambda_base_url =
             "https://ywaixwivt3.execute-api.eu-west-2.amazonaws.com/prod".to_string();
 
-        let enable_database_sync = true;
+        let enable_database_sync = false;
         let enable_google_sync = false;
         let notification_service = match fs::read_to_string("settings.json") {
             Ok(content) => serde_json::from_str::<UserSettings>(&content)

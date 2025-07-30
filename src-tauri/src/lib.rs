@@ -687,7 +687,7 @@ pub fn run() {
 pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
     let app_config = Arc::new(crate::api_utils::AppConfig::new()?);
     #[allow(unused_mut)] // silence unused mut warning on desktop platforms
-    let mut builder = tauri::Builder::default().plugin(tauri_plugin_notification::init());
+    let mut builder = tauri::Builder::default();
 
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
@@ -733,8 +733,6 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
             set_notification_lead_time,
         ])
         .setup(|app| {
-            use tauri_plugin_notification::NotificationExt;
-
             // Initialize database on app startup
             database_utils::init_db(&app.handle()).map_err(|e| e.to_string())?;
 

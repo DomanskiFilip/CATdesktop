@@ -81,7 +81,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, computed } from 'vue'
+import { ref, watch, onMounted, computed, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, emit } from '@tauri-apps/api/event'
 import { platform } from '@tauri-apps/plugin-os'
@@ -194,6 +194,19 @@ const handleLocationNameUpdate = (name: string) => {
 }
 
 onMounted(async () => {
+  // Listen for backend notification to open smart features
+  await listen('open-smartfeatures', ({ payload }) => {
+    console.log('Received open-smartfeatures event:', payload);
+    // switch to calendar section
+    activeSection.value = 'section1';
+    nextTick(() => {
+      const calendarEl = document.querySelector('#calendar');
+      if (calendarEl && calendarEl.scrollIntoView) {
+        calendarEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    });
+  });
+
   // Listen for backend auto-login events
   await listen('auto-login-completed', (event) => {
     const loginResult = event.payload as boolean;

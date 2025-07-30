@@ -129,6 +129,7 @@ impl NotificationService {
                 warning_delay.num_minutes()
             );
 
+            let event_user_id = event.user_id.clone();
             let _event_id_clone = event_id.clone();
             let _description_clone = description.clone();
 
@@ -138,7 +139,7 @@ impl NotificationService {
 
                 // Decrypt the description before showing the notification
                 let decrypted_description = match base64::engine::general_purpose::STANDARD.decode(&_description_clone) {
-                    Ok(decoded) => match decrypt_user_data_base(&app_handle_arc, "", &decoded) {
+                    Ok(decoded) => match decrypt_user_data_base(&app_handle_arc, &event_user_id, &decoded) {
                         Ok(decrypted) => String::from_utf8(decrypted).unwrap_or("[UNREADABLE EVENT]".to_string()),
                         Err(_) => "[UNREADABLE EVENT]".to_string(),
                     },
@@ -156,6 +157,10 @@ impl NotificationService {
                     eprintln!("Failed to show warning notification: {}", e);
                 } else {
                     println!("✅ Warning notification shown successfully");
+                    match app_handle_arc.emit("open-smartfeatures", serde_json::json!({ "eventId": _event_id_clone })) {
+                        Ok(_) => println!("✅ open-smartfeatures event emitted"),
+                        Err(e) => eprintln!("❌ Failed to emit open-smartfeatures: {}", e),
+                    }
                 }
             });
 
@@ -170,6 +175,7 @@ impl NotificationService {
                 event_delay.num_minutes()
             );
 
+            let event_user_id = event.user_id.clone();
             let _event_id_clone = event_id.clone();
             let _description_clone = description.clone();
 
@@ -179,7 +185,7 @@ impl NotificationService {
 
                 // Decrypt the description before showing the notification
                 let decrypted_description = match base64::engine::general_purpose::STANDARD.decode(&_description_clone) {
-                    Ok(decoded) => match decrypt_user_data_base(&app_handle_arc, "", &decoded) {
+                    Ok(decoded) => match decrypt_user_data_base(&app_handle_arc, &event_user_id, &decoded) {
                         Ok(decrypted) => String::from_utf8(decrypted).unwrap_or("[UNREADABLE EVENT]".to_string()),
                         Err(_) => "[UNREADABLE EVENT]".to_string(),
                     },
@@ -196,6 +202,10 @@ impl NotificationService {
                     eprintln!("Failed to show event notification: {}", e);
                 } else {
                     println!("✅ Event notification shown successfully");
+                    match app_handle_arc.emit("open-smartfeatures", serde_json::json!({ "eventId": _event_id_clone })) {
+                        Ok(_) => println!("✅ open-smartfeatures event emitted"),
+                        Err(e) => eprintln!("❌ Failed to emit open-smartfeatures: {}", e),
+                    }
                 }
             });
 

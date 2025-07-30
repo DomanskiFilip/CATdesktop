@@ -610,6 +610,11 @@ watch(chatHistory, () => {
   border-radius: 8px;
 }
 
+#chat-container::-webkit-scrollbar {
+  width: 8px;
+  background: transparent;
+}
+
 .message-timestamp {
   font-size: 0.75rem;
   color: var(--color-text);

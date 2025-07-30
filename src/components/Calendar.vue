@@ -822,8 +822,35 @@ onBeforeUnmount(() => {
   document.removeEventListener('mousedown', handleClickOutside)
 })
 
+// open smart features when user clicks on notification
+listen('open-smartfeatures', ({ payload }) => {
+  const data = payload as { eventId: string }
+  const event = events.value.find(e => e.id === data.eventId)
+  if (event) {
+    smartFeaturesEvent.value = event
+    showSmartFeatures.value = true
+    nextTick(() => {
+      smartFeaturesRef.value?.$el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+  }
+})
+
 // Initialize calendar on component mount
 onMounted(async () => {
+  window.addEventListener('open-smartfeatures', (event) => {
+    console.log('Received open-smartfeatures event calendar:', event);
+    const data = (event as CustomEvent).detail as { eventId: string }
+    const foundEvent = events.value.find(e => e.id === data.eventId)
+    if (foundEvent) {
+      smartFeaturesEvent.value = foundEvent
+      showSmartFeatures.value = true
+      nextTick(() => {
+        smartFeaturesRef.value?.$el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      })
+    }
+  });
+
+
   document.addEventListener('mousedown', handleClickOutside)
   try {
     renderCalendar()
