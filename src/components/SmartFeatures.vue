@@ -27,8 +27,16 @@
       <span v-if="emailError" class="error">{{ emailError }}</span>
       <button @click="addParticipant" id="participants-btn">Add</button>
       <section id="ai-responce-container">
-        <MiniAiChat :clarifyingQuestion="'Write an email to participants based on event description or notify you will be late.'" @answered="handleEmailAi"/>
-        <div style="position: relative; width: 100%;">
+        <MiniAiChat :clarifyingQuestion="'Write an email to participants based on event description or notify you will be late.'" @answered="handleEmailAi" :disabled="!hasParticipants"/>
+        <section v-if="emailAiLoading" id="loading-screen">
+          <div id="loader"></div>
+          <span>generateing email...</span>
+        </section>
+        <span v-if="emailAiError" class="error">{{ emailAiError }}</span>
+        <h2 v-if="emailSubject" id="email-subject">
+            <span>Subject: </span>{{ emailSubject }}
+        </h2>
+        <div v-if="hasParticipants && emailSubject" style="position: relative; width: 100%;">
           <button id="copy-email-btn" @click="copyEmailContent">
             <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M360-240q-29.7 0-50.85-21.15Q288-282.3 288-312v-480q0-29.7 21.15-50.85Q330.3-864 360-864h384q29.7 0 50.85 21.15Q816-821.7 816-792v480q0 29.7-21.15 50.85Q773.7-240 744-240H360Zm0-72h384v-480H360v480ZM216-96q-29.7 0-50.85-21.15Q144-138.3 144-168v-552h72v552h456v72H216Zm144-216v-480 480Z"/></svg>
           </button>
@@ -37,7 +45,7 @@
       </section>
       <span v-if="sendEmailError" class="error">{{ sendEmailError }}</span>
       <span v-if="emailSuccess" class="error" style="color: var(--color-success); border-left-color: var(--color-success); background-color: rgba(39, 174, 96, 0.1);">{{ emailSuccess }}</span>
-      <button @click="sendEmail" :class="{ inactive: isSending || !participants.length || !emailContent.trim() }" id="send-email-btn">Send Email</button>
+      <button v-if="hasParticipants && emailSubject" @click="sendEmail" :class="{ inactive: isSending || !participants.length || !emailContent.trim() }" id="send-email-btn">Send Email</button>
     </section>
     <!-- Map Tab -->
     <section v-else id="tab-section">
@@ -93,7 +101,7 @@
 
 <reference types="google.maps" />
 <script setup lang="ts">
-import { ref, onMounted, watch, nextTick } from 'vue'
+import { ref, onMounted, watch, nextTick, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import MiniAiChat from './MiniAiChat.vue';
 
@@ -121,10 +129,14 @@ const apiKey = "AIzaSyCq_gPC_WgOecqVQ0JJKo221BRlHuasJ-4";
 const clarificationHistory = ref<string[]>([])
 const activeTab = ref<'map' | 'email'>('email')
 const emailContent = ref('')
+const emailSubject = ref('')
 const participants = ref<string[]>(props.event?.participants || [])
+const hasParticipants = computed(() => participants.value.length > 0)
 const newParticipant = ref('')
 const isSending = ref(false)
 const emailError = ref<string | null>(null)
+const emailAiError = ref<string | null>(null)
+const emailAiLoading = ref(false)
 const sendEmailError = ref<string | null>(null)
 const emailSuccess = ref<string | null>(null)
 
@@ -299,8 +311,32 @@ async function removeParticipant(email: string) {
 }
 
 // Use MiniAiChat to generate email
-function handleEmailAi(answer: string) {
-  emailContent.value = answer
+async function handleEmailAi(answer: string) {
+  if (!participants.value.length) return
+  emailAiLoading.value = true
+  emailAiError.value = ''
+  try {
+    // Call the backend to generate the email using the LLM
+    const response = await invoke('generate_ai_email', {
+      eventJson: JSON.stringify(props.event),
+      emailTopic: answer,
+      participants: participants.value,
+    })
+    // Parse and set the response text as the email content
+    const parsed = JSON.parse(response as string)
+    emailSubject.value = parsed.email_subject || ''
+    emailContent.value = parsed.response_text || ''
+  await nextTick()
+    const emailContentEl = document.getElementById('email-content')
+    if (emailContentEl) {
+      emailContentEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  } catch (err) {
+    emailAiError.value = 'Failed to generate email content.'
+    console.error(err)
+  } finally {
+    emailAiLoading.value = false
+  }
 }
 
 function copyEmailContent() {
@@ -317,18 +353,17 @@ async function sendEmail() {
     return
   }
   isSending.value = true
-  try {
-    await invoke('send_event_email', {
-      eventJson: JSON.stringify({ ...props.event, participants: participants.value }),
-      emailContent: emailContent.value
-    })
-    emailSuccess.value = 'Email sent successfully!'
-    sendEmailError.value = ''
-  } catch (err) {
-    sendEmailError.value = typeof err === 'string' ? err : 'Failed to send email.'
-    emailSuccess.value = ''
-  }
+
+  // Compose mailto link
+  const mailto = `mailto:${participants.value.join(',')}` +
+    `?subject=${encodeURIComponent(emailSubject.value)}` +
+    `&body=${encodeURIComponent(emailContent.value)}`
+
+  // Open user's default email client
+  window.open(mailto, '_blank')
+
   isSending.value = false
+  emailSuccess.value = 'Email client opened!'
 }
 
 // == watchers and computed properties == //
@@ -385,10 +420,11 @@ watch([mode, transitSteps], async ([newMode, steps]) => {
 // Re-render map when mode or manual inputs change
 watch(
   [mode, manualOrigin, useManualOrigin, manualDestination, useManualDestination, () => props.coordinates, destinationLocation],
-  () => {
+  async () => {
     map = null
     directionsRenderer = null
     directionsService = null
+    await loadGoogleMapsApi()
     renderMap()
     // Scroll to map after rendering if map is shown
     nextTick(() => {
@@ -627,6 +663,11 @@ watch(
 
 #participants-btn:active {
   background-color: var(--color-main);
+  color: var(--color-theme);
+}
+
+#email-subject span {
+  font-weight: bold;
   color: var(--color-theme);
 }
 

@@ -1,15 +1,10 @@
 <template>
-  <div class="mini-ai-chat">
+  <div class="mini-ai-chat" v-if="!props.disabled">
     <div class="mini-message" v-if="clarifyingQuestion">
       <span class="ai-label">CAT:</span> {{ clarifyingQuestion }}
     </div>
-    <div class="mini-input-area">
-      <input
-        v-model="userInput"
-        @keyup.enter="sendAnswer"
-        :disabled="isProcessing"
-        placeholder="Type your answer..."
-      />
+    <div class="mini-input-area" v-if="!props.disabled">
+      <input v-model="userInput" @keyup.enter="sendAnswer" :disabled="isProcessing" placeholder="Type your answer..."/>
       <button @click="sendAnswer" :disabled="isProcessing || !userInput.trim()">Send</button>
     </div>
     <div class="mini-message user" v-if="userAnswer">
@@ -23,6 +18,7 @@ import { ref } from 'vue'
 
 const props = defineProps<{
   clarifyingQuestion: string
+  disabled?: boolean
 }>()
 const emit = defineEmits(['answered'])
 
@@ -70,6 +66,7 @@ const sendAnswer = () => {
   flex: 1;
   border-radius: 6px;
   background: var(--color-shadow);
+  color: var(--color-text);
   border: 1px solid var(--color-border);
   padding: 0.25rem 0.5rem;
 }

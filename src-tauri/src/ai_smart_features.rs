@@ -12,27 +12,25 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct EnrichmentResponse {
+pub struct AISmartFeaturesResponse {
     pub response_text: String,
     pub event_type: Option<String>,
     pub location: Option<String>,
     pub time: Option<String>,
     pub info_needed: Option<Vec<String>>,
+    pub email_subject: Option<String>,
+    pub participants: Option<Vec<String>>,
     pub confidence: Option<f64>,
 }
 
-pub struct AIEnrichmentService;
+pub struct AISmartFeaturesService;
 
-impl AIEnrichmentService {
+impl AISmartFeaturesService {
     pub fn new() -> Self {
         Self
     }
 
-    async fn get_context(
-        &self,
-        app_handle: &AppHandle,
-        event: &CalendarEvent,
-    ) -> Result<(String, serde_json::Value, String, String, String), String> {
+    async fn get_context(&self, app_handle: &AppHandle, event: &CalendarEvent,) -> Result<(String, serde_json::Value, String, String, String), String> {
         // Get user ID
         let user_id: String = {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -96,11 +94,7 @@ impl AIEnrichmentService {
         ))
     }
 
-    async fn send_lambda_request(
-        &self,
-        url: &str,
-        payload: &serde_json::Value,
-    ) -> Result<EnrichmentResponse, String> {
+    async fn send_lambda_request(&self, url: &str, payload: &serde_json::Value,) -> Result<AISmartFeaturesResponse, String> {
         let client = reqwest::Client::new();
         let resp = client
             .post(url)
@@ -118,21 +112,39 @@ impl AIEnrichmentService {
         let lambda_resp: LambdaResponse = serde_json::from_str(&text)
             .map_err(|e| format!("Failed to parse Lambda response: {}", e))?;
 
-        let enrichment: EnrichmentResponse = serde_json::from_str(&lambda_resp.body)
-            .map_err(|e| format!("Failed to parse enrichment response: {}", e))?;
+        let enrichment: AISmartFeaturesResponse = serde_json::from_str(&lambda_resp.body)
+            .map_err(|e| format!("Failed to parse smart features response: {}", e))?;
 
-        println!("Enrichment response: {:?}", &enrichment);
+        println!("Smart features response: {:?}", &enrichment);
 
         Ok(enrichment)
     }
 
-    pub async fn enrich_event(
-        &self,
-        app_handle: &AppHandle,
-        event: CalendarEvent,
-    ) -> Result<EnrichmentResponse, String> {
-        let (user_id, device_info, lambda_base_url, current_time, weather) =
-            self.get_context(app_handle, &event).await?;
+    pub async fn generate_email(&self, app_handle: &AppHandle, event: CalendarEvent, email_topic: String, participants: Vec<String>) -> Result<AISmartFeaturesResponse, String> {
+        let (user_id, device_info, lambda_base_url, current_time, weather) = self.get_context(app_handle, &event).await?;
+
+        let mut payload = serde_json::json!({
+            "request_type": "email_agent",
+            "event": event,
+            "current_time": current_time,
+            "weather_forecast": weather,
+            "email_topic": email_topic,
+            "participants": participants,
+            "access_token": "",
+            "deviceInfo": device_info,
+            "email": user_id,
+        });
+
+        if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle).await {
+            payload["access_token"] = serde_json::json!(access_token);
+        }
+
+        let url = format!("{}/llm", lambda_base_url);
+        self.send_lambda_request(&url, &payload).await
+    }
+
+    pub async fn enrich_event(&self, app_handle: &AppHandle, event: CalendarEvent,) -> Result<AISmartFeaturesResponse, String> {
+        let (user_id, device_info, lambda_base_url, current_time, weather) = self.get_context(app_handle, &event).await?;
 
         let mut payload = serde_json::json!({
             "request_type": "event_enrichment",
@@ -152,15 +164,8 @@ impl AIEnrichmentService {
         self.send_lambda_request(&url, &payload).await
     }
 
-    pub async fn enrichment_followup(
-        &self,
-        app_handle: &AppHandle,
-        event: CalendarEvent,
-        user_additional_info: String,
-        clarification_history: Option<String>,
-    ) -> Result<EnrichmentResponse, String> {
-        let (user_id, device_info, lambda_base_url, current_time, weather) =
-            self.get_context(app_handle, &event).await?;
+    pub async fn enrichment_followup(&self, app_handle: &AppHandle, event: CalendarEvent, user_additional_info: String, clarification_history: Option<String>,) -> Result<AISmartFeaturesResponse, String> {
+        let (user_id, device_info, lambda_base_url, current_time, weather) = self.get_context(app_handle, &event).await?;
 
         let mut payload = serde_json::json!({
             "request_type": "enrichment_followup",

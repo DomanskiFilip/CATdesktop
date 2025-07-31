@@ -1,5 +1,5 @@
 mod ai_assistant;
-mod ai_enrichment;
+mod ai_smart_features;
 mod api_utils;
 mod auto_login;
 mod database_sync_service;
@@ -15,7 +15,7 @@ mod token_utils;
 mod user_utils;
 mod weather_service;
 
-use crate::ai_enrichment::AIEnrichmentService;
+use crate::ai_smart_features::AISmartFeaturesService;
 use crate::database_sync_service::DbSyncService;
 use crate::database_utils::CalendarEvent;
 use crate::google_sync_service::GoogleSyncService;
@@ -149,11 +149,7 @@ async fn check_login_status(app_handle: tauri::AppHandle) -> Result<bool, String
 
 // login user command
 #[tauri::command]
-async fn login_user(
-    app_handle: tauri::AppHandle,
-    email: String,
-    password: String,
-) -> Result<String, String> {
+async fn login_user(app_handle: tauri::AppHandle, email: String, password: String,) -> Result<String, String> {
     // Wrap in Arc for the async tasks
     let app_handle_arc = Arc::new(app_handle);
 
@@ -321,13 +317,9 @@ async fn setup_auto_launch() -> Result<(), String> {
     Ok(())
 }
 
-// save user coordinates command
+// save user coordinates command //
 #[tauri::command]
-async fn set_user_coordinates(
-    state: State<'_, Mutex<UserLocation>>,
-    latitude: f64,
-    longitude: f64,
-) -> Result<(), String> {
+async fn set_user_coordinates(state: State<'_, Mutex<UserLocation>>, latitude: f64, longitude: f64,) -> Result<(), String> {
     let mut loc = state.lock().await;
     loc.latitude = latitude;
     loc.longitude = longitude;
@@ -335,11 +327,7 @@ async fn set_user_coordinates(
 }
 
 #[tauri::command]
-async fn set_notification_service(
-    app_handle: tauri::AppHandle,
-    enabled: bool,
-    lead_minutes: Option<u32>,
-) -> Result<(), String> {
+async fn set_notification_service(app_handle: tauri::AppHandle, enabled: bool, lead_minutes: Option<u32>,) -> Result<(), String> {
     user_utils::set_notification_service(app_handle, enabled, lead_minutes)
         .await
         .map_err(|e| format!("Failed to set notification service: {}", e))?;
@@ -347,10 +335,7 @@ async fn set_notification_service(
 }
 
 #[tauri::command]
-async fn set_notification_lead_time(
-    app_handle: tauri::AppHandle,
-    lead_minutes: u32,
-) -> Result<(), String> {
+async fn set_notification_lead_time(app_handle: tauri::AppHandle, lead_minutes: u32,) -> Result<(), String> {
     user_utils::set_notification_lead_time(app_handle, lead_minutes)
         .await
         .map_err(|e| format!("Failed to set notification lead time: {}", e))
@@ -358,11 +343,7 @@ async fn set_notification_lead_time(
 
 // ai assistant comands //
 #[tauri::command]
-async fn process_ai_message(
-    app_handle: AppHandle,
-    query: String,
-    conversation_history: String,
-) -> Result<String, String> {
+async fn process_ai_message(app_handle: AppHandle, query: String, conversation_history: String,) -> Result<String, String> {
     let parsed_history: Option<Vec<ConversationMessage>> = if conversation_history.is_empty() {
         None
     } else {
@@ -391,46 +372,38 @@ async fn process_ai_message(
     }
 }
 
-// Tauri command to enrich calendar event
+// Tauri command to generate AI email //
+#[tauri::command]
+async fn generate_ai_email(app_handle: tauri::AppHandle, event_json: String, email_topic: String, participants: Vec<String>) -> Result<String, String> {
+    let event: CalendarEvent = serde_json::from_str(&event_json).map_err(|e| format!("Failed to parse event: {}", e))?;
+    let service = AISmartFeaturesService::new();
+    let response = service.generate_email(&app_handle, event, email_topic, participants).await?;
+    serde_json::to_string(&response).map_err(|e| format!("Failed to serialize response: {}", e))
+}
+
+// Tauri command to enrich calendar event //
 #[tauri::command]
 async fn enrich_event(app_handle: AppHandle, event_json: String) -> Result<String, String> {
-    let event: CalendarEvent =
-        serde_json::from_str(&event_json).map_err(|e| format!("Failed to parse event: {}", e))?;
-    let service = AIEnrichmentService::new();
+    let event: CalendarEvent = serde_json::from_str(&event_json).map_err(|e| format!("Failed to parse event: {}", e))?;
+    let service = AISmartFeaturesService::new();
     let response = service.enrich_event(&app_handle, event).await?;
     serde_json::to_string(&response).map_err(|e| format!("Failed to serialize response: {}", e))
 }
 
-// Tauri command to handle AI enrichment follow-up
+// Tauri command to handle AI enrichment follow-up //
 #[tauri::command]
-async fn enrichment_followup(
-    app_handle: AppHandle,
-    event_json: String,
-    user_additional_info: String,
-    clarification_history: Option<String>,
-) -> Result<String, String> {
-    let event: CalendarEvent =
-        serde_json::from_str(&event_json).map_err(|e| format!("Failed to parse event: {}", e))?;
-    let service = AIEnrichmentService::new();
-    let response = service
-        .enrichment_followup(
-            &app_handle,
-            event,
-            user_additional_info,
-            clarification_history,
-        )
-        .await?;
+async fn enrichment_followup(app_handle: AppHandle, event_json: String, user_additional_info: String, clarification_history: Option<String>,) -> Result<String, String> {
+    let event: CalendarEvent = serde_json::from_str(&event_json).map_err(|e| format!("Failed to parse event: {}", e))?;
+    let service = AISmartFeaturesService::new();
+    let response = service.enrichment_followup(&app_handle, event, user_additional_info, clarification_history,).await?;
     serde_json::to_string(&response).map_err(|e| format!("Failed to serialize response: {}", e))
 }
 
 #[tauri::command]
 async fn save_event_from_ai(event_json: String, app_handle: AppHandle) -> Result<(), String> {
-    let event: crate::database_utils::CalendarEvent =
-        serde_json::from_str(&event_json).map_err(|e| format!("Failed to parse event: {}", e))?;
+    let event: crate::database_utils::CalendarEvent = serde_json::from_str(&event_json).map_err(|e| format!("Failed to parse event: {}", e))?;
 
-    database_utils::save_event(&app_handle, serde_json::to_string(&event).unwrap())
-        .await
-        .map_err(|e| format!("Failed to save event: {}", e))
+    database_utils::save_event(&app_handle, serde_json::to_string(&event).unwrap()).await.map_err(|e| format!("Failed to save event: {}", e))
 }
 
 #[tauri::command]
@@ -471,13 +444,7 @@ async fn delete_all_events(app_handle: tauri::AppHandle) -> Result<usize, String
     };
 
     // Mark all events as deleted
-    let result = conn
-        .execute(
-            "UPDATE events SET deleted = TRUE WHERE user_id = ?",
-            [&user_id],
-        )
-        .map_err(|e| e.to_string())?;
-
+    let result = conn.execute("UPDATE events SET deleted = TRUE WHERE user_id = ?", [&user_id],).map_err(|e| e.to_string())?;
     Ok(result as usize)
 }
 
@@ -489,10 +456,7 @@ async fn start_auto_login(app_handle_arc: Arc<AppHandle>) -> Result<bool, String
     };
 
     // Emit login status to frontend
-    app_handle_arc
-        .emit("auto-login-completed", login_success)
-        .ok();
-
+    app_handle_arc.emit("auto-login-completed", login_success).ok();
     Ok(login_success)
 }
 
@@ -508,9 +472,7 @@ async fn start_notification_service(app_handle_arc: Arc<AppHandle>, user_logged_
 
     // Always create and start a new service
     let service = NotificationService::new();
-    service
-        .start(Arc::clone(&app_handle_arc), user_logged_in)
-        .await;
+    service.start(Arc::clone(&app_handle_arc), user_logged_in).await;
     *service_guard = Some(service);
     Ok(())
 }
@@ -722,6 +684,7 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
             run_oauth2_flow,
             schedule_event_notification,
             process_ai_message,
+            generate_ai_email,
             enrich_event,
             enrichment_followup,
             save_event_from_ai,
