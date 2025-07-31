@@ -27,7 +27,7 @@
       <span v-if="emailError" class="error">{{ emailError }}</span>
       <button @click="addParticipant" id="participants-btn">Add</button>
       <section id="ai-responce-container">
-        <MiniAiChat :clarifyingQuestion="'Write an email to participants based on event description or notify you will be late.'" @answered="handleEmailAi" :disabled="!hasParticipants"/>
+        <MiniAiChat :clarifyingQuestion="'Write a topic for the email'" @answered="handleEmailAi" :disabled="!hasParticipants"/>
         <section v-if="emailAiLoading" id="loading-screen">
           <div id="loader"></div>
           <span>generateing email...</span>
