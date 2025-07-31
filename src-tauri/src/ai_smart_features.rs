@@ -13,7 +13,7 @@ use tauri::{AppHandle, Manager};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AISmartFeaturesResponse {
-    pub response_text: String,
+    pub response_text: Option<String>,
     pub event_type: Option<String>,
     pub location: Option<String>,
     pub time: Option<String>,

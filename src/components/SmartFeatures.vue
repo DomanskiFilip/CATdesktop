@@ -324,6 +324,7 @@ async function handleEmailAi(answer: string) {
     })
     // Parse and set the response text as the email content
     const parsed = JSON.parse(response as string)
+    console.log('AI Email Response:', parsed)
     emailSubject.value = parsed.email_subject || ''
     emailContent.value = parsed.response_text || ''
   await nextTick()
@@ -359,11 +360,15 @@ async function sendEmail() {
     `?subject=${encodeURIComponent(emailSubject.value)}` +
     `&body=${encodeURIComponent(emailContent.value)}`
 
-  // Open user's default email client
-  window.open(mailto, '_blank')
-
+  // Use location.href for Android, window.open for desktop
+  if (/android/i.test(navigator.userAgent)) {
+    emailSuccess.value = 'feature not supported on this platform for now'
+  } else {
+    window.open(mailto, '_blank')
+    emailSuccess.value = 'Email client opened!'
+  }
   isSending.value = false
-  emailSuccess.value = 'Email client opened!'
+  
 }
 
 // == watchers and computed properties == //
