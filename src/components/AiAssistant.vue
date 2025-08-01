@@ -208,6 +208,18 @@ const processQuery = async (message: string) => {
     return aiResponse;
   } catch (error) {
     console.error("Error in processQuery:", error);
+
+    // Check if the error message starts with the rate limit emoji
+    const errorString = error instanceof Error ? error.message : String(error);
+    if (errorString.startsWith('🚫')) {
+      return {
+        response_text: errorString,
+        action_taken: "none",
+        extracted_events: [],
+        confidence: 0.0
+      };
+    }
+    
     return {
       response_text: "I'm sorry, I encountered an error processing your request.",
       action_taken: "none",

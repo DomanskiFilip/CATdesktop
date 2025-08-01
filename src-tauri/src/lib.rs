@@ -365,10 +365,51 @@ async fn process_ai_message(app_handle: AppHandle, query: String, conversation_h
             // Ensure we're returning valid, clean JSON
             match serde_json::to_string(&response) {
                 Ok(json_string) => Ok(json_string),
-                Err(e) => Err(format!("Failed to serialize response: {}", e)),
+                Err(e) => {
+                    // If serialization fails, return a fallback response
+                    let fallback_response = crate::ai_assistant::LLMResponse {
+                        response_text: format!("Failed to serialize response: {}", e),
+                        extracted_events: None,
+                        action_taken: Some("none".to_string()),
+                        confidence: Some(0.0),
+                        remaining_requests: None,
+                    };
+                    match serde_json::to_string(&fallback_response) {
+                        Ok(fallback_json) => Ok(fallback_json),
+                        Err(_) => Err(format!("Critical serialization error: {}", e)),
+                    }
+                }
             }
         }
-        Err(e) => Err(format!("Failed to process AI message: {}", e)),
+        Err(e) => {
+            // Check if this is a rate limit error and create a proper LLMResponse
+            if e.contains("Daily AI request limit exceeded") || e.contains("rate limit") {
+                let rate_limit_response = crate::ai_assistant::LLMResponse {
+                    response_text: format!("🚫 {}", e),
+                    extracted_events: None,
+                    action_taken: Some("none".to_string()),
+                    confidence: Some(1.0),
+                    remaining_requests: Some(0),
+                };
+                match serde_json::to_string(&rate_limit_response) {
+                    Ok(json_string) => Ok(json_string),
+                    Err(serialize_err) => Err(format!("Failed to serialize rate limit response: {}", serialize_err)),
+                }
+            } else {
+                // For other errors, create a generic error response
+                let error_response = crate::ai_assistant::LLMResponse {
+                    response_text: "I'm sorry, I encountered an error processing your request.".to_string(),
+                    extracted_events: None,
+                    action_taken: Some("none".to_string()),
+                    confidence: Some(0.0),
+                    remaining_requests: None,
+                };
+                match serde_json::to_string(&error_response) {
+                    Ok(json_string) => Ok(json_string),
+                    Err(serialize_err) => Err(format!("Failed to serialize error response: {}", serialize_err)),
+                }
+            }
+        }
     }
 }
 

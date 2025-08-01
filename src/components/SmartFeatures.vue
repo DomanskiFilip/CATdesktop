@@ -324,13 +324,20 @@ async function handleEmailAi(answer: string) {
     })
     // Parse and set the response text as the email content
     const parsed = JSON.parse(response as string)
-    console.log('AI Email Response:', parsed)
-    emailSubject.value = parsed.email_subject || ''
-    emailContent.value = parsed.response_text || ''
-  await nextTick()
-    const emailContentEl = document.getElementById('email-content')
-    if (emailContentEl) {
-      emailContentEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    // Check if this is a rate limit or error response
+    if (parsed.response_text && parsed.response_text.startsWith('🚫')) {
+      emailAiError.value = parsed.response_text
+      emailSubject.value = ''
+      emailContent.value = ''
+    } else {
+      // Normal response - set email content
+      emailSubject.value = parsed.email_subject || ''
+      emailContent.value = parsed.response_text || ''
+    await nextTick()
+      const emailContentEl = document.getElementById('email-content')
+      if (emailContentEl) {
+        emailContentEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
     }
   } catch (err) {
     emailAiError.value = 'Failed to generate email content.'

@@ -27,6 +27,7 @@ pub struct LLMResponse {
     pub extracted_events: Option<Vec<ExtractedEvent>>,
     pub action_taken: Option<String>,
     pub confidence: Option<f64>,
+    pub remaining_requests: Option<i32>, 
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,7 +86,7 @@ impl AIAssistantService {
         Ok(llm_response)
     }
 
-    fn get_canned_response(&self, query: &str) -> Option<LLMResponse> {
+        fn get_canned_response(&self, query: &str) -> Option<LLMResponse> {
         let lowercase_query = query.to_lowercase();
         let normalized_query = lowercase_query.trim();
         let mut rng = rand::rng();
@@ -106,6 +107,7 @@ impl AIAssistantService {
                     extracted_events: None,
                     action_taken: Some("none".to_string()),
                     confidence: Some(1.0),
+                    remaining_requests: None,
                 })
             },
             "what can you do" | "what can you do?" | "help" | "what are your features" => {
@@ -114,6 +116,7 @@ impl AIAssistantService {
                     extracted_events: None,
                     action_taken: Some("none".to_string()),
                     confidence: Some(1.0),
+                    remaining_requests: None,
                 })
             },
             _ => None,
@@ -187,8 +190,6 @@ impl AIAssistantService {
             "user_query": query,
         });
 
-        println!("📝 Prompt: {}", prompt_json);
-
         Ok(prompt_json)
     }
 
@@ -208,6 +209,7 @@ impl AIAssistantService {
                             extracted_events: None,
                             action_taken: None,
                             confidence: None,
+                            remaining_requests: None,
                         });
                     }
                 }
@@ -225,6 +227,7 @@ impl AIAssistantService {
                             extracted_events: None,
                             action_taken: Some("none".to_string()),
                             confidence: None,
+                            remaining_requests: None,
                         });
                     }
                 }
@@ -242,6 +245,7 @@ impl AIAssistantService {
             prompt_with_token["deviceInfo"] = device_info;
             prompt_with_token["email"] = serde_json::json!(user_id);
         }
+        
         let resp = client
             .post(&url)
             .header("Content-Type", "application/json")
@@ -250,17 +254,34 @@ impl AIAssistantService {
             .await
             .map_err(|e| format!("Failed to call Lambda: {}", e))?;
 
-        let text = resp
-            .text()
-            .await
-            .map_err(|e| format!("Failed to read Lambda response: {}", e))?;
+        let text = resp.text().await.map_err(|e| format!("Failed to read Lambda response: {}", e))?;
 
         // Parse Lambda response for status_code
         let mut lambda_resp: LambdaResponse = serde_json::from_str(&text)
             .map_err(|e| format!("Failed to parse Lambda response: {}", e))?;
 
-        println!("🔍 Raw Lambda response: {}", lambda_resp.body);
+        if lambda_resp.status_code == 429 {
+            // Handle rate limiting
+            let rate_limit_error: serde_json::Value = serde_json::from_str(&lambda_resp.body)
+                .map_err(|e| format!("Failed to parse rate limit response: {}", e))?;
+            
+            let error_message = rate_limit_error["message"]
+                .as_str()
+                .unwrap_or("Daily AI request limit exceeded. You can make 25 requests per day. Please try again tomorrow. :3 😽");
+            
+            let remaining_requests = rate_limit_error["remaining_requests"]
+                .as_i64()
+                .unwrap_or(0) as i32;
 
+            return Ok(LLMResponse {
+                response_text: format!("🚫 {}", error_message),
+                extracted_events: None,
+                action_taken: Some("none".to_string()),
+                confidence: Some(1.0),
+                remaining_requests: Some(remaining_requests),
+            });
+        }
+        
         // If access token is rejected (status_code 401), try auto-login
         if lambda_resp.status_code == 401 {
             // Try auto-login to refresh tokens
@@ -279,9 +300,34 @@ impl AIAssistantService {
                         .send()
                         .await
                         .map_err(|e| format!("Failed to call Lambda after auto-login: {}", e))?;
+                    
+                    let retry_status = retry_resp.status();
                     let retry_text = retry_resp.text().await.map_err(|e| {
                         format!("Failed to read Lambda response after auto-login: {}", e)
                     })?;
+
+                    // Check for rate limiting on retry as well
+                    if retry_status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                        let rate_limit_error: serde_json::Value = serde_json::from_str(&retry_text)
+                            .map_err(|e| format!("Failed to parse rate limit response on retry: {}", e))?;
+                        
+                        let error_message = rate_limit_error["message"]
+                            .as_str()
+                            .unwrap_or("Daily AI request limit exceeded. You can make 25 requests per day. Please try again tomorrow. :3 😽");
+                        
+                        let remaining_requests = rate_limit_error["remaining_requests"]
+                            .as_i64()
+                            .unwrap_or(0) as i32;
+
+                        return Ok(LLMResponse {
+                            response_text: format!("🚫 {}", error_message),
+                            extracted_events: None,
+                            action_taken: Some("none".to_string()),
+                            confidence: Some(1.0),
+                            remaining_requests: Some(remaining_requests),
+                        });
+                    }
+
                     lambda_resp = serde_json::from_str(&retry_text).map_err(|e| {
                         format!("Failed to parse Lambda response after auto-login: {}", e)
                     })?;
