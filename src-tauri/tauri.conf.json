@@ -17,6 +17,7 @@
         "height": 680,
         "resizable": true,
         "decorations": false,
+        "titleBarStyle": "Overlay",
         "transparent": false,
         "fullscreen": false,
         "devtools": true
