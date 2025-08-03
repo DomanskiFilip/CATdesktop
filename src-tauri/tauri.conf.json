@@ -41,9 +41,12 @@
       "frameworks": [],
       "minimumSystemVersion": "",
       "exceptionDomain": "",
-      "signingIdentity": null,
+      "signingIdentity": "Developer: DomanskiFilip",
       "providerShortName": null,
       "entitlements": null
+    },
+    "iOS": {
+      "developmentTeam": "DomanskiFilip"
     }
   }
 }
