@@ -7,7 +7,7 @@ use oauth2::{
     basic::BasicClient, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken,
     PkceCodeChallenge, RedirectUrl, Scope, TokenResponse, TokenUrl,
 };
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use open;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -36,7 +36,7 @@ pub struct GoogleTokenExtraFields {
     pub id_token: Option<String>,
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String, String> {
     let client_id = ClientId::new(
         "99017034100-stfl2943ef0lnp7c36upsqrstaub49ns.apps.googleusercontent.com".to_string(),
@@ -168,7 +168,7 @@ pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String,
     Ok(access_token)
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn oauth2_flow(_app_handle: &AppHandle, _timeout: u64) -> Result<String, String> {
     Err("Google OAuth is not supported on Android in this build.".to_string())
 }

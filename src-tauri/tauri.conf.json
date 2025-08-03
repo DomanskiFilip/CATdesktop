@@ -35,7 +35,13 @@
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
-      "icons/icon.ico"
+      "icons/icon.ico",
+      "icons/ios/icon-20.png",
+      "icons/ios/icon-29.png",
+      "icons/ios/icon-40.png",
+      "icons/ios/icon-60.png",
+      "icons/ios/icon-76.png",
+      "icons/ios/icon-1024.png"
     ],
     "macOS": {
       "frameworks": [],
@@ -46,7 +52,8 @@
       "entitlements": null
     },
     "iOS": {
-      "developmentTeam": "DomanskiFilip"
+      "developmentTeam": "${IOS_DEVELOPMENT_TEAM}",
+      "minimumSystemVersion": "18.6"
     }
   }
 }

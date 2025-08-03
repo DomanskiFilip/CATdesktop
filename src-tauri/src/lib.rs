@@ -21,16 +21,16 @@ use crate::database_utils::CalendarEvent;
 use crate::google_sync_service::GoogleSyncService;
 use crate::notification_service::NotificationService;
 use crate::weather_service::get_weekly_weather;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use auto_launch::AutoLaunchBuilder;
 use base64::Engine;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::sync::Arc;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri::menu::{Menu, MenuItem};
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex;
@@ -95,7 +95,7 @@ async fn set_tokens_for_autologin(tokens_json: String) {
     println!("Tokens set for autologin: {:?}", tokens_json);
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 async fn read_tokens_from_cache() -> Option<(String, String, Option<[u8; 32]>)> {
     let cache = TOKEN_CACHE.lock().await;
     let access_token = cache.access_token.clone().unwrap_or_default();
@@ -295,7 +295,7 @@ fn get_oauth_timeout() -> u64 {
 }
 
 // Setup auto-launch command
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 #[allow(dead_code)]
 async fn setup_auto_launch() -> Result<(), String> {
@@ -503,6 +503,15 @@ async fn start_auto_login(app_handle_arc: Arc<AppHandle>) -> Result<bool, String
 
 // Start notification service //
 async fn start_notification_service(app_handle_arc: Arc<AppHandle>, user_logged_in: bool,) -> Result<(), String> {
+    // Skip on iOS if there are issues
+    #[cfg(target_os = "ios")]
+    {
+        if !user_logged_in {
+            println!("iOS: Skipping notification service - user not logged in");
+            return Ok(());
+        }
+    }
+
     let notification_state = app_handle_arc.state::<NotificationServiceState>();
     let mut service_guard = notification_state.lock().await;
 
@@ -637,7 +646,7 @@ async fn trigger_sync(app_handle: tauri::AppHandle) -> Result<(), String> {
 }
 
 // Create system tray
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn create_system_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
@@ -737,23 +746,40 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
             set_notification_lead_time,
         ])
         .setup(|app| {
-            // Initialize database on app startup
-            database_utils::init_db(&app.handle()).map_err(|e| e.to_string())?;
+            // Initialize database with iOS-specific error handling
+            #[cfg(target_os = "ios")]
+            {
+                match database_utils::init_db(&app.handle()) {
+                    Ok(_) => println!("iOS: Database initialized successfully"),
+                    Err(e) => {
+                        eprintln!("iOS: Database initialization failed (non-critical): {}", e);
+                        // Don't fail the app startup
+                    }
+                }
+            }
+            
+            #[cfg(not(target_os = "ios"))]
+            {
+                match database_utils::init_db(&app.handle()) {
+                    Ok(_) => println!("Database initialized successfully"),
+                    Err(e) => {
+                        eprintln!("Database initialization failed: {}", e);
+                        // Don't return error immediately, let the app continue
+                    }
+                }
+            }
 
-            // Create system tray
-            #[cfg(not(target_os = "android"))]
+            // iOS-specific setup
+            #[cfg(target_os = "ios")]
+            {
+                std::env::set_var("RUST_BACKTRACE", "1");
+                std::env::set_var("RUST_LOG", "debug");
+            }
+            
+            // Create system tray (desktop only)
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             create_system_tray(&app.handle())?;
 
-            // Initialize notification service state
-            app.manage(
-                Arc::new(Mutex::new(None::<NotificationService>)) as NotificationServiceState
-            );
-
-            // Initialize database sync service state
-            app.manage(Arc::new(Mutex::new(None::<DbSyncService>)) as DbSyncServiceState);
-
-            // Initialize google sync service state
-            app.manage(Arc::new(Mutex::new(None::<GoogleSyncService>)) as GoogleSyncServiceState);
             Ok(())
         })
         .build(tauri::generate_context!())?
@@ -762,36 +788,63 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
                 let app_handle_owned = app_handle.clone();
                 tauri::async_runtime::spawn(async move {
                     let app_handle_arc = Arc::new(app_handle_owned);
-                    // Start auto-login
-                    let login_success = start_auto_login(Arc::clone(&app_handle_arc))
-                        .await
-                        .unwrap_or(false);
+                    
+                    // Start auto-login with timeout
+                    let login_success = {
+                        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                        {
+                            match tokio::time::timeout(
+                                std::time::Duration::from_secs(5), // Reduce timeout
+                                start_auto_login(Arc::clone(&app_handle_arc))
+                            ).await {
+                                Ok(Ok(success)) => success,
+                                Ok(Err(e)) => {
+                                    eprintln!("Auto-login failed: {}", e);
+                                    false
+                                }
+                                Err(_) => {
+                                    eprintln!("Auto-login timeout");
+                                    false
+                                }
+                            }
+                        }
+                        #[cfg(any(target_os = "android", target_os = "ios"))]
+                        {
+                            // Completely skip auto-login on iOS to prevent crashes
+                            println!("iOS: Skipping auto-login entirely");
+                            let _ = app_handle_arc.emit("auto-login-completed", false);
+                            false
+                        }
+                    };
 
-                    // Start notification service
-                    if let Err(e) =
-                        start_notification_service(Arc::clone(&app_handle_arc), login_success).await
-                    {
-                        eprintln!("Failed to start notification service: {}", e);
+                    // Add delays between service starts
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await; 
+
+                    // Start notification service with error handling
+                    match start_notification_service(Arc::clone(&app_handle_arc), login_success).await {
+                        Ok(_) => println!("Notification service started successfully"),
+                        Err(e) => eprintln!("Failed to start notification service: {}", e),
                     }
 
-                    // Start database sync service using a connection pool or other thread-safe approach
-                    if let Err(e) =
-                        start_database_sync_service(Arc::clone(&app_handle_arc), login_success)
-                            .await
-                    {
-                        eprintln!("Failed to start database sync service: {}", e);
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+                    // Start database sync service with error handling
+                    match start_database_sync_service(Arc::clone(&app_handle_arc), login_success).await {
+                        Ok(_) => println!("Database sync service started successfully"),
+                        Err(e) => eprintln!("Failed to start database sync service: {}", e),
                     }
 
-                    // Start google sync service using a connection pool or other thread-safe approach
-                    if let Err(e) =
-                        start_google_sync_service(Arc::clone(&app_handle_arc), login_success).await
-                    {
-                        eprintln!("Failed to start google sync service: {}", e);
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+                    // Start google sync service with error handling
+                    match start_google_sync_service(Arc::clone(&app_handle_arc), login_success).await {
+                        Ok(_) => println!("Google sync service started successfully"),
+                        Err(e) => eprintln!("Failed to start google sync service: {}", e),
                     }
                 });
             }
             tauri::RunEvent::WindowEvent { label, event, .. } => {
-                #[cfg(not(target_os = "android"))]
+                #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         // Hide the window instead of closing it

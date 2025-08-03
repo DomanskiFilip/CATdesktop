@@ -1,9 +1,9 @@
 use crate::api_utils::{get_device_info, AppConfig};
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 use crate::read_tokens_from_cache;
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 use crate::token_utils::save_tokens_to_file;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::token_utils::{read_tokens_from_file, save_tokens_to_file};
 use crate::user_utils::save_current_user_id;
 use reqwest::Client;
@@ -30,7 +30,7 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
     let device_info = get_device_info(&app_handle);
 
     // Read tokens from file
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     let (access_token, refresh_token, database_token) = match crate::read_tokens_from_cache().await
     {
         Some(tokens) => tokens,
@@ -40,7 +40,7 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
         }
     };
 
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let (access_token, refresh_token, database_token) =
         match read_tokens_from_file(&app_handle).await {
             Ok(tokens) => tokens,

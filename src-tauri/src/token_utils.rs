@@ -1,10 +1,10 @@
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 use base64::Engine;
 use rand::Rng;
 use std::fs;
 use tauri::{AppHandle, Manager};
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::encryption_utils::get_encryption_key;
 
 fn get_tokens_path(app_handle: &AppHandle) -> Result<std::path::PathBuf, String> {
@@ -22,7 +22,7 @@ fn generate_nonce() -> [u8; 12] {
     nonce
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn save_tokens_to_file(
     app_handle: &AppHandle,
     access_token: &str,
@@ -63,7 +63,7 @@ pub async fn save_tokens_to_file(
     Ok(())
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn read_tokens_from_file(
     app_handle: &AppHandle,
 ) -> Result<(String, String, Option<[u8; 32]>), String> {
@@ -110,7 +110,7 @@ pub async fn read_tokens_from_file(
 }
 
 // On Android/iOS, use the plugin from JS/TS, not Rust!
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn save_tokens_to_file(
     _: &AppHandle,
     _: &str,
@@ -121,7 +121,7 @@ pub async fn save_tokens_to_file(
     Ok(())
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn read_tokens_from_file(
     _: &AppHandle,
 ) -> Result<(String, String, Option<[u8; 32]>), String> {
