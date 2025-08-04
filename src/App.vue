@@ -73,7 +73,11 @@
         <Themes />
         <Notifications />
         <Location @updateCoordinates="handleLocationUpdate" @updateLocationName="handleLocationNameUpdate" />
-        <Oauth />
+        <h3>Connect:</h3>
+        <section id="oauth-section">
+            <Oauth providerName="Google"/>
+            <Oauth providerName="Outlook"/>
+        </section>
       </section>
     </section>
   </section>
@@ -424,6 +428,15 @@ stroke: var(--color-dark);
  height: 100%;
  background-color: var(--color-main);
  padding: 1rem;
+}
+
+.content-section h3 {
+    margin-left: 0.5rem;
+}
+
+#oauth-section {
+  display: flex;
+  flex-direction: row;
 }
 
 #theme-background-element {

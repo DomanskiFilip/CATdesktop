@@ -1,11 +1,12 @@
 <template>
-  <h2>connect your account:</h2>
   <section>
     <button v-if="!loggedIn" @click="checkOAuthAndLoad" :disabled="authenticating">
-      login with <img src="@/assets/google-2025-g-logo.webp" alt="Google Logo" class="google-logo"/>
+      Login with
+      <img  v-if="providerName === 'Google'" src="../assets/google-2025-g-logo.webp" alt="Google Logo" class="oauth-logo"/>
+      <img v-else-if="providerName === 'Outlook'"  src="../assets/outlook-logo.webp" alt="Outlook Logo" class="oauth-logo"/>
     </button>
     <div v-if="authenticating && timer > 0">
-      Authenticating with google ...
+      Authenticating with {{ providerName }}...
       Time left: {{ timer }} seconds
     </div>
     <div id="endpoint" v-html="message"></div>
@@ -13,11 +14,21 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, defineProps } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 
+// Props for customization
+const props = defineProps({
+  providerName: {
+    type: String,
+    required: true,
+    default: 'Google', // Default to Google
+  },
+})
+
+const providerName = props.providerName
 const message = ref('')
-const timer = ref(0)
+const timer = ref(0) // Timer will be set dynamically
 const authenticating = ref(false)
 let interval: number | undefined
 const oauthFinished = ref(false)
@@ -28,50 +39,36 @@ async function checkOAuthAndLoad() {
   authenticating.value = true
   oauthFinished.value = false
 
-  // Fetch timeout from backend
-  timer.value = await invoke<number>('get_oauth_timeout')
-
-  // Start countdown timer
-  interval = window.setInterval(() => {
-    if (timer.value > 0) {
-      timer.value--
-    } else {
-      clearInterval(interval)
-      if (!oauthFinished.value) {
-        authenticating.value = false
-        message.value = 'OAuth failed or cancelled. Please try again.'
-      }
-    }
-  }, 1000)
-
-  // Start OAuth process in parallel with timer
   try {
-    const oauthResult = await invoke<string>('run_oauth2_flow')
+    // Fetch the timeout dynamically from the backend
+    timer.value = await invoke<number>('get_oauth_timeout')
+
+    // Start countdown timer
+    interval = window.setInterval(() => {
+      if (timer.value > 0) {
+        timer.value--
+      } else {
+        clearInterval(interval)
+        if (!oauthFinished.value) {
+          authenticating.value = false
+          message.value = `${providerName} OAuth failed or cancelled. Please try again.`
+        }
+      }
+    }, 1000)
+
+    // Determine the OAuth flow function based on the provider
+    const oauthFlowFunction =
+      providerName === 'Google' ? 'run_oauth2_flow' : 'run_outlook_oauth2_flow'
+
+    // Start OAuth process in parallel with timer
+    const oauthResult = await invoke<string>(oauthFlowFunction)
     if (!oauthFinished.value) {
       oauthFinished.value = true
       authenticating.value = false
       clearInterval(interval)
       if (oauthResult) {
-        message.value = '<span>OAuth successful!</span>'
-        const body = await invoke<string>('fetch_lambda_endpoint')
-        if (!body) throw new Error('No data returned')
-        const outer = JSON.parse(body)
-        const response = typeof outer.body === 'string' ? JSON.parse(outer.body) : outer.body
-        if (response.status === 'ok') {
-          // Replace the message, removing "Loading data..."
-          let msg = `<span>OAuth successful!</span><span>Lambda connection: ${response.message}</span>`
-          if (Array.isArray(response.items)) {
-            response.items.forEach((item: any) => {
-              msg += `<span>id: ${item.id}, text: ${item.text}</span>`
-            })
-          } else {
-            msg += 'No items found.'
-          }
-          message.value = msg
-          loggedIn.value = true
-        } else {
-          message.value = `<span>OAuth successful!</span>Lambda error: ${response.message || 'Unknown error'}`
-        }
+        message.value = `<span>${providerName} OAuth successful!</span>`
+        loggedIn.value = true
       }
     }
   } catch (err) {
@@ -79,7 +76,7 @@ async function checkOAuthAndLoad() {
       oauthFinished.value = true
       authenticating.value = false
       clearInterval(interval)
-      message.value = 'OAuth failed or cancelled. Please try again.'
+      message.value = `${providerName} OAuth failed or cancelled. Please try again.`
     }
   }
 }
@@ -122,7 +119,7 @@ button:hover {
   align-items: center;
   margin-top: 1rem;
 }
-.google-logo {
+.oauth-logo {
   width: 24px;
   height: 24px;
   vertical-align: middle;
