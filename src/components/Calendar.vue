@@ -9,7 +9,7 @@
             </li>
           </ul>
         </h2>
-        <button v-if="currentDate.getMonth() !== (new Date()).getMonth() || currentDate.getFullYear() !== (new Date()).getFullYear()" @click="currentDate = new Date(); renderCalendar();"> Back to current month</button>
+        <button v-if="currentDate.getMonth() !== (new Date()).getMonth() || currentDate.getFullYear() !== (new Date()).getFullYear()" @click="currentDate = new Date(); renderCalendar();" style="color: var(--color--text)"> Back to current month</button>
         <button @click="previousMonth"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M480-528 296-344l-56-56 240-240 240 240-56 56-184-184Z"/></svg></button>
         <button @click="nextMonth"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="M480-344 240-584l56-56 184 184 184-184 56 56-240 240Z"/></svg></button>
       </section>
@@ -405,7 +405,6 @@ const closeSmartFeatures = () => {
 }
 
 // Open/close recurrence dropdown and toggle recurrence
-// Open/close recurrence dropdown and toggle recurrence
 const reocuringEvents = (hour: number) => {
   // If dropdown is already open for this hour, close it
   if (recurrenceDropdown.value.visible && recurrenceDropdown.value.hour === hour) {
@@ -577,8 +576,10 @@ const updateEventDescription = async (event: Event, hour: number) => {
       alarm: false,
       synced: false,
       synced_google: false,
+      synced_outlook: false,
       deleted: false,
       recurrence: null,
+      participants: [],
     };
     events.value.push(newEvent);
     saveEvent(newEvent);

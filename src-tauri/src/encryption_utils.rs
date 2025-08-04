@@ -15,7 +15,7 @@ pub fn encrypt_user_data_base(
     let key = Key::from_slice(&key);
     let cipher = ChaCha20Poly1305::new(key);
     let mut nonce_bytes = [0u8; 12];
-    rand::thread_rng().fill_bytes(&mut nonce_bytes);
+    rand::rng().fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
     let ciphertext = cipher
         .encrypt(nonce, data)

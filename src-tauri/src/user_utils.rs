@@ -36,7 +36,7 @@ pub fn save_current_user_id(app_handle: &AppHandle, user_id: &str) -> Result<(),
     let cipher = ChaCha20Poly1305::new(key);
 
     let mut nonce_bytes = [0u8; 12];
-    rand::thread_rng().fill_bytes(&mut nonce_bytes);
+    rand::rng().fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
 
     let encrypted = cipher

@@ -9,6 +9,7 @@ pub struct AppConfig {
     pub lambda_base_url: String,
     pub enable_database_sync: bool,
     pub enable_google_sync: bool,
+    pub enable_outlook_sync: bool,
     pub notification_service: bool,
 }
 
@@ -20,6 +21,7 @@ impl AppConfig {
 
         let enable_database_sync = false;
         let enable_google_sync = false;
+        let enable_outlook_sync = false;
         let notification_service = match fs::read_to_string("settings.json") {
             Ok(content) => serde_json::from_str::<UserSettings>(&content)
                 .map(|s| s.notification_service)
@@ -31,6 +33,7 @@ impl AppConfig {
             lambda_base_url,
             enable_database_sync,
             enable_google_sync,
+            enable_outlook_sync,
             notification_service,
         })
     }

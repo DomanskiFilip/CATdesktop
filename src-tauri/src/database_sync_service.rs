@@ -174,7 +174,7 @@ impl DbSyncService {
                 .and_hms_opt(0, 0, 0)
                 .unwrap();
             let mut unsynced = conn.prepare(
-                "SELECT id, user_id, description, time, alarm, synced, synced_google, deleted, recurrence, participants FROM events 
+                "SELECT id, user_id, description, time, alarm, synced, synced_google, synced_outlook, deleted, recurrence, participants FROM events 
                 WHERE user_id = ? AND ((synced = 0) OR (deleted = 1 AND synced = 0)) AND time >= ?"
             ).map_err(|e| format!("Failed to prepare statement: {}", e))?;
 
@@ -370,6 +370,7 @@ impl DbSyncService {
                     "time": event.time.to_rfc3339(),
                     "alarm": event.alarm,
                     "synced_google": event.synced_google,
+                    "synced_outlook": event.synced_outlook,
                     "deleted": event.deleted,
                     "recurrence": event.recurrence.clone().unwrap_or_else(|| "none".to_string()),
                     "participants": event.participants.clone().unwrap_or_default()
@@ -540,6 +541,7 @@ impl DbSyncService {
                 "deleted": incoming_deleted,
                 "synced": event_data.get("synced").and_then(|v| v.as_bool()).unwrap_or(false),
                 "synced_google": event_data.get("synced_google").and_then(|v| v.as_bool()).unwrap_or(false),
+                "synced_outlook": event_data.get("synced_outlook").and_then(|v| v.as_bool()).unwrap_or(false),
                 "recurrence": event_data.get("recurrence").and_then(|v| v.as_str()).map(String::from),
                 "participants": participants_for_json.unwrap_or_default(),
             });

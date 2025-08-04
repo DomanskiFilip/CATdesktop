@@ -78,6 +78,7 @@ impl GoogleSyncService {
             while running.load(Ordering::SeqCst) {
                 interval.tick().await;
 
+                #[allow(unused_variables)]
                 let username = {
                     #[cfg(not(any(target_os = "android", target_os = "ios")))]
                     {
@@ -118,16 +119,13 @@ impl GoogleSyncService {
     }
 
     // Method to sync local events to Google Calendar (push unsynced_google events) //
-    pub async fn sync_to_google(
-        &self,
-        app_handle_arc: &Arc<AppHandle>,
-        user_logged_in: bool,
-    ) -> Result<(), String> {
+    pub async fn sync_to_google(&self, app_handle_arc: &Arc<AppHandle>, user_logged_in: bool,) -> Result<(), String> {
         if !user_logged_in {
             println!("User not logged in, skipping sync to Google.");
             return Ok(());
         }
 
+        #[allow(unused_variables)]
         let username = {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
@@ -201,7 +199,7 @@ impl GoogleSyncService {
                 .and_hms_opt(0, 0, 0)
                 .unwrap();
             let mut unsynced = conn.prepare(
-                "SELECT id, user_id, description, time, alarm, synced, synced_google, deleted, recurrence FROM events 
+                "SELECT id, user_id, description, time, alarm, synced, synced_google, synced_outlook, deleted, recurrence, participants FROM events 
                 WHERE user_id = ? AND ((synced_google = 0) OR (deleted = 1 AND synced_google = 0)) AND time >= ?"
             ).map_err(|e| format!("Failed to prepare statement: {}", e))?;
 
@@ -339,11 +337,25 @@ impl GoogleSyncService {
                 }
             }
 
-            // Now create the new event
+            let attendees: Vec<serde_json::Value> = event.participants
+                .as_ref()
+                .map(|participants| {
+                    participants.iter()
+                        .map(|email| {
+                            json!({
+                                "email": email,
+                                "responseStatus": "needsAction"
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
             let body = json!({
                 "summary": decrypted_description,
                 "start": { "dateTime": start_time.to_rfc3339() },
                 "end": { "dateTime": end_time.to_rfc3339() },
+                "attendees": attendees
             });
 
             let url = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
@@ -376,16 +388,13 @@ impl GoogleSyncService {
     }
 
     // Method to sync from Google Calendar to local DB (pull events) //
-    pub async fn sync_from_google(
-        &self,
-        app_handle_arc: &Arc<AppHandle>,
-        user_logged_in: bool,
-    ) -> Result<(), String> {
+    pub async fn sync_from_google(&self, app_handle_arc: &Arc<AppHandle>, user_logged_in: bool,) -> Result<(), String> {
         if !user_logged_in {
             println!("User not logged in, skipping sync from Google.");
             return Ok(());
         }
 
+        #[allow(unused_variables)]
         let username = {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
@@ -487,8 +496,6 @@ impl GoogleSyncService {
 
         let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
         if let Some(items) = json.get("items").and_then(|v| v.as_array()) {
-            let conn = get_db_connection(app_handle_arc)
-                .map_err(|e| format!("Database connection failed: {}", e))?;
             for item in items {
                 if let (Some(google_id), Some(summary), Some(start)) = (
                     item.get("id").and_then(|v| v.as_str()),
@@ -497,6 +504,24 @@ impl GoogleSyncService {
                         .and_then(|v| v.get("dateTime").or_else(|| v.get("date")))
                         .and_then(|v| v.as_str()),
                 ) {
+                    // Extract participants from Google Calendar attendees
+                    let participants: Option<Vec<String>> = item.get("attendees")
+                        .and_then(|attendees| attendees.as_array())
+                        .map(|attendees_array| {
+                            attendees_array.iter()
+                                .filter_map(|attendee| {
+                                    attendee.get("email").and_then(|email| email.as_str())
+                                })
+                                .map(String::from)
+                                .collect()
+                        });
+
+                    if participants.is_some() {
+                        println!("Processing Google event: {}", summary);
+                    } else {
+                        println!("Processing Google event without participants: {}", summary);
+                    }
+
                     // Parse event time as chrono::DateTime
                     if let Ok(event_time) = chrono::DateTime::parse_from_rfc3339(start) {
                         let today = chrono::Utc::now()
@@ -507,71 +532,49 @@ impl GoogleSyncService {
                             continue; // Skip past events
                         }
 
-                        // Check if there's any event at the same hour
-                        let event_hour_start = event_time
-                            .naive_utc()
-                            .date()
-                            .and_hms_opt(event_time.hour(), 0, 0)
-                            .unwrap_or_else(|| event_time.naive_utc());
-                        let event_hour_end = event_time
-                            .naive_utc()
-                            .date()
-                            .and_hms_opt(event_time.hour(), 59, 59)
-                            .unwrap_or_else(|| event_time.naive_utc());
+                        // Check for duplicates in a separate scope
+                        let should_skip = {
+                            let conn = get_db_connection(app_handle_arc)
+                                .map_err(|e| format!("Database connection failed: {}", e))?;
 
-                        let mut same_event_query = conn
-                            .prepare(
-                                "SELECT COUNT(*) FROM events 
-                          WHERE user_id = ?1 
-                          AND time >= ?2 
-                          AND time <= ?3 
-                          AND description = ?4
-                          AND deleted = 0",
-                            )
-                            .map_err(|e| format!("Failed to prepare same event check: {}", e))?;
+                            // Check if this Google event already exists locally
+                            let mut query = conn
+                                .prepare("SELECT COUNT(*) FROM events WHERE id = ?1 AND user_id = ?2")
+                                .map_err(|e| format!("Failed to prepare check statement: {}", e))?;
+                            let exists: i64 = query
+                                .query_row([google_id, &username], |row| row.get(0))
+                                .map_err(|e| format!("Failed to check for existing event: {}", e))?;
 
-                        let same_event_count: i64 = same_event_query
-                            .query_row(
-                                (
-                                    &username,
-                                    &event_hour_start.to_string(),
-                                    &event_hour_end.to_string(),
-                                    &summary,
-                                ),
-                                |row| row.get(0),
-                            )
-                            .map_err(|e| format!("Failed to check for same event: {}", e))?;
+                            exists > 0
+                        };
 
-                        if same_event_count > 0 {
-                            println!("Skipping Google event at {} as there's already a matching local event", 
-                                  event_time.format("%Y-%m-%d %H:%M:%S"));
-                            continue; // Skip if there's already a matching event
+                        if should_skip {
+                            continue; // Skip if already exists
+                        }
+
+                        // Create the event JSON
+                        let event_json = json!({
+                            "id": google_id,
+                            "user_id": username,
+                            "description": summary,
+                            "time": start,
+                            "alarm": false,
+                            "synced": false,
+                            "synced_google": true,
+                            "synced_outlook": false,
+                            "deleted": false,
+                            "recurrence": None::<String>,
+                            "participants": participants.unwrap_or_default(),
+                        });
+
+                        println!("Saving Google event '{}' to local database...", summary);
+                        let save_result = save_event(app_handle_arc, event_json.to_string()).await;
+                        if let Err(e) = save_result {
+                            eprintln!("Failed to save Google event '{}': {}", summary, e);
+                        } else {
+                            println!("✅ Successfully saved Google event '{}'", summary);
                         }
                     }
-
-                    // Check if this Google event already exists locally
-                    let mut query = conn
-                        .prepare("SELECT COUNT(*) FROM events WHERE id = ?1 AND user_id = ?2")
-                        .map_err(|e| format!("Failed to prepare check statement: {}", e))?;
-                    let exists: i64 = query
-                        .query_row([google_id, &username], |row| row.get(0))
-                        .map_err(|e| format!("Failed to check for existing event: {}", e))?;
-                    if exists > 0 {
-                        continue; // Skip if already exists
-                    }
-
-                    let event_json = json!({
-                        "id": google_id,
-                        "user_id": username,
-                        "description": summary,
-                        "time": start,
-                        "alarm": false,
-                        "synced": false,
-                        "synced_google": true,
-                        "deleted": false,
-                        "recurrence": None::<String>
-                    });
-                    let _ = save_event(app_handle_arc, event_json.to_string());
                 }
             }
         }
@@ -579,31 +582,19 @@ impl GoogleSyncService {
         Ok(())
     }
 
-    // Helper method -> mark events synced //
-    fn mark_events_synced_google(
-        conn: &rusqlite::Connection,
-        events: &[CalendarEvent],
-    ) -> Result<(), String> {
-        let mut synced = conn
-            .prepare("UPDATE events SET synced_google = TRUE WHERE id = ?")
-            .map_err(|e| e.to_string())?;
-
+    fn mark_events_synced_google(conn: &rusqlite::Connection, events: &[CalendarEvent]) -> Result<(), String> {
         for event in events {
-            synced.execute([&event.id]).map_err(|e| {
-                format!("Failed to mark event {} as synced_google: {}", event.id, e)
-            })?;
+            conn.execute(
+                "UPDATE events SET synced_google = 1 WHERE id = ? AND user_id = ?",
+                (&event.id, &event.user_id),
+            )
+            .map_err(|e| format!("Failed to mark event as synced to Google: {}", e))?;
         }
-
         Ok(())
     }
 
-    /// Refreshes the Google access token using the refresh token.
-    pub async fn refresh_google_access_token(
-        &self,
-        refresh_token: &str,
-        client_id: &str,
-        client_secret: &str,
-    ) -> Result<String, String> {
+    /// Refreshes the Google access token using the refresh token. //
+    pub async fn refresh_google_access_token(&self, refresh_token: &str, client_id: &str, client_secret: &str,) -> Result<String, String> {
         let url = "https://oauth2.googleapis.com/token";
         let params = [
             ("client_id", client_id),
@@ -637,12 +628,8 @@ impl GoogleSyncService {
         Ok(access_token.to_string())
     }
 
-    /// Updates the token file with the new access token.
-    pub fn update_access_token_file(
-        &self,
-        token_path: &std::path::Path,
-        new_access_token: &str,
-    ) -> Result<(), String> {
+    /// Updates the token file with the new access token. //
+    pub fn update_access_token_file(&self, token_path: &std::path::Path, new_access_token: &str,) -> Result<(), String> {
         let mut token_json: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(token_path).map_err(|e| e.to_string())?)
                 .map_err(|e| e.to_string())?;

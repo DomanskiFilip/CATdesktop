@@ -3,7 +3,6 @@ use base64::Engine;
 use rand::Rng;
 use std::fs;
 use tauri::{AppHandle, Manager};
-
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::encryption_utils::get_encryption_key;
 

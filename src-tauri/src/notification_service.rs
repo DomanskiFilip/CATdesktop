@@ -390,6 +390,7 @@ impl NotificationService {
                 alarm: event.alarm,
                 synced: event.synced,
                 synced_google: event.synced_google,
+                synced_outlook: event.synced_outlook,
                 deleted: event.deleted,
                 recurrence: None::<String>,
                 participants: None,
