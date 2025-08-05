@@ -1,5 +1,5 @@
 <template>
-  <section>
+  <section v-if="!isMobile">
     <button v-if="!loggedIn" @click="checkOAuthAndLoad" :disabled="authenticating">
       Login with
       <img  v-if="providerName === 'Google'" src="../assets/google-2025-g-logo.webp" alt="Google Logo" class="oauth-logo"/>
@@ -14,7 +14,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, defineProps } from 'vue'
+import { ref, defineProps, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 
 // Props for customization
@@ -26,6 +26,7 @@ const props = defineProps({
   },
 })
 
+const isMobile = computed(() => /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent))
 const providerName = props.providerName
 const message = ref('')
 const timer = ref(0) // Timer will be set dynamically

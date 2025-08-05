@@ -6,7 +6,9 @@ mod database_sync_service;
 mod database_utils;
 mod encryption_utils;
 mod google_oauth;
+mod outlook_oauth;
 mod google_sync_service;
+mod outlook_sync_service;
 mod login;
 mod notification_service;
 mod register;
@@ -19,6 +21,7 @@ use crate::ai_smart_features::AISmartFeaturesService;
 use crate::database_sync_service::DbSyncService;
 use crate::database_utils::CalendarEvent;
 use crate::google_sync_service::GoogleSyncService;
+use crate::outlook_sync_service::OutlookSyncService;
 use crate::notification_service::NotificationService;
 use crate::weather_service::get_weekly_weather;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -39,6 +42,7 @@ pub type AppConfigState = Arc<crate::api_utils::AppConfig>;
 pub type NotificationServiceState = Arc<Mutex<Option<NotificationService>>>;
 pub type DbSyncServiceState = Arc<Mutex<Option<DbSyncService>>>;
 pub type GoogleSyncServiceState = Arc<Mutex<Option<GoogleSyncService>>>;
+pub type OutlookSyncServiceState = Arc<Mutex<Option<OutlookSyncService>>>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationMessage {
@@ -114,8 +118,7 @@ async fn read_tokens_from_cache() -> Option<(String, String, Option<[u8; 32]>)> 
                 }
             })
     });
-    println!(
-        "Tokens loaded from cache: access_token='{}', refresh_token='{}', database_token='{:?}'",
+    println!("Tokens loaded from cache: access_token='{}', refresh_token='{}', database_token='{:?}'",
         access_token, refresh_token, database_token
     );
     Some((access_token, refresh_token, database_token))
@@ -287,6 +290,11 @@ const TIMEOUT: u64 = 120;
 #[tauri::command]
 async fn run_oauth2_flow(app_handle: tauri::AppHandle) -> Result<String, String> {
     crate::google_oauth::oauth2_flow(&app_handle, TIMEOUT).await
+}
+
+#[tauri::command]
+async fn run_outlook_oauth2_flow(app_handle: tauri::AppHandle) -> Result<String, String> {
+    crate::outlook_oauth::outlook_oauth2_flow(&app_handle, TIMEOUT).await
 }
 
 #[tauri::command]
@@ -582,6 +590,31 @@ async fn start_google_sync_service(app_handle_arc: Arc<AppHandle>, user_logged_i
     Ok(())
 }
 
+async fn start_outlook_sync_service(app_handle_arc: Arc<AppHandle>, user_logged_in: bool) -> Result<(), String> {
+    let config_state = app_handle_arc.state::<AppConfigState>();
+    if !config_state.enable_outlook_sync {
+        println!("Outlook sync service is disabled via configuration");
+        return Ok(());
+    }
+
+    let outlook_state = app_handle_arc.state::<OutlookSyncServiceState>();
+    let mut service_guard = outlook_state.lock().await;
+
+    // Stop existing service if it exists
+    if let Some(mut existing_service) = service_guard.take() {
+        existing_service.stop().await;
+    }
+
+    // Always create and start a new service
+    let mut service = OutlookSyncService::new(Arc::clone(&config_state));
+    service
+        .start(Arc::clone(&app_handle_arc), user_logged_in)
+        .await;
+    *service_guard = Some(service);
+    println!("Outlook sync service started successfully");
+    Ok(())
+}
+
 // Schedule event notification command //
 #[tauri::command]
 async fn schedule_event_notification(event_json: String, app_handle: AppHandle) -> Result<String, String> {
@@ -716,6 +749,7 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
         .manage(Arc::new(Mutex::new(None::<NotificationService>)) as NotificationServiceState)
         .manage(Arc::new(Mutex::new(None::<DbSyncService>)) as DbSyncServiceState)
         .manage(Arc::new(Mutex::new(None::<GoogleSyncService>)) as GoogleSyncServiceState)
+        .manage(Arc::new(Mutex::new(None::<OutlookSyncService>)) as OutlookSyncServiceState)
         .invoke_handler(tauri::generate_handler![
             check_login_status,
             login_user,
@@ -732,6 +766,7 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
             trigger_sync,
             get_oauth_timeout,
             run_oauth2_flow,
+            run_outlook_oauth2_flow,
             schedule_event_notification,
             process_ai_message,
             generate_ai_email,
@@ -753,7 +788,7 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(_) => println!("iOS: Database initialized successfully"),
                     Err(e) => {
                         eprintln!("iOS: Database initialization failed (non-critical): {}", e);
-                        // Don't fail the app startup
+                        // Don't fail the app
                     }
                 }
             }
@@ -840,6 +875,14 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
                     match start_google_sync_service(Arc::clone(&app_handle_arc), login_success).await {
                         Ok(_) => println!("Google sync service started successfully"),
                         Err(e) => eprintln!("Failed to start google sync service: {}", e),
+                    }
+
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+                    // Start outlook sync service with error handling
+                    match start_outlook_sync_service(Arc::clone(&app_handle_arc), login_success).await {
+                        Ok(_) => println!("Outlook sync service started successfully"),
+                        Err(e) => eprintln!("Failed to start outlook sync service: {}", e),
                     }
                 });
             }

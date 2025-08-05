@@ -73,7 +73,7 @@
         <Themes />
         <Notifications />
         <Location @updateCoordinates="handleLocationUpdate" @updateLocationName="handleLocationNameUpdate" />
-        <h3>Connect:</h3>
+        <h3 v-if="!isMobile">Connect:</h3>
         <section id="oauth-section">
             <Oauth providerName="Google"/>
             <Oauth providerName="Outlook"/>

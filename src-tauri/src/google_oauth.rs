@@ -38,11 +38,9 @@ pub struct GoogleTokenExtraFields {
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String, String> {
-    let client_id = ClientId::new(
-        "99017034100-stfl2943ef0lnp7c36upsqrstaub49ns.apps.googleusercontent.com".to_string(),
-    );
     let secret_json = fs::read_to_string("google_client.json").map_err(|e| e.to_string())?;
     let secret: GoogleSecret = serde_json::from_str(&secret_json).map_err(|e| e.to_string())?;
+    let client_id = ClientId::new(secret.installed.client_id);
     let client_secret = ClientSecret::new(secret.installed.client_secret);
     let redirect_url = RedirectUrl::new("http://127.0.0.1:1425".to_string()).unwrap();
     let auth_url =
@@ -129,27 +127,14 @@ pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String,
     let refresh_token = token_result.refresh_token().map(|t| t.secret().to_string());
     // Get the current user's email (user_id)
     let user_id: String = {
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        {
-            match get_current_user_id(&app_handle) {
+        match get_current_user_id(&app_handle) {
                 Ok(id) => id,
                 Err(e) => {
                     println!("Failed to get user ID: {}", e);
                     return Ok(String::new());
                 }
             }
-        }
-        #[cfg(any(target_os = "android", target_os = "ios"))]
-        {
-            match get_current_user_id_mobile().await {
-                Ok(id) => id,
-                Err(e) => {
-                    println!("Failed to get user ID: {}", e);
-                    return Ok(String::new());
-                }
-            }
-        }
-    };
+        };
 
     // Save all tokens in a user-specific file
     let token_data = serde_json::json!({
@@ -170,5 +155,5 @@ pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String,
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn oauth2_flow(_app_handle: &AppHandle, _timeout: u64) -> Result<String, String> {
-    Err("Google OAuth is not supported on Android in this build.".to_string())
+    Err("Google OAuth is not supported on Android/iOs in this build.".to_string())
 }
