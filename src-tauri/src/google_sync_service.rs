@@ -1,5 +1,6 @@
 use crate::database_utils::{get_db_connection, save_event, CalendarEvent};
 use crate::encryption_utils::decrypt_user_data_base;
+use crate::credential_utils::fetch_google_credentials;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::user_utils::get_current_user_id;
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -169,17 +170,12 @@ impl GoogleSyncService {
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        // Load client_id and client_secret from google_client.json
-        let google_client_path = std::env::current_dir()
-            .map_err(|e| format!("Failed to get current dir: {}", e))?
-            .join("google_client.json");
-        let google_client_json = std::fs::read_to_string(&google_client_path)
-            .map_err(|e| format!("Failed to read google_client.json: {}", e))?;
-        let google_client_data: Value = serde_json::from_str(&google_client_json)
-            .map_err(|e| format!("Failed to parse google_client.json: {}", e))?;
+        // Fetch client credentials from Lambda instead of local file
+        let google_client_data = fetch_google_credentials(app_handle_arc).await
+            .map_err(|e| format!("Failed to fetch Google credentials: {}", e))?;
         let installed = google_client_data
             .get("installed")
-            .ok_or("No 'installed' section in google_client.json")?;
+            .ok_or("No 'installed' section in Google credentials")?;
         let client_id = installed
             .get("client_id")
             .and_then(|v| v.as_str())

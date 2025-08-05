@@ -5,6 +5,7 @@ mod auto_login;
 mod database_sync_service;
 mod database_utils;
 mod encryption_utils;
+mod credential_utils;
 mod google_oauth;
 mod outlook_oauth;
 mod google_sync_service;

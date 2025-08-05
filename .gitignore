@@ -33,15 +33,15 @@ coverage
 # will have compiled files and executables
 src-tauri/target/
 src-tauri/gen/schemas
-src-tauri/google_client.json
-src-tauri/outlook_client.json
-google_client.json
-outlook_client.json
 # exclude environment files
 .env
 access_token.txt
 tokens.enc
 client_secret_*.json
+
+# Exclude OAuth client credential files (now fetched from Lambda)
+google_client.json
+outlook_client.json
 
 # Exclude build artifacts
 build/

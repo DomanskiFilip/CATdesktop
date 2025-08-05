@@ -2,6 +2,7 @@
 use crate::user_utils::get_current_user_id;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 use crate::user_utils::get_current_user_id_mobile;
+use crate::credential_utils::fetch_google_credentials;
 use oauth2::basic::BasicTokenType;
 use oauth2::{
     basic::BasicClient, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken,
@@ -9,27 +10,14 @@ use oauth2::{
 };
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use open;
-use serde::{Deserialize, Serialize};
+use serde::{ Deserialize, Serialize };
 use std::fs;
 use std::io::Read;
 use std::io::Write;
 use std::net::TcpListener;
 use std::time::Instant;
-use tauri::{AppHandle, Manager};
+use tauri::{ AppHandle, Manager };
 use urlencoding;
-
-#[allow(dead_code)]
-#[derive(Deserialize)]
-struct Installed {
-    client_id: String,
-    client_secret: String,
-    redirect_uris: Vec<String>,
-}
-
-#[derive(Deserialize)]
-struct GoogleSecret {
-    installed: Installed,
-}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GoogleTokenExtraFields {
@@ -38,11 +26,42 @@ pub struct GoogleTokenExtraFields {
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String, String> {
-    let secret_json = fs::read_to_string("google_client.json").map_err(|e| e.to_string())?;
-    let secret: GoogleSecret = serde_json::from_str(&secret_json).map_err(|e| e.to_string())?;
-    let client_id = ClientId::new(secret.installed.client_id);
-    let client_secret = ClientSecret::new(secret.installed.client_secret);
-    let redirect_url = RedirectUrl::new("http://127.0.0.1:1425".to_string()).unwrap();
+    // Fetch credentials from Lambda instead of local file
+    let google_credentials = fetch_google_credentials(app_handle)
+        .await
+        .map_err(|e| format!("Failed to fetch Google credentials: {}", e))?;
+
+    let installed = google_credentials
+        .get("installed")
+        .ok_or("No 'installed' section in Google credentials")?;
+    let client_id_str = installed
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .ok_or("No client_id in Google credentials")?;
+    let client_secret_str = installed
+        .get("client_secret")
+        .and_then(|v| v.as_str())
+        .ok_or("No client_secret in Google credentials")?;
+    let redirect_uris = installed
+        .get("redirect_uris")
+        .and_then(|v| v.as_array())
+        .ok_or("No redirect_uris in Google credentials")?;
+    let redirect_uri_str = redirect_uris
+        .iter()
+        .find_map(|uri| {
+            let uri_str = uri.as_str()?;
+            if uri_str.contains("127.0.0.1:1425") {
+                Some(uri_str)
+            } else {
+                None
+            }
+        })
+        .unwrap_or("http://127.0.0.1:1425");
+
+
+    let client_id = ClientId::new(client_id_str.to_string());
+    let client_secret = ClientSecret::new(client_secret_str.to_string());
+    let redirect_url = RedirectUrl::new(redirect_uri_str.to_string()).unwrap();
     let auth_url =
         AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string()).unwrap();
     let token_url = TokenUrl::new("https://oauth2.googleapis.com/token".to_string()).unwrap();

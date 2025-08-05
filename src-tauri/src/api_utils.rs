@@ -17,7 +17,7 @@ impl AppConfig {
     pub fn new() -> Result<Self, String> {
         dotenv().ok();
 
-        let lambda_base_url = "https://ywaixwivt3.execute-api.eu-west-2.amazonaws.com/prod".to_string();
+        let lambda_base_url = "https://dnal5hv7lj.execute-api.eu-west-2.amazonaws.com/prod".to_string();
 
         let enable_database_sync = false;
         let enable_google_sync = false;
