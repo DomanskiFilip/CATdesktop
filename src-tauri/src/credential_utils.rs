@@ -1,6 +1,6 @@
 use reqwest::Client;
 use serde_json::{ Value, json };
-use tauri::{ AppHandle, Manager };
+use tauri::AppHandle;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::user_utils::get_current_user_id;
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -48,7 +48,7 @@ pub async fn fetch_google_credentials(app_handle: &AppHandle) -> Result<Value, S
     };
 
     // Construct the payload
-    let mut payload = json!({
+    let payload = json!({
         "accessToken": access_token,
         "deviceInfo": device_info,
         "email": user_id
@@ -63,7 +63,6 @@ pub async fn fetch_google_credentials(app_handle: &AppHandle) -> Result<Value, S
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
 
-    let status = response.status();
     let text = response.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
     
     let response_json: Value = serde_json::from_str(&text)
@@ -124,7 +123,7 @@ pub async fn fetch_outlook_credentials(app_handle: &AppHandle) -> Result<Value, 
     };
 
     // Construct the payload
-    let mut payload = json!({
+    let payload = json!({
         "accessToken": access_token,
         "deviceInfo": device_info,
         "email": user_id
@@ -139,7 +138,6 @@ pub async fn fetch_outlook_credentials(app_handle: &AppHandle) -> Result<Value, 
         .await
         .map_err(|e| format!("Request failed: {}", e))?;
 
-    let status = response.status();
     let text = response.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
     
     let response_json: Value = serde_json::from_str(&text)

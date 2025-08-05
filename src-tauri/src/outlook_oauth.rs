@@ -3,9 +3,8 @@ use crate::user_utils::get_current_user_id;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 use crate::user_utils::get_current_user_id_mobile;
 use crate::credential_utils::fetch_outlook_credentials;
-use oauth2::basic::BasicTokenType;
 use oauth2::{
-    basic::BasicClient, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken,
+    basic::BasicClient, AuthUrl, AuthorizationCode, ClientId, CsrfToken,
     PkceCodeChallenge, RedirectUrl, Scope, TokenResponse, TokenUrl,
 };
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -136,12 +135,10 @@ pub async fn outlook_oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result
                                 
                                 match key {
                                     "code" => {
-                                        found_code = true;
-                                        
                                         // Verify CSRF token if present
                                         if !state_token.is_empty() && state_token != *csrf_token.secret() {
                                             let csrf_error_response = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\n\r\n\
-                                                <html><body><h1>❌ CSRF Token Mismatch</h1>\
+                                                <html><body><h1>CSRF Token Mismatch</h1>\
                                                 <p>Security error: Invalid state parameter.</p>\
                                                 <script>window.close();</script></body></html>";
                                             let _ = stream.write_all(csrf_error_response.as_bytes());
@@ -150,7 +147,7 @@ pub async fn outlook_oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result
                                         
                                         // Send success response first
                                         let success_response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
-                                            <html><body><h1>✅ Authentication Successful!</h1>\
+                                            <html><body><h1>Authentication Successful!</h1>\
                                             <p>You can now close this window and return to the application.</p>\
                                             <script>setTimeout(() => window.close(), 1000);</script></body></html>";
                                         

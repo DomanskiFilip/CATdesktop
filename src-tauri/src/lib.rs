@@ -858,7 +858,7 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
 
                     // Start notification service with error handling
                     match start_notification_service(Arc::clone(&app_handle_arc), login_success).await {
-                        Ok(_) => println!("Notification service started successfully"),
+                        Ok(_) => (),
                         Err(e) => eprintln!("Failed to start notification service: {}", e),
                     }
 
@@ -866,7 +866,7 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
 
                     // Start database sync service with error handling
                     match start_database_sync_service(Arc::clone(&app_handle_arc), login_success).await {
-                        Ok(_) => println!("Database sync service started successfully"),
+                        Ok(_) => (),
                         Err(e) => eprintln!("Failed to start database sync service: {}", e),
                     }
 
@@ -874,7 +874,7 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
 
                     // Start google sync service with error handling
                     match start_google_sync_service(Arc::clone(&app_handle_arc), login_success).await {
-                        Ok(_) => println!("Google sync service started successfully"),
+                        Ok(_) => (),
                         Err(e) => eprintln!("Failed to start google sync service: {}", e),
                     }
 
@@ -882,7 +882,7 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
 
                     // Start outlook sync service with error handling
                     match start_outlook_sync_service(Arc::clone(&app_handle_arc), login_success).await {
-                        Ok(_) => println!("Outlook sync service started successfully"),
+                        Ok(_) => (),
                         Err(e) => eprintln!("Failed to start outlook sync service: {}", e),
                     }
                 });

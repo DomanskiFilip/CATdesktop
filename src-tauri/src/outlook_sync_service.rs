@@ -1,6 +1,5 @@
 use crate::database_utils::{get_db_connection, save_event, CalendarEvent};
 use crate::encryption_utils::decrypt_user_data_base;
-use crate::credential_utils::fetch_outlook_credentials;
 use crate::outlook_oauth::refresh_outlook_token;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::user_utils::get_current_user_id;
@@ -12,7 +11,7 @@ use serde_json::json;
 use serde_json::Value;
 use std::sync::atomic::{ AtomicBool, Ordering };
 use std::sync::Arc;
-use tauri::{ AppHandle, Manager, Emitter };
+use tauri::{ AppHandle, Manager };
 use tokio::task::JoinHandle;
 use tokio::time::{ self, Duration };
 use chrono::TimeZone;
@@ -200,7 +199,7 @@ impl OutlookSyncService {
         // Send each event to Outlook Calendar
         for event in &events {
             if event.synced_outlook == true {
-                println!("Skipping event {} that originated from Outlook", event.id);
+                // Already synced to Outlook, skip
                 continue;
             }
 
@@ -390,13 +389,10 @@ impl OutlookSyncService {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Could not read error response".to_string());
-            eprintln!("Outlook API error response: {}", error_body);
             return Err(format!("Outlook API error: {} - {}", status, error_body));
         }
 
         let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-        println!("Outlook API response received with {} events", 
-            json.get("value").and_then(|v| v.as_array()).map(|arr| arr.len()).unwrap_or(0));
         
         if let Some(items) = json.get("value").and_then(|v| v.as_array()) {
             for item in items {
@@ -407,16 +403,6 @@ impl OutlookSyncService {
                         .and_then(|v| v.get("dateTime"))
                         .and_then(|v| v.as_str()),
                 ) {
-                    println!("Processing Outlook event ID: {}, Subject: {}, Start: {}", outlook_id, subject, start);
-                    
-                    // Extract timezone from start object
-                    let timezone = item.get("start")
-                        .and_then(|v| v.get("timeZone"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("UTC");
-                    
-                    println!("Event timezone: {}", timezone);
-                    
                     // Extract participants from Outlook attendees
                     let participants: Option<Vec<String>> = item.get("attendees")
                         .and_then(|attendees| attendees.as_array())
@@ -430,12 +416,6 @@ impl OutlookSyncService {
                                 .map(String::from)
                                 .collect()
                         });
-
-                    if let Some(ref parts) = participants {
-                        println!("Event has {} participants: {:?}", parts.len(), parts);
-                    } else {
-                        println!("Event has no participants");
-                    }
 
                     // Parse Microsoft's datetime format
                     let event_time = {
@@ -465,8 +445,6 @@ impl OutlookSyncService {
                                 format!("{}Z", start)
                             };
                             
-                            println!("Cleaned datetime string: {}", cleaned_start);
-                            
                             match chrono::DateTime::parse_from_rfc3339(&cleaned_start) {
                                 Ok(time) => time,
                                 Err(e) => {
@@ -478,8 +456,8 @@ impl OutlookSyncService {
                                             let utc_time = chrono::Utc.from_utc_datetime(&naive_time);
                                             utc_time.with_timezone(&chrono::FixedOffset::east_opt(0).unwrap())
                                         }
-                                        Err(e2) => {
-                                            eprintln!("Failed to parse as naive datetime '{}': {}", start, e2);
+                                        Err(_) => {
+                                            // If all parsing fails, skip this event
                                             continue;
                                         }
                                     }
@@ -495,8 +473,8 @@ impl OutlookSyncService {
                         .and_hms_opt(0, 0, 0)
                         .unwrap();
                     if event_time.naive_utc() < today {
-                        println!("Skipping past event: {}", subject);
-                        continue; // Skip past events
+                        // Skip past events
+                        continue; 
                     }
 
                     // Check for duplicates
@@ -515,7 +493,7 @@ impl OutlookSyncService {
                     };
 
                     if should_skip {
-                        println!("Event already exists in database, skipping: {}", subject);
+                        // If the event already exists, skip it
                         continue;
                     }
 
@@ -535,20 +513,8 @@ impl OutlookSyncService {
                         "recurrence": None::<String>,
                         "participants": participants.unwrap_or_default(),
                     });
-
-                    println!("Prepared event JSON for saving: {}", event_json);
-                    println!("Attempting to save Outlook event '{}' to local database...", subject);
                     
-                    let save_result = save_event(app_handle_arc, event_json.to_string()).await;
-                    match save_result {
-                        Ok(_) => {
-                            println!("✅ Successfully saved Outlook event '{}' with ID: {}", subject, outlook_id);
-                        },
-                        Err(e) => {
-                            eprintln!("❌ Failed to save Outlook event '{}': {}", subject, e);
-                            eprintln!("Event data that failed to save: {}", event_json);
-                        }
-                    }
+                    let _ = save_event(app_handle_arc, event_json.to_string()).await;
                 } else {
                     println!("Skipping malformed event - missing required fields");
                     if let Some(debug_id) = item.get("id") {
@@ -566,8 +532,6 @@ impl OutlookSyncService {
             println!("No events found in Outlook API response");
         }
         
-        println!("Outlook sync from completed, emitting sync complete event");
-        let _ = app_handle_arc.emit("outlook_sync_complete", ());
         Ok(())
     }
 
@@ -582,7 +546,7 @@ impl OutlookSyncService {
         Ok(())
     }
 
-    pub async fn refresh_outlook_access_token(&self, refresh_token: &str, app_handle: &AppHandle) -> Result<String, String> {
+    pub async fn refresh_outlook_access_token(&self, _refresh_token: &str, app_handle: &AppHandle) -> Result<String, String> {
         // Use the refresh function that doesn't require client secret
         refresh_outlook_token(app_handle).await
     }
