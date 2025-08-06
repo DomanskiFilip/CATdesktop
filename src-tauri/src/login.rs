@@ -1,5 +1,6 @@
 use crate::api_utils::{get_device_info, AppConfig};
 use crate::token_utils::save_tokens_to_file;
+use crate::user_utils::{save_current_user_id};
 use argon2::password_hash::SaltString;
 use argon2::{Argon2, PasswordHasher};
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -21,14 +22,11 @@ struct LambdaResponse {
 struct Body {
     access_token: String,
     refresh_token: String,
+    user_id: String,
 }
 
 // Function to log in a user using AWS Lambda //
-pub async fn login_user_lambda(
-    app_handle: &AppHandle,
-    email: String,
-    password: String,
-) -> Result<String, String> {
+pub async fn login_user_lambda(app_handle: &AppHandle, email: String, password: String,) -> Result<String, String> {
     let config = AppConfig::new()?;
     let device_info = get_device_info(&app_handle);
 
@@ -93,9 +91,9 @@ pub async fn login_user_lambda(
     }
 
     let body: Body = serde_json::from_str(&lambda_resp.body).map_err(|e| e.to_string())?;
-
+    let user_id = body.user_id;
     // Derive and cache the database token for this session
-    let db_token = derive_database_token(&email, &password);
+    let db_token = derive_database_token(&user_id, &password);
     {
         let mut cache = DATABASE_TOKEN.lock().unwrap();
         *cache = Some(db_token);
@@ -112,6 +110,10 @@ pub async fn login_user_lambda(
     .await
     .map_err(|e| format!("Failed to save tokens: {}", e))?;
 
+    // Save user_id instead of email
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let _ = save_current_user_id(&app_handle, &user_id)?;
+
     // Build frontend response for all platforms
     #[allow(unused_mut)] // silence unused mut warning on desktop platforms
     let mut frontend_response = serde_json::json!({
@@ -125,7 +127,7 @@ pub async fn login_user_lambda(
             "access_token": body.access_token,
             "refresh_token": body.refresh_token,
         });
-        frontend_response["user_id"] = serde_json::json!(email);
+        frontend_response["user_id"] = serde_json::json!(user_id);
         frontend_response["database_token"] =
             serde_json::json!(base64::engine::general_purpose::STANDARD.encode(db_token));
     }
@@ -136,10 +138,10 @@ pub async fn login_user_lambda(
 // Static cache for the database token
 pub static DATABASE_TOKEN: Lazy<Mutex<Option<[u8; 32]>>> = Lazy::new(|| Mutex::new(None));
 
-fn derive_database_token(email: &str, password: &str) -> [u8; 32] {
-    let salt = SaltString::encode_b64(email.as_bytes()).unwrap(); // Use email as salt for determinism
+fn derive_database_token(username: &str, password: &str) -> [u8; 32] {
+    let salt = SaltString::encode_b64(username.as_bytes()).unwrap(); // Use username as salt for determinism
     let argon2 = Argon2::default();
-    let password = format!("{}:{}", email, password);
+    let password = format!("{}:{}", username, password);
     let hash = argon2.hash_password(password.as_bytes(), &salt).unwrap();
     let hash_value = hash.hash.unwrap();
     let hash_bytes = hash_value.as_bytes();

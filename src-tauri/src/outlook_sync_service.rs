@@ -78,7 +78,7 @@ impl OutlookSyncService {
                 interval.tick().await;
 
                 #[allow(unused_variables)]
-                let username = {
+                let user_id = {
                     #[cfg(not(any(target_os = "android", target_os = "ios")))]
                     {
                         match get_current_user_id(&app_handle_ref) {
@@ -125,7 +125,7 @@ impl OutlookSyncService {
         }
 
         #[allow(unused_variables)]
-        let username = {
+        let user_id = {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 match get_current_user_id(app_handle_arc) {
@@ -152,7 +152,7 @@ impl OutlookSyncService {
             .path()
             .app_data_dir()
             .map_err(|e| format!("Failed to get app data dir: {}", e))?;
-        let token_path = app_data_dir.join(format!("outlook_tokens_{}.json", username));
+        let token_path = app_data_dir.join(format!("outlook_tokens_{}.json", user_id));
         let token_json = std::fs::read_to_string(&token_path)
             .map_err(|e| format!("Failed to read token: {}", e))?;
         let token_data: Value = serde_json::from_str(&token_json)
@@ -183,7 +183,7 @@ impl OutlookSyncService {
             ).map_err(|e| format!("Failed to prepare statement: {}", e))?;
 
             let events_result = unsynced
-                .query_map((&username, &now.to_string()), CalendarEvent::from_row)
+                .query_map((&user_id, &now.to_string()), CalendarEvent::from_row)
                 .map_err(|e| e.to_string())?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| format!("Failed to collect events: {}", e))?;
@@ -318,7 +318,7 @@ impl OutlookSyncService {
         }
 
         #[allow(unused_variables)]
-        let username = {
+        let user_id = {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 match get_current_user_id(app_handle_arc) {
@@ -345,7 +345,7 @@ impl OutlookSyncService {
             .path()
             .app_data_dir()
             .map_err(|e| format!("Failed to get app data dir: {}", e))?;
-        let token_path = app_data_dir.join(format!("outlook_tokens_{}.json", username));
+        let token_path = app_data_dir.join(format!("outlook_tokens_{}.json", user_id));
         let token_json = std::fs::read_to_string(&token_path)
             .map_err(|e| format!("Failed to read token: {}", e))?;
         let token_data: Value = serde_json::from_str(&token_json)
@@ -486,7 +486,7 @@ impl OutlookSyncService {
                             .prepare("SELECT COUNT(*) FROM events WHERE id = ?1 AND user_id = ?2")
                             .map_err(|e| format!("Failed to prepare check statement: {}", e))?;
                         let exists: i64 = query
-                            .query_row([outlook_id, &username], |row| row.get(0))
+                            .query_row([outlook_id, &user_id], |row| row.get(0))
                             .map_err(|e| format!("Failed to check for existing event: {}", e))?;
 
                         exists > 0
@@ -502,7 +502,7 @@ impl OutlookSyncService {
                     
                     let event_json = json!({
                         "id": outlook_id,
-                        "user_id": username,
+                        "user_id": user_id,
                         "description": subject,
                         "time": event_time_str,
                         "alarm": false,

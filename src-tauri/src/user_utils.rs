@@ -117,10 +117,7 @@ pub async fn set_notification_service(
         notification_lead_minutes: lead,
     };
     std::fs::write("settings.json", serde_json::to_string(&settings).unwrap()).unwrap();
-    println!(
-        "Notification service set to: {}, lead: {} min",
-        enabled, lead
-    );
+    println!("Notification service set to: {}, lead: {} min", enabled, lead);
 
     let notification_state = app_handle.state::<NotificationServiceState>();
 

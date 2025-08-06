@@ -121,7 +121,7 @@ pub async fn outlook_oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result
                         let query_part = path_and_query.split('?').nth(1).unwrap_or("");
                         println!("Query parameters: {}", query_part);
                         
-                        let mut found_code = false;
+                        let found_code = false;
                         let mut found_error = false;
                         let mut error_description = String::new();
                         let mut state_token = String::new();

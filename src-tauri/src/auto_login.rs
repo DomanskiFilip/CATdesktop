@@ -79,16 +79,16 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
 
     match lambda_resp.status_code {
         200 => {
-            // Access token is valid, save email as user_id
+            // Access token is valid, save user_id
             let body_json: serde_json::Value = serde_json::from_str(&lambda_resp.body)
                 .map_err(|e| format!("Failed to parse response body: {}", e))?;
 
-            // Extract email from the body
-            if let Some(email) = body_json["email"].as_str() {
-                // Save the email as the user ID
-                save_current_user_id(app_handle, email)?;
+            // Extract user_id from the body
+            if let Some(user_id) = body_json["user_id"].as_str() {
+                // Save the user_id
+                save_current_user_id(app_handle, user_id)?;
             } else {
-                return Err("Failed to extract email from response body".to_string());
+                return Err("Failed to extract user_id from response body".to_string());
             }
 
             // User is logged in
@@ -97,14 +97,8 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
         }
         201 => {
             // Access token expired, send refresh token
-            println!(
-                "Access token expired. Server response: {}",
-                lambda_resp.body
-            );
-            println!(
-                "Attempting to refresh access token... refresh_token: {}",
-                refresh_token
-            );
+            println!("Access token expired. Server response: {}", lambda_resp.body);
+            println!("Attempting to refresh access token... refresh_token: {}", refresh_token);
             if let Some(refresh_token) = Some(refresh_token) {
                 payload = serde_json::json!({
                     "body": serde_json::json!({
@@ -129,12 +123,12 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
                     let body_json: serde_json::Value = serde_json::from_str(&lambda_resp.body)
                         .map_err(|e| format!("Failed to parse response body: {}", e))?;
 
-                    // Extract email from the body
-                    if let Some(email) = body_json["email"].as_str() {
-                        // Save the email as the user ID
-                        save_current_user_id(app_handle, email)?;
+                    // Extract user_id from the body
+                    if let Some(user_id) = body_json["user_id"].as_str() {
+                        // Save the user_id
+                        save_current_user_id(app_handle, user_id)?;
                     } else {
-                        return Err("Failed to extract email from response body".to_string());
+                        return Err("Failed to extract user_id from response body".to_string());
                     }
 
                     // Save new access token
@@ -152,32 +146,20 @@ pub async fn auto_login_lambda(app_handle: &AppHandle) -> Result<bool, String> {
                         return Ok(true);
                     }
                 }
-                println!(
-                    "Failed to refresh access token. Server response: {}",
-                    lambda_resp.body
-                );
+                println!("Failed to refresh access token. Server response: {}", lambda_resp.body);
                 return Ok(false);
             }
-            println!(
-                "No refresh token available. Server response: {}",
-                lambda_resp.body
-            );
+            println!("No refresh token available. Server response: {}", lambda_resp.body);
             Ok(false)
         }
         301 => {
             // Refresh token expired or device mismatch
-            println!(
-                "Refresh token expired or device mismatch. Server response: {}",
-                lambda_resp.body
-            );
+            println!("Refresh token expired or device mismatch. Server response: {}", lambda_resp.body);
             Ok(false)
         }
         _ => {
             // Unexpected status code
-            println!(
-                "Unexpected status code: {}. Server response: {}",
-                lambda_resp.status_code, lambda_resp.body
-            );
+            println!("Unexpected status code: {}. Server response: {}", lambda_resp.status_code, lambda_resp.body);
             Ok(false)
         }
     }

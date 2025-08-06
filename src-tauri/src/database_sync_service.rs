@@ -243,10 +243,10 @@ impl DbSyncService {
 
         let mut payload = json!({
             "body": json!({
-                "email": user_id
+                "user_id": user_id
             }).to_string(),
             "deviceInfo": device_info,
-            "email": user_id
+            "user_id": user_id
         });
         if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle_arc).await {
             payload["access_token"] = serde_json::json!(access_token);
@@ -273,6 +273,8 @@ impl DbSyncService {
                     // Retry with new token (always read from file)
                     if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle_arc).await {
                         payload["access_token"] = serde_json::json!(access_token);
+                        payload["deviceInfo"] = device_info;
+                        payload["user_id"] = serde_json::json!(user_id);
                         let retry_response = self
                             .client
                             .post(&sync_url)
@@ -365,7 +367,7 @@ impl DbSyncService {
             "body": json!({
                 "events": events.iter().map(|event| json!({
                     "id": event.id,
-                    "email": event.user_id,
+                    "user_id": event.user_id,
                     "description": event.description,
                     "time": event.time.to_rfc3339(),
                     "alarm": event.alarm,
@@ -377,7 +379,7 @@ impl DbSyncService {
                 })).collect::<Vec<_>>()
             }).to_string(),
             "deviceInfo": device_info,
-            "email": user_id
+            "user_id": user_id
         });
         if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle_arc).await {
             payload["access_token"] = serde_json::json!(access_token);
@@ -407,6 +409,8 @@ impl DbSyncService {
                     // Retry with new token (always read from file)
                     if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle_arc).await {
                         payload["access_token"] = serde_json::json!(access_token);
+                        payload["deviceInfo"] = device_info;
+                        payload["user_id"] = serde_json::json!(user_id);
                         let retry_response = self
                             .client
                             .post(&sync_url)
@@ -534,7 +538,7 @@ impl DbSyncService {
 
             let event_json = json!({
                 "id": event_data["id"],
-                "user_id": event_data["email"],
+                "user_id": event_data["user_id"],
                 "description": description_plain,
                 "time": event_data["time"],
                 "alarm": event_data["alarm"],

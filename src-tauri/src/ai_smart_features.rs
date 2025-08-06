@@ -208,7 +208,7 @@ impl AISmartFeaturesService {
             "participants": participants,
             "access_token": "",
             "deviceInfo": device_info,
-            "email": user_id,
+            "user_id": user_id,
         });
 
         if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle).await {
@@ -229,7 +229,7 @@ impl AISmartFeaturesService {
             "weather_forecast": weather,
             "access_token": "",
             "deviceInfo": device_info,
-            "email": user_id,
+            "user_id": user_id,
         });
 
         if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle).await {
@@ -252,7 +252,7 @@ impl AISmartFeaturesService {
             "clarification_history": clarification_history,
             "access_token": "",
             "deviceInfo": device_info,
-            "email": user_id,
+            "user_id": user_id,
         });
 
         if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle).await {

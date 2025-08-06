@@ -51,7 +51,7 @@ pub async fn fetch_google_credentials(app_handle: &AppHandle) -> Result<Value, S
     let payload = json!({
         "accessToken": access_token,
         "deviceInfo": device_info,
-        "email": user_id
+        "user_id": user_id
     });
 
     let client = Client::new();
@@ -126,7 +126,7 @@ pub async fn fetch_outlook_credentials(app_handle: &AppHandle) -> Result<Value, 
     let payload = json!({
         "accessToken": access_token,
         "deviceInfo": device_info,
-        "email": user_id
+        "user_id": user_id
     });
 
     let client = Client::new();

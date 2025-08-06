@@ -68,7 +68,7 @@ async function checkOAuthAndLoad() {
       authenticating.value = false
       clearInterval(interval)
       if (oauthResult) {
-        message.value = `<span>${providerName} OAuth successful!</span>`
+        message.value = `<span><span style="color: var(--color-theme);">${providerName}</span> OAuth successful!</span>`
         loggedIn.value = true
       }
     }

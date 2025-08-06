@@ -38,6 +38,24 @@ pub async fn register_user_lambda(email: String, password: String) -> Result<Str
         .map_err(|e| e.to_string())?;
     let text = response.text().await.map_err(|e| e.to_string())?;
 
+    // Check for Sandbox.Timedout error in the raw response
+    if text.contains("\"errorType\":\"Sandbox.Timedout\"") {
+        let frontend_response = serde_json::json!({
+            "status": "error",
+            "message": "Server timeout, please try again.",
+        });
+        return Err(frontend_response.to_string());
+    }
+
+    // Check for API Gateway errors (like Forbidden)
+    if text.contains("\"message\":\"Forbidden\"") || text == "{\"message\":\"Forbidden\"}" {
+        let frontend_response = serde_json::json!({
+            "status": "error",
+            "message": "Access denied!",
+        });
+        return Err(frontend_response.to_string());
+    }
+
     // Parse Lambda response
     let lambda_resp: LambdaResponse = serde_json::from_str(&text).map_err(|e| e.to_string())?;
     // Check status_code

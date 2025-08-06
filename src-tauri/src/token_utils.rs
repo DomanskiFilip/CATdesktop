@@ -22,12 +22,7 @@ fn generate_nonce() -> [u8; 12] {
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub async fn save_tokens_to_file(
-    app_handle: &AppHandle,
-    access_token: &str,
-    refresh_token: &str,
-    database_token: Option<&[u8; 32]>,
-) -> Result<(), String> {
+pub async fn save_tokens_to_file(app_handle: &AppHandle, access_token: &str, refresh_token: &str, database_token: Option<&[u8; 32]>,) -> Result<(), String> {
     use aes_gcm::aead::Aead;
     use aes_gcm::KeyInit;
     use aes_gcm::{Aes256Gcm, Key, Nonce};
@@ -63,9 +58,7 @@ pub async fn save_tokens_to_file(
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub async fn read_tokens_from_file(
-    app_handle: &AppHandle,
-) -> Result<(String, String, Option<[u8; 32]>), String> {
+pub async fn read_tokens_from_file(app_handle: &AppHandle,) -> Result<(String, String, Option<[u8; 32]>), String> {
     use aes_gcm::aead::Aead;
     use aes_gcm::KeyInit;
     use aes_gcm::{Aes256Gcm, Key, Nonce};
@@ -110,27 +103,16 @@ pub async fn read_tokens_from_file(
 
 // On Android/iOS, use the plugin from JS/TS, not Rust!
 #[cfg(any(target_os = "android", target_os = "ios"))]
-pub async fn save_tokens_to_file(
-    _: &AppHandle,
-    _: &str,
-    _: &str,
-    _: Option<&[u8; 32]>,
-) -> Result<(), String> {
-    // No-op: tokens are set via set_tokens_for_autologin from the frontend
+pub async fn save_tokens_to_file(_: &AppHandle, _: &str,  _: &str,  _: Option<&[u8; 32]>,) -> Result<(), String> {
+     // No-op: tokens are set via set_tokens_for_autologin from the frontend
     Ok(())
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
-pub async fn read_tokens_from_file(
-    _: &AppHandle,
-) -> Result<(String, String, Option<[u8; 32]>), String> {
+pub async fn read_tokens_from_file(_: &AppHandle,) -> Result<(String, String, Option<[u8; 32]>), String> {
     let (access_token, refresh_token, database_token) = crate::read_tokens_from_cache()
         .await
         .ok_or("No tokens in cache".to_string())?;
-    println!(
-        "Reading tokens from cache on Android: {:?}, {:?}, {:?}",
-        access_token, refresh_token, database_token
-    );
     Ok((access_token, refresh_token, database_token))
 }
 

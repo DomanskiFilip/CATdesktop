@@ -63,10 +63,8 @@ function register() {
     return
   }
 
-  
-
   // Call the backend to register the user and handle response
-  invoke('register_user', { email: email.value, password: password.value})
+  invoke('register_user', { username: email.value, password: password.value})
   .then((response: any) => {
     let respObj = response
     if (typeof response === 'string') {

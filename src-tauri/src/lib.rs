@@ -80,10 +80,19 @@ async fn set_tokens_for_autologin(tokens_json: String) {
     let parsed: Result<TokenBundle, _> = serde_json::from_str(&tokens_json);
     if let Ok(tokens) = parsed {
         let mut cache = TOKEN_CACHE.lock().await;
-        cache.access_token = tokens.access_token;
-        cache.refresh_token = tokens.refresh_token;
-        cache.user_id = tokens.user_id;
+        cache.access_token = tokens.access_token.clone();
+        cache.refresh_token = tokens.refresh_token.clone();
+        cache.user_id = tokens.user_id.clone();
         cache.database_token = tokens.database_token.clone();
+
+        // Validate tokens are not empty
+        if let (Some(access), Some(refresh)) = (&tokens.access_token, &tokens.refresh_token) {
+            if !access.is_empty() && !refresh.is_empty() {
+                println!("Valid tokens cached successfully");
+            } else {
+                println!("Warning: Empty tokens being cached");
+            }
+        }
 
         // Optionally decode and cache database_token as bytes if needed
         if let Some(db_token_b64) = tokens.database_token {
@@ -96,33 +105,39 @@ async fn set_tokens_for_autologin(tokens_json: String) {
                 }
             }
         }
+    } else {
+        println!("Failed to parse tokens JSON: {:?}", parsed.err());
     }
-    println!("Tokens set for autologin: {:?}", tokens_json);
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
 async fn read_tokens_from_cache() -> Option<(String, String, Option<[u8; 32]>)> {
     let cache = TOKEN_CACHE.lock().await;
-    let access_token = cache.access_token.clone().unwrap_or_default();
-    let refresh_token = cache.refresh_token.clone().unwrap_or_default();
-    let database_token = cache.database_token.as_ref().and_then(|b64| {
-        base64::engine::general_purpose::STANDARD
-            .decode(b64)
-            .ok()
-            .and_then(|bytes| {
-                if bytes.len() == 32 {
-                    let mut arr = [0u8; 32];
-                    arr.copy_from_slice(&bytes);
-                    Some(arr)
-                } else {
-                    None
-                }
-            })
-    });
-    println!("Tokens loaded from cache: access_token='{}', refresh_token='{}', database_token='{:?}'",
-        access_token, refresh_token, database_token
-    );
-    Some((access_token, refresh_token, database_token))
+
+    // Validate tokens exist and are not empty
+    match (&cache.access_token, &cache.refresh_token) {
+        (Some(access), Some(refresh)) if !access.is_empty() && !refresh.is_empty() => {
+            let database_token = cache.database_token.as_ref().and_then(|b64| {
+                base64::engine::general_purpose::STANDARD
+                    .decode(b64)
+                    .ok()
+                    .and_then(|bytes| {
+                        if bytes.len() == 32 {
+                            let mut arr = [0u8; 32];
+                            arr.copy_from_slice(&bytes);
+                            Some(arr)
+                        } else {
+                            None
+                        }
+                    })
+            });
+            Some((access.clone(), refresh.clone(), database_token))
+        }
+        _ => {
+            println!("No valid tokens found in cache");
+            None
+        }
+    }
 }
 
 static USER_ID_CACHE: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
@@ -158,14 +173,10 @@ async fn login_user(app_handle: tauri::AppHandle, email: String, password: Strin
     let app_handle_arc = Arc::new(app_handle);
 
     // Attempt login
-    let login_result =
-        crate::login::login_user_lambda(&app_handle_arc, email.clone(), password).await?;
+    let login_result = crate::login::login_user_lambda(&app_handle_arc, email.clone(), password).await?;
 
     // If login was successful, store the email as user ID and start notification service
     if login_result.contains("\"status\":\"ok\"") {
-        // Store the email as user ID (desktop only)
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        user_utils::save_current_user_id(&app_handle_arc, &email)?;
 
         // initialize database
         if let Err(e) = database_utils::init_db(&app_handle_arc) {
@@ -202,8 +213,8 @@ async fn login_user(app_handle: tauri::AppHandle, email: String, password: Strin
 
 // register user command
 #[tauri::command]
-async fn register_user(email: String, password: String) -> Result<String, String> {
-    crate::register::register_user_lambda(email, password).await
+async fn register_user(username: String, password: String) -> Result<String, String> {
+    crate::register::register_user_lambda(username, password).await
 }
 
 // logout user command
