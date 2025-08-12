@@ -452,6 +452,10 @@ const updateEventByTargetId = async (eventSuggestion: EventSuggestion) => {
     time: eventSuggestion.time || existingEvent.time,
     alarm: eventSuggestion.alarm !== undefined ? eventSuggestion.alarm : existingEvent.alarm,
     recurrence: eventSuggestion.recurrence || existingEvent.recurrence,
+    // Preserve participants and other fields
+    participants: existingEvent.participants || [],
+    location: existingEvent.location || '',
+    // Reset sync flags
     synced: false,
     synced_google: false
   };
@@ -478,8 +482,11 @@ const createNewEvent = async (eventSuggestion: EventSuggestion) => {
     alarm: eventSuggestion.alarm,
     synced: false,
     synced_google: false,
+    synced_outlook: false,
     deleted: false,
-    recurrence: eventSuggestion.recurrence
+    recurrence: eventSuggestion.recurrence,
+    participants: [],
+    location: ""
   };
   await invoke('save_event', { event: JSON.stringify(calendarEvent) });
   if (calendarEvent.alarm) {
@@ -539,8 +546,11 @@ const updateConflictingEvent = async (existingEvent: any, newSuggestion: EventSu
       description: newSuggestion.description,
       alarm: newSuggestion.alarm !== undefined ? newSuggestion.alarm : existingEvent.alarm,
       recurrence: newSuggestion.recurrence || existingEvent.recurrence,
+      participants: existingEvent.participants || [],
+      location: existingEvent.location || '',
       synced: false,
-      synced_google: false
+      synced_google: false,
+      synced_outlook: false
     };
   } else if (conflictType === 'description') {
     updatedEvent = {
@@ -548,8 +558,11 @@ const updateConflictingEvent = async (existingEvent: any, newSuggestion: EventSu
       time: newSuggestion.time || existingEvent.time,
       alarm: newSuggestion.alarm !== undefined ? newSuggestion.alarm : existingEvent.alarm,
       recurrence: newSuggestion.recurrence || existingEvent.recurrence,
+      participants: existingEvent.participants || [],
+      location: existingEvent.location || '',
       synced: false,
-      synced_google: false
+      synced_google: false,
+      synced_outlook: false
     };
   }
   await invoke('save_event', { event: JSON.stringify(updatedEvent) });
