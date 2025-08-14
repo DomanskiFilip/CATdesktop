@@ -178,7 +178,7 @@ impl OutlookSyncService {
                 .and_hms_opt(0, 0, 0)
                 .unwrap();
             let mut unsynced = conn.prepare(
-                "SELECT id, user_id, description, time, alarm, synced, synced_google, synced_outlook, deleted, recurrence, participants FROM events 
+                "SELECT id, user_id, description, time, alarm, synced, synced_google, synced_outlook, event_id_google, event_id_outlook, deleted, recurrence, participants FROM events
                 WHERE user_id = ? AND ((synced_outlook = 0) OR (deleted = 1 AND synced_outlook = 0)) AND time >= ?"
             ).map_err(|e| format!("Failed to prepare statement: {}", e))?;
 
@@ -198,62 +198,86 @@ impl OutlookSyncService {
 
         // Send each event to Outlook Calendar
         for event in &events {
-            if event.synced_outlook == true {
-                // Already synced to Outlook, skip
+            // Skip events that already have an Outlook ID (already originated from Outlook or already synced)
+            if let Some(ref outlook_id) = event.event_id_outlook {
+                if !outlook_id.is_empty() {
+                    println!("Skipping event {} - already has Outlook ID: {}", event.id, outlook_id);
+                    continue;
+                }
+            }
+
+            // Skip events that are already synced to Outlook
+            if event.synced_outlook {
+                println!("Skipping event {} - already synced to Outlook", event.id);
                 continue;
             }
 
-            // Temporary safeguard: skip locally-deleted events to avoid re-creating them in Outlook
-            if event.deleted {
-                println!("Skipping deleted event {} for Outlook push", event.id);
+            // Skip deleted events unless they need to be deleted from Outlook
+            if event.deleted && !event.synced_outlook {
+                println!("Skipping deleted event {} - not synced to Outlook yet", event.id);
                 continue;
             }
 
-            // // Handle deletions: delete from Outlook if we have an Outlook ID
-            // if event.deleted == true {
-            //     // Assumes event.id is the Outlook event ID (true for events pulled from Outlook).
-            //     // For locally-created events you POSTed to Outlook, you must persist the returned Outlook ID to delete correctly.
-            //     let delete_url = format!("https://graph.microsoft.com/v1.0/me/events/{}", event.id);
+            if event.deleted == true && event.synced_outlook == true {
+                let outlook_id_to_delete = if let Some(ref outlook_id) = event.event_id_outlook {
+                    if !outlook_id.is_empty() {
+                        // This was a locally-created event synced to Outlook
+                        outlook_id
+                    } else {
+                        // Empty Outlook ID, use the event ID
+                        &event.id
+                    }
+                } else {
+                    // No Outlook ID stored, use the event ID (this was an event pulled from Outlook)
+                    &event.id
+                };
+                
+                println!("Deleting Outlook event {}", outlook_id_to_delete);
+                let delete_url = format!("https://graph.microsoft.com/v1.0/me/events/{}", outlook_id_to_delete);
+                
+                let delete_resp = tokio::time::timeout(
+                    Duration::from_secs(15),
+                    self.client
+                        .delete(&delete_url)
+                        .bearer_auth(access_token.trim())
+                        .send(),
+                )
+                .await;
 
-            //     let mut delete_resp = tokio::time::timeout(
-            //         Duration::from_secs(15),
-            //         self.client
-            //             .delete(&delete_url)
-            //             .bearer_auth(access_token.trim())
-            //             .send(),
-            //     )
-            //     .await
-            //     .map_err(|e| format!("Request timed out: {}", e))?
-            //     .map_err(|e| format!("Failed to delete Outlook event: {}", e))?;
-
-            //     // If unauthorized, refresh and retry once
-            //     if delete_resp.status() == reqwest::StatusCode::UNAUTHORIZED && !refresh_token.is_empty() {
-            //         if let Ok(new_token) = self.refresh_outlook_access_token(refresh_token, app_handle_arc).await {
-            //             self.update_access_token_file(&token_path, &new_token)?;
-            //             access_token = new_token;
-
-            //             delete_resp = tokio::time::timeout(
-            //                 Duration::from_secs(15),
-            //                 self.client
-            //                     .delete(&delete_url)
-            //                     .bearer_auth(access_token.trim())
-            //                     .send(),
-            //             )
-            //             .await
-            //             .map_err(|e| format!("Request timed out: {}", e))?
-            //             .map_err(|e| format!("Failed to delete Outlook event: {}", e))?;
-            //         }
-            //     }
-
-            //     if delete_resp.status().is_success() || delete_resp.status() == reqwest::StatusCode::NOT_FOUND {
-            //         println!("Deleted Outlook event {}", event.id);
-            //     } else {
-            //         eprintln!("Outlook delete error: {}", delete_resp.status());
-            //     }
-
-            //     // Skip create path for deleted events
-            //     continue;
-            // }
+                match delete_resp {
+                    Ok(Ok(resp)) => {
+                        if resp.status() == reqwest::StatusCode::UNAUTHORIZED && !refresh_token.is_empty() {
+                            // Retry with refreshed token
+                            if let Ok(new_token) = self.refresh_outlook_access_token(&refresh_token, app_handle_arc).await {
+                                self.update_access_token_file(&token_path, &new_token)?;
+                                access_token = new_token;
+                                
+                                let retry_resp = tokio::time::timeout(
+                                    Duration::from_secs(15),
+                                    self.client
+                                        .delete(&delete_url)
+                                        .bearer_auth(access_token.trim())
+                                        .send(),
+                                )
+                                .await;
+                                
+                                if let Ok(Ok(retry_resp)) = retry_resp {
+                                    if retry_resp.status().is_success() || retry_resp.status() == reqwest::StatusCode::NOT_FOUND {
+                                        println!("Successfully deleted Outlook event {}", outlook_id_to_delete);
+                                    }
+                                }
+                            }
+                        } else if resp.status().is_success() || resp.status() == reqwest::StatusCode::NOT_FOUND {
+                            println!("Successfully deleted Outlook event {}", outlook_id_to_delete);
+                        } else {
+                            eprintln!("Failed to delete Outlook event {}: {}", outlook_id_to_delete, resp.status());
+                        }
+                    }
+                    Ok(Err(e)) => eprintln!("Request error deleting Outlook event: {}", e),
+                    Err(_) => eprintln!("Timeout deleting Outlook event {}", outlook_id_to_delete),
+                }
+                continue; // Skip to next event
+            }
 
             // Decrypt the event description
             let decrypted_description = if !event.description.is_empty() {
@@ -319,10 +343,31 @@ impl OutlookSyncService {
             .map_err(|e| format!("Request timed out: {}", e))?
             .map_err(|e| format!("Failed to send event to Outlook: {}", e))?;
 
-            if resp.status() == reqwest::StatusCode::UNAUTHORIZED && !refresh_token.is_empty() {
-                if let Ok(new_token) = self.refresh_outlook_access_token(refresh_token, app_handle_arc).await {
+           if resp.status().is_success() {
+                // IMPORTANT: Capture the Outlook ID and store it
+                if let Ok(response_json) = resp.json::<serde_json::Value>().await {
+                    if let Some(outlook_id) = response_json.get("id").and_then(|v| v.as_str()) {
+                        let conn = get_db_connection(app_handle_arc)
+                            .map_err(|e| format!("Database connection failed: {}", e))?;
+                        
+                        // FIXED: Update the specific event, not all events
+                        conn.execute(
+                            "UPDATE events SET event_id_outlook = ?, synced_outlook = 1 WHERE id = ? AND user_id = ?",
+                            (outlook_id, &event.id, &event.user_id),
+                        )
+                        .map_err(|e| format!("Failed to store Outlook event ID: {}", e))?;
+                        
+                        println!("Successfully created Outlook event with ID: {} for local event: {}", outlook_id, event.id);
+                    }
+                } else {
+                    eprintln!("Failed to parse Outlook response for event: {}", event.id);
+                }
+            } else if resp.status() == reqwest::StatusCode::UNAUTHORIZED && !refresh_token.is_empty() {
+                // Try refreshing token and retry once
+                if let Ok(new_token) = self.refresh_outlook_access_token(&refresh_token, app_handle_arc).await {
                     self.update_access_token_file(&token_path, &new_token)?;
                     access_token = new_token;
+                    
                     // Retry the request with new token
                     let retry_resp = tokio::time::timeout(
                         Duration::from_secs(15),
@@ -333,19 +378,32 @@ impl OutlookSyncService {
                             .send(),
                     )
                     .await
-                    .map_err(|e| format!("Request timed out: {}", e))?
-                    .map_err(|e| format!("Failed to send event to Outlook: {}", e))?;
+                    .map_err(|e| format!("Retry request timed out: {}", e))?
+                    .map_err(|e| format!("Failed to retry event to Outlook: {}", e))?;
 
-                    if !retry_resp.status().is_success() {
-                        eprintln!("Outlook API error: {}", retry_resp.status());
+                    if retry_resp.status().is_success() {
+                        if let Ok(response_json) = retry_resp.json::<serde_json::Value>().await {
+                            if let Some(outlook_id) = response_json.get("id").and_then(|v| v.as_str()) {
+                                let conn = get_db_connection(app_handle_arc)
+                                    .map_err(|e| format!("Database connection failed: {}", e))?;
+                                
+                                conn.execute(
+                                    "UPDATE events SET event_id_outlook = ?, synced_outlook = 1 WHERE id = ? AND user_id = ?",
+                                    (outlook_id, &event.id, &event.user_id),
+                                )
+                                .map_err(|e| format!("Failed to store Outlook event ID: {}", e))?;
+                                
+                                println!("Successfully created Outlook event with ID: {} for local event: {} (after token refresh)", outlook_id, event.id);
+                            }
+                        }
                     } else {
-                        println!("Successfully created new Outlook event");
+                        eprintln!("Outlook API error after token refresh: {} for event: {}", retry_resp.status(), event.id);
                     }
+                } else {
+                    eprintln!("Failed to refresh Outlook token for event: {}", event.id);
                 }
-            } else if !resp.status().is_success() {
-                eprintln!("Outlook API error: {}", resp.status());
             } else {
-                println!("Successfully created new Outlook event");
+                eprintln!("Outlook API error: {} for event: {}", resp.status(), event.id);
             }
         }
 
@@ -353,6 +411,13 @@ impl OutlookSyncService {
         let conn = get_db_connection(app_handle_arc)
             .map_err(|e| format!("Database connection failed: {}", e))?;
         Self::mark_events_synced_outlook(&conn, &events)?;
+
+        // TRIGGER IMMEDIATE DYNAMODB SYNC TO PERSIST SYNC FLAGS
+        if let Err(e) = crate::trigger_sync(app_handle_arc.as_ref().clone()).await {
+            eprintln!("Failed to trigger DynamoDB sync after Google sync: {}", e);
+        } else {
+            println!("Successfully triggered DynamoDB sync after Google sync");
+        }
 
         Ok(())
     }
@@ -525,22 +590,44 @@ impl OutlookSyncService {
                     }
 
                     // Check for duplicates
-                    let should_skip = {
+                     let should_skip = {
                         let conn = get_db_connection(app_handle_arc)
                             .map_err(|e| format!("Database connection failed: {}", e))?;
 
-                        let mut query = conn
-                            .prepare("SELECT COUNT(*) FROM events WHERE id = ?1 AND user_id = ?2")
-                            .map_err(|e| format!("Failed to prepare check statement: {}", e))?;
-                        let exists: i64 = query
+                        // 1. Check if this Outlook event already exists by ID OR by event_id_outlook
+                        let mut id_query = conn
+                            .prepare("SELECT COUNT(*) FROM events WHERE (id = ?1 OR event_id_outlook = ?1) AND user_id = ?2")
+                            .map_err(|e| format!("Failed to prepare ID check statement: {}", e))?;
+                        let id_exists: i64 = id_query
                             .query_row([outlook_id, &user_id], |row| row.get(0))
-                            .map_err(|e| format!("Failed to check for existing event: {}", e))?;
+                            .map_err(|e| format!("Failed to check for existing event by ID: {}", e))?;
 
-                        exists > 0
+                        if id_exists > 0 {
+                            true
+                        } else {
+                            // 2. Check for events with same time and description (within 30-minute window)
+                            let event_start = event_time.with_timezone(&chrono::Utc);
+                            let window_start = event_start - chrono::Duration::minutes(30);
+                            let window_end = event_start + chrono::Duration::minutes(30);
+
+                            let mut time_query = conn.prepare(
+                                "SELECT COUNT(*) FROM events WHERE user_id = ?1 AND description = ?2 AND time BETWEEN ?3 AND ?4 AND deleted = 0"
+                            ).map_err(|e| format!("Failed to prepare time check statement: {}", e))?;
+                            
+                            let time_exists: i64 = time_query.query_row([
+                                &user_id,
+                                subject,
+                                &window_start.to_rfc3339(),
+                                &window_end.to_rfc3339()
+                            ], |row| row.get(0))
+                            .map_err(|e| format!("Failed to check for existing event by time: {}", e))?;
+
+                            time_exists > 0
+                        }
                     };
 
                     if should_skip {
-                        // If the event already exists, skip it
+                        println!("Skipping Outlook event '{}' - duplicate found", subject);
                         continue;
                     }
 
@@ -556,6 +643,8 @@ impl OutlookSyncService {
                         "synced": false,
                         "synced_google": false,
                         "synced_outlook": true,
+                        "event_id_google": None::<String>,
+                        "event_id_outlook": outlook_id,
                         "deleted": false,
                         "recurrence": None::<String>,
                         "participants": participants.unwrap_or_default(),
