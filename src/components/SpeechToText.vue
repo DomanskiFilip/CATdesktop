@@ -1,25 +1,14 @@
 <template>
   <section class="speech-container">
     <!-- Speech Button -->
-    <button @click="toggleRecording" :class="['speech-btn', { recording: isRecording, disabled: !isSupported || isProcessing }]" :disabled="!isSupported || isProcessing" :title="getButtonTitle()" :style="{ transform: isRecording ? `scale(${1 + audioLevel / 100})` : 'scale(1)' }">
-      <svg v-if="!isRecording && !isProcessing" xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="currentColor">
-        <path d="M480-400q-50 0-85-35t-35-85v-240q0-50 35-85t85-35q50 0 85 35t35 85v240q0 50-35 85t-85 35Zm0-240Zm-40 520v-123q-104-14-172-93t-68-184h80q0 83 58.5 141.5T480-320q83 0 141.5-58.5T680-520h80q0 105-68 184t-172 93v123h-40Zm40-360q17 0 28.5-11.5T520-520v-240q0-17-11.5-28.5T480-800q-17 0-28.5 11.5T440-760v240q0 17 11.5 28.5T480-480Z"/>
-      </svg>
-      <svg v-else-if="isRecording" xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="currentColor">
-        <path d="M320-320h320v-320H320v320ZM480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Z"/>
-      </svg>
-      <div v-else class="loading-spinner"></div>
+    <button @click="toggleRecording" :class="['speech-btn', { recording: isRecording, disabled: !isSupported || isProcessing }]" :disabled="!isSupported || isProcessing" :title="getButtonTitle()">
+      <svg v-if="!isRecording && !isProcessing" xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-dark)"><path d="M480-400q-50 0-85-35t-35-85v-240q0-50 35-85t85-35q50 0 85 35t35 85v240q0 50-35 85t-85 35Zm0-240Zm-40 520v-123q-104-14-172-93t-68-184h80q0 83 58.5 141.5T480-320q83 0 141.5-58.5T680-520h80q0 105-68 184t-172 93v123h-40Zm40-360q17 0 28.5-11.5T520-520v-240q0-17-11.5-28.5T480-800q-17 0-28.5 11.5T440-760v240q0 17 11.5 28.5T480-480Z"/></svg>
+      <svg v-else-if="isRecording" xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-dark)"><path d="M320-320h320v-320H320v320ZM480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Z"/></svg>
     </button>
 
     <!-- Microphone Selection Dropdown -->
-    <select v-if="!isRecording && availableMicrophones.length > 1" 
-            v-model="selectedMicrophoneId" 
-            @change="onMicrophoneChange"
-            class="microphone-select"
-            title="Select microphone">
-      <option v-for="mic in availableMicrophones" 
-              :key="mic.deviceId" 
-              :value="mic.deviceId">
+    <select v-if="!isRecording && availableMicrophones.length > 1" v-model="selectedMicrophoneId" @change="onMicrophoneChange" class="microphone-select" title="Select microphone">
+      <option v-for="mic in availableMicrophones" :key="mic.deviceId" :value="mic.deviceId">
         {{ mic.label || `Microphone ${mic.deviceId.slice(0, 8)}` }}
       </option>
     </select>
@@ -46,7 +35,6 @@ let mediaRecorder: MediaRecorder | null = null
 let audioChunks: Blob[] = []
 let stream: MediaStream | null = null
 let audioContext: AudioContext | null = null
-let analyser: AnalyserNode | null = null
 let animationFrame: number | null = null
 
 onMounted(async () => {
@@ -191,7 +179,6 @@ const stopRecording = () => {
   if (mediaRecorder && isRecording.value) {
     mediaRecorder.stop()
     isRecording.value = false
-    audioLevel.value = 0
   }
   
   if (stream) {
@@ -277,24 +264,23 @@ const processRecording = async () => {
   padding: 0.25rem 0.5rem;
   border: 1px solid var(--color-border);
   border-radius: 4px;
-  background-color: var(--color-surface);
+  background-color: var(--color-main);
   color: var(--color-text);
   font-size: 0.8rem;
   max-width: 200px;
 }
 
-.audio-level-indicator {
-  width: 100px;
-  height: 4px;
-  background-color: rgba(255, 255, 255, 0.2);
-  border-radius: 2px;
-  overflow: hidden;
+.microphone-select option {
+  cursor: pointer;
+  background-color: var(--color-main);
+  color: var(--color-text);
 }
 
-.audio-level-bar {
-  height: 100%;
-  background-color: #4CAF50;
-  transition: width 0.1s ease;
+.microphone-select option:hover, 
+.microphone-select option:focus {
+  background-color: var(--color-text);
+  color: var(--color-dark);
+  cursor: pointer;
 }
 
 .speech-btn {
@@ -326,19 +312,6 @@ const processRecording = async () => {
 .speech-btn.disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.loading-spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-radius: 50%;
-  border-top-color: currentColor;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
 }
 
 @keyframes pulse {

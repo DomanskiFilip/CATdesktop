@@ -8,6 +8,7 @@
     <button id="dark-1"></button>
     <button id="dark-2"></button>
     <button id="dark-3"></button>
+    <button id="dark-4"></button>
     </section>
   </section>
 </template>
@@ -33,7 +34,7 @@ const themeMappings: Record<string, Theme> = {
     "--color-main": "var(--color-light)",
     "--color-border": "var(--color-dark)",
     "--color-text": "var(--color-dark)",
-    "--color-theme": "var(--color-lemon)",
+    "--color-theme": "var(--color-orange)",
     "--color-action": "var(--color-theme)",
     "--color-shadow": "var(--color-shadow-light)"
   },
@@ -57,7 +58,7 @@ const themeMappings: Record<string, Theme> = {
    "--color-main": "var(--color-dark)",
     "--color-border": "var(--color-light)",
     "--color-text": "var(--color-light)",
-    "--color-theme": "var(--color-lemon)",
+    "--color-theme": "var(--color-orange)",
     "--color-action": "var(--color-theme)",
     "--color-shadow": "var(--color-shadow-dark)"
   },
@@ -66,6 +67,14 @@ const themeMappings: Record<string, Theme> = {
     "--color-border": "var(--color-light)",
     "--color-text": "var(--color-light)",
     "--color-theme": "var(--color-rasberry)",
+    "--color-action": "var(--color-theme)",
+    "--color-shadow": "var(--color-shadow-dark)"
+  },
+  "dark-4": {
+   "--color-main": "var(--color-dark)",
+    "--color-border": "var(--color-light)",
+    "--color-text": "var(--color-light)",
+    "--color-theme": "var(--color-lemon)",
     "--color-action": "var(--color-theme)",
     "--color-shadow": "var(--color-shadow-dark)"
   }
@@ -131,7 +140,7 @@ button:hover {
 }
 
 #light-2 {
-  background: conic-gradient(from 225deg, var(--color-light) 0deg 180deg, var(--color-lemon) 180deg 360deg);
+  background: conic-gradient(from 225deg, var(--color-light) 0deg 180deg, var(--color-orange) 180deg 360deg);
 }
 
 #light-3 {
@@ -143,11 +152,15 @@ button:hover {
 }
 
 #dark-2 {
-  background: conic-gradient(from 225deg, var(--color-dark) 0deg 180deg, var(--color-lemon) 180deg 360deg);
+  background: conic-gradient(from 225deg, var(--color-dark) 0deg 180deg, var(--color-orange) 180deg 360deg);
 }
 
 #dark-3 {
   background: conic-gradient(from 225deg, var(--color-dark) 0deg 180deg, var(--color-rasberry) 180deg 360deg);
+}
+
+#dark-4 {
+  background: conic-gradient(from 225deg, var(--color-dark) 0deg 180deg, var(--color-lemon) 180deg 360deg);
 }
 
 </style>
