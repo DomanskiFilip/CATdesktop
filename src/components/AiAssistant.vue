@@ -15,24 +15,8 @@
     <section id="chat-container" ref="chatContainer">
       <div v-for="(message, index) in chatHistory" :key="index" :class="['message', message.sender === 'user' ? 'user-message' : 'assistant-message']">
         <div class="message-timestamp">{{ formatTimestamp(message.timestamp) }}</div>
-        <DeleteSuggestion
-          v-if="message.sender === 'assistant' && message.eventSuggestion && message.isDelete"
-          :eventSuggestion="message.eventSuggestion"
-          :eventAccepted="message.eventAccepted"
-          :eventRejected="message.eventRejected"
-          @accept="acceptSuggestion(index)"
-          @reject="rejectSuggestion(index)"
-        />
-        <EventSuggestion
-          v-else-if="message.sender === 'assistant' && message.eventSuggestion"
-          :eventSuggestion="message.eventSuggestion"
-          :eventAccepted="message.eventAccepted"
-          :eventRejected="message.eventRejected"
-          :isUpdate="message.isUpdate"
-          :isMoved="message.isMoved"
-          @accept="acceptSuggestion(index)"
-          @reject="rejectSuggestion(index)"
-        />
+        <DeleteSuggestion v-if="message.sender === 'assistant' && message.eventSuggestion && message.isDelete" :eventSuggestion="message.eventSuggestion" :eventAccepted="message.eventAccepted" :eventRejected="message.eventRejected" @accept="acceptSuggestion(index)" @reject="rejectSuggestion(index)"/>
+        <EventSuggestion v-else-if="message.sender === 'assistant' && message.eventSuggestion" :eventSuggestion="message.eventSuggestion" :eventAccepted="message.eventAccepted" :eventRejected="message.eventRejected" :isUpdate="message.isUpdate" :isMoved="message.isMoved" @accept="acceptSuggestion(index)" @reject="rejectSuggestion(index)"/>
         <div class="message-content">{{ message.content }}</div>
       </div>
       <div v-if="isTyping" class="typing-indicator">
@@ -60,6 +44,7 @@
     
     <section id="input-area">
       <input  type="text" v-model="userInput" @keyup.enter="sendMessage" placeholder="Ask me to create events, check your schedule, etc." :disabled="isProcessing"/>
+      <SpeechToText @transcription="handleTranscription" @error="handleSpeechError"/>
       <button @click="sendMessage" :disabled="isProcessing || !userInput.trim()">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
           <path fill="none" d="M0 0h24v24H0z"/>
@@ -69,14 +54,7 @@
     </section>
 
     <!-- Conflict Resolution Dialog -->
-    <ConflictMessage
-      :isVisible="showConflictDialog"
-      :existingEvent="conflictData.existingEvent"
-      :newSuggestion="conflictData.newSuggestion"
-      :conflictType="conflictData.conflictType"
-      @update="handleConflictUpdate"
-      @cancel="handleConflictCancel"
-    />
+    <ConflictMessage :isVisible="showConflictDialog" :existingEvent="conflictData.existingEvent" :newSuggestion="conflictData.newSuggestion" :conflictType="conflictData.conflictType" @update="handleConflictUpdate" @cancel="handleConflictCancel"/>
   </section>
 </template>
 
@@ -87,6 +65,7 @@ import { emit as tauriEmit } from '@tauri-apps/api/event'
 import DeleteSuggestion from './DeleteSuggestion.vue'
 import EventSuggestion from './EventSuggestion.vue'
 import ConflictMessage from './ConflictMessage.vue'
+import SpeechToText from './SpeechToText.vue'
 
 interface EventSuggestion {
   target_event_id?: string;
@@ -601,6 +580,44 @@ const rejectSuggestion = async (messageIndex: number) => {
   });
   await scrollToBottom();
 };
+
+// Handle speech-to-text transcription //
+const handleTranscription = (text: string) => {
+  userInput.value = text
+  // Focus on input for user to review before sending
+  nextTick(() => {
+    const inputElement = document.querySelector('#input-area input') as HTMLInputElement
+    if (inputElement) {
+      inputElement.focus()
+      // Place cursor at the end
+      inputElement.setSelectionRange(inputElement.value.length, inputElement.value.length)
+    }
+  })
+}
+
+const handleSpeechError = (error: string) => {
+  console.error('Speech recognition error:', error)
+  
+  // Dedicated rate limit handling
+  if (error.startsWith('RATE_LIMIT:')) {
+    const rateLimitMessage = error.replace('RATE_LIMIT:', '').trim()
+    chatHistory.value.push({
+      content: rateLimitMessage,
+      sender: 'assistant',
+      timestamp: new Date().toISOString()
+    })
+    scrollToBottom()
+    return
+  }
+  
+  // Regular error handling
+  chatHistory.value.push({
+    content: `Speech recognition error: ${error}`,
+    sender: 'assistant', 
+    timestamp: new Date().toISOString()
+  })
+  scrollToBottom()
+}
 
 // Scroll to bottom on mount
 onMounted(() => {

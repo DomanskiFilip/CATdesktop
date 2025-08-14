@@ -17,6 +17,7 @@ mod theme_utils;
 mod token_utils;
 mod user_utils;
 mod weather_service;
+mod speech_to_text;
 
 use crate::ai_smart_features::AISmartFeaturesService;
 use crate::database_sync_service::DbSyncService;
@@ -25,6 +26,7 @@ use crate::google_sync_service::GoogleSyncService;
 use crate::outlook_sync_service::OutlookSyncService;
 use crate::notification_service::NotificationService;
 use crate::weather_service::get_weekly_weather;
+use speech_to_text::transcribe_audio;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use auto_launch::AutoLaunchBuilder;
 use base64::Engine;
@@ -791,6 +793,7 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
             set_user_coordinates,
             set_notification_service,
             set_notification_lead_time,
+            transcribe_audio,
         ])
         .setup(|app| {
             // Initialize database with iOS-specific error handling

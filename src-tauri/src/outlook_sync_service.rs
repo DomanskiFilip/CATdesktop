@@ -203,10 +203,57 @@ impl OutlookSyncService {
                 continue;
             }
 
-            if event.deleted == true {
-                println!("Skipping deleted event {}", event.id);
+            // Temporary safeguard: skip locally-deleted events to avoid re-creating them in Outlook
+            if event.deleted {
+                println!("Skipping deleted event {} for Outlook push", event.id);
                 continue;
             }
+
+            // // Handle deletions: delete from Outlook if we have an Outlook ID
+            // if event.deleted == true {
+            //     // Assumes event.id is the Outlook event ID (true for events pulled from Outlook).
+            //     // For locally-created events you POSTed to Outlook, you must persist the returned Outlook ID to delete correctly.
+            //     let delete_url = format!("https://graph.microsoft.com/v1.0/me/events/{}", event.id);
+
+            //     let mut delete_resp = tokio::time::timeout(
+            //         Duration::from_secs(15),
+            //         self.client
+            //             .delete(&delete_url)
+            //             .bearer_auth(access_token.trim())
+            //             .send(),
+            //     )
+            //     .await
+            //     .map_err(|e| format!("Request timed out: {}", e))?
+            //     .map_err(|e| format!("Failed to delete Outlook event: {}", e))?;
+
+            //     // If unauthorized, refresh and retry once
+            //     if delete_resp.status() == reqwest::StatusCode::UNAUTHORIZED && !refresh_token.is_empty() {
+            //         if let Ok(new_token) = self.refresh_outlook_access_token(refresh_token, app_handle_arc).await {
+            //             self.update_access_token_file(&token_path, &new_token)?;
+            //             access_token = new_token;
+
+            //             delete_resp = tokio::time::timeout(
+            //                 Duration::from_secs(15),
+            //                 self.client
+            //                     .delete(&delete_url)
+            //                     .bearer_auth(access_token.trim())
+            //                     .send(),
+            //             )
+            //             .await
+            //             .map_err(|e| format!("Request timed out: {}", e))?
+            //             .map_err(|e| format!("Failed to delete Outlook event: {}", e))?;
+            //         }
+            //     }
+
+            //     if delete_resp.status().is_success() || delete_resp.status() == reqwest::StatusCode::NOT_FOUND {
+            //         println!("Deleted Outlook event {}", event.id);
+            //     } else {
+            //         eprintln!("Outlook delete error: {}", delete_resp.status());
+            //     }
+
+            //     // Skip create path for deleted events
+            //     continue;
+            // }
 
             // Decrypt the event description
             let decrypted_description = if !event.description.is_empty() {
