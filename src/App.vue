@@ -197,6 +197,13 @@ const handleLocationNameUpdate = (name: string) => {
   currentLocationName.value = name
 }
 
+onMounted(() => {
+  // Disable right-click context menu everywhere
+  window.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+  });
+});
+
 onMounted(async () => {
   // Listen for backend notification to open smart features
   await listen('open-smartfeatures', ({ payload }) => {
