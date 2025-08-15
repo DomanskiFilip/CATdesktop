@@ -198,23 +198,37 @@ impl OutlookSyncService {
 
         // Send and process each event to Outlook Calendar
         for event in &events {
-            let is_local_change = !event.synced;
+            // Skip events that already have an Outlook ID (already originated from Outlook or already synced)
+            if let Some(ref outlook_id) = event.event_id_outlook {
+                if !outlook_id.is_empty() {
+                    println!("Skipping event {} - already has Outlook ID: {}", event.id, outlook_id);
+                    continue;
+                }
+            }
+
+            // Skip events that are already synced to Outlook
+            if event.synced_outlook {
+                println!("Skipping event {} - already synced to Outlook", event.id);
+                continue;
+            }
 
             // Skip deleted events unless they need to be deleted from Outlook
-            if event.deleted && event.synced_outlook {
+            if event.deleted && !event.synced_outlook {
                 println!("Skipping deleted event {} - not synced to Outlook yet", event.id);
                 continue;
             }
 
-            // Handle deletion of synced events
-            if event.deleted == true && event.synced_outlook == false {
+            if event.deleted == true && event.synced_outlook == true {
                 let outlook_id_to_delete = if let Some(ref outlook_id) = event.event_id_outlook {
                     if !outlook_id.is_empty() {
+                        // This was a locally-created event synced to Outlook
                         outlook_id
                     } else {
+                        // Empty Outlook ID, use the event ID
                         &event.id
                     }
                 } else {
+                    // No Outlook ID stored, use the event ID (this was an event pulled from Outlook)
                     &event.id
                 };
                 
@@ -230,7 +244,7 @@ impl OutlookSyncService {
                 )
                 .await;
 
-                 match delete_resp {
+                match delete_resp {
                     Ok(Ok(resp)) => {
                         if resp.status() == reqwest::StatusCode::UNAUTHORIZED && !refresh_token.is_empty() {
                             // Retry with refreshed token
@@ -262,125 +276,8 @@ impl OutlookSyncService {
                     Ok(Err(e)) => eprintln!("Request error deleting Outlook event: {}", e),
                     Err(_) => eprintln!("Timeout deleting Outlook event {}", outlook_id_to_delete),
                 }
-                continue;
+                continue; // Skip to next event
             }
-
-            // Check if this event has an Outlook ID (existing Outlook event to update)
-            if let Some(ref outlook_id) = event.event_id_outlook {
-                if !outlook_id.is_empty() && is_local_change {
-                    // UPDATE existing Outlook event with local changes
-                    println!("Updating existing Outlook event {} with local changes", outlook_id);
-                    
-                    // Decrypt the event description
-                    let decrypted_description = if !event.description.is_empty() {
-                        match decrypt_user_data_base(
-                            app_handle_arc,
-                            &event.user_id,
-                            &base64::engine::general_purpose::STANDARD
-                                .decode(&event.description)
-                                .unwrap_or_default(),
-                        ) {
-                            Ok(bytes) => String::from_utf8(bytes).unwrap_or_default(),
-                            Err(e) => {
-                                eprintln!("Failed to decrypt event description for Outlook sync: {}", e);
-                                String::from("[UNREADABLE EVENT]")
-                            }
-                        }
-                    } else {
-                        String::new()
-                    };
-
-                    let start_time = event.time;
-                    let end_time = event.time + chrono::Duration::hours(1);
-
-                    let attendees: Vec<serde_json::Value> = event.participants
-                        .as_ref()
-                        .map(|participants| {
-                            participants.iter()
-                                .map(|email| {
-                                    json!({
-                                        "emailAddress": {
-                                            "address": email,
-                                            "name": email
-                                        }
-                                    })
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
-
-                    let body = json!({
-                        "subject": decrypted_description,
-                        "start": {
-                            "dateTime": start_time.to_rfc3339(),
-                            "timeZone": "UTC"
-                        },
-                        "end": {
-                            "dateTime": end_time.to_rfc3339(),
-                            "timeZone": "UTC"
-                        },
-                        "attendees": attendees
-                    });
-
-                    // UPDATE existing Outlook event
-                    let update_url = format!("https://graph.microsoft.com/v1.0/me/events/{}", outlook_id);
-                    let resp = tokio::time::timeout(
-                        Duration::from_secs(15),
-                        self.client
-                            .patch(&update_url)
-                            .bearer_auth(access_token.trim())
-                            .json(&body)
-                            .send(),
-                    )
-                    .await
-                    .map_err(|e| format!("Request timed out: {}", e))?
-                    .map_err(|e| format!("Failed to update event in Outlook: {}", e))?;
-
-                    if resp.status().is_success() {
-                        println!("✅ Successfully updated Outlook event with ID: {}", outlook_id);
-                    } else if resp.status() == reqwest::StatusCode::UNAUTHORIZED && !refresh_token.is_empty() {
-                        // Try refreshing token and retry
-                        if let Ok(new_token) = self.refresh_outlook_access_token(&refresh_token, app_handle_arc).await {
-                            self.update_access_token_file(&token_path, &new_token)?;
-                            access_token = new_token;
-                            
-                            let retry_resp = tokio::time::timeout(
-                                Duration::from_secs(15),
-                                self.client
-                                    .patch(&update_url)
-                                    .bearer_auth(access_token.trim())
-                                    .json(&body)
-                                    .send(),
-                            )
-                            .await;
-                            
-                            if let Ok(Ok(retry_resp)) = retry_resp {
-                                if retry_resp.status().is_success() {
-                                    println!("✅ Successfully updated Outlook event with ID: {} (after token refresh)", outlook_id);
-                                } else {
-                                    eprintln!("Failed to update Outlook event {}: {}", outlook_id, retry_resp.status());
-                                }
-                            }
-                        }
-                    } else {
-                        eprintln!("Outlook API error updating event: {}", resp.status());
-                    }
-                    continue; // Skip to next event - we're done with this one
-                } else if !outlook_id.is_empty() && !is_local_change {
-                    // Event already has Outlook ID and no local changes - skip
-                    println!("Skipping event {} - already has Outlook ID and no local changes: {}", event.id, outlook_id);
-                    continue;
-                }
-            }
-
-            // Skip events that are already synced to Outlook (no local changes)
-            if event.synced_outlook && !is_local_change {
-                println!("Skipping event {} - already synced to Outlook", event.id);
-                continue;
-            }
-
-            // CREATE new Outlook event (no Outlook ID or empty Outlook ID)
-            println!("Creating new Outlook event for local event {}", event.id);
 
             // Decrypt the event description
             let decrypted_description = if !event.description.is_empty() {
@@ -446,30 +343,32 @@ impl OutlookSyncService {
             .map_err(|e| format!("Request timed out: {}", e))?
             .map_err(|e| format!("Failed to send event to Outlook: {}", e))?;
 
-        if resp.status().is_success() {
+           if resp.status().is_success() {
                 // IMPORTANT: Capture the Outlook ID and store it
                 if let Ok(response_json) = resp.json::<serde_json::Value>().await {
                     if let Some(outlook_id) = response_json.get("id").and_then(|v| v.as_str()) {
                         let conn = get_db_connection(app_handle_arc)
                             .map_err(|e| format!("Database connection failed: {}", e))?;
                         
+                        // FIXED: Update the specific event, not all events
                         conn.execute(
                             "UPDATE events SET event_id_outlook = ?, synced_outlook = 1 WHERE id = ? AND user_id = ?",
                             (outlook_id, &event.id, &event.user_id),
                         )
                         .map_err(|e| format!("Failed to store Outlook event ID: {}", e))?;
                         
-                        println!("✅ Successfully created Outlook event with ID: {} for local event: {}", outlook_id, event.id);
+                        println!("Successfully created Outlook event with ID: {} for local event: {}", outlook_id, event.id);
                     }
                 } else {
                     eprintln!("Failed to parse Outlook response for event: {}", event.id);
                 }
             } else if resp.status() == reqwest::StatusCode::UNAUTHORIZED && !refresh_token.is_empty() {
-                // Try refreshing token and retry once for creation
+                // Try refreshing token and retry once
                 if let Ok(new_token) = self.refresh_outlook_access_token(&refresh_token, app_handle_arc).await {
                     self.update_access_token_file(&token_path, &new_token)?;
                     access_token = new_token;
                     
+                    // Retry the request with new token
                     let retry_resp = tokio::time::timeout(
                         Duration::from_secs(15),
                         self.client
@@ -478,29 +377,33 @@ impl OutlookSyncService {
                             .json(&body)
                             .send(),
                     )
-                    .await;
-                    
-                    if let Ok(Ok(retry_resp)) = retry_resp {
-                        if retry_resp.status().is_success() {
-                            if let Ok(response_json) = retry_resp.json::<serde_json::Value>().await {
-                                if let Some(outlook_id) = response_json.get("id").and_then(|v| v.as_str()) {
-                                    let conn = get_db_connection(app_handle_arc)
-                                        .map_err(|e| format!("Database connection failed: {}", e))?;
-                                    
-                                    conn.execute(
-                                        "UPDATE events SET event_id_outlook = ?, synced_outlook = 1 WHERE id = ? AND user_id = ?",
-                                        (outlook_id, &event.id, &event.user_id),
-                                    )
-                                    .map_err(|e| format!("Failed to store Outlook event ID: {}", e))?;
-                                    
-                                    println!("✅ Successfully created Outlook event with ID: {} for local event: {} (after token refresh)", outlook_id, event.id);
-                                }
+                    .await
+                    .map_err(|e| format!("Retry request timed out: {}", e))?
+                    .map_err(|e| format!("Failed to retry event to Outlook: {}", e))?;
+
+                    if retry_resp.status().is_success() {
+                        if let Ok(response_json) = retry_resp.json::<serde_json::Value>().await {
+                            if let Some(outlook_id) = response_json.get("id").and_then(|v| v.as_str()) {
+                                let conn = get_db_connection(app_handle_arc)
+                                    .map_err(|e| format!("Database connection failed: {}", e))?;
+                                
+                                conn.execute(
+                                    "UPDATE events SET event_id_outlook = ?, synced_outlook = 1 WHERE id = ? AND user_id = ?",
+                                    (outlook_id, &event.id, &event.user_id),
+                                )
+                                .map_err(|e| format!("Failed to store Outlook event ID: {}", e))?;
+                                
+                                println!("Successfully created Outlook event with ID: {} for local event: {} (after token refresh)", outlook_id, event.id);
                             }
                         }
+                    } else {
+                        eprintln!("Outlook API error after token refresh: {} for event: {}", retry_resp.status(), event.id);
                     }
+                } else {
+                    eprintln!("Failed to refresh Outlook token for event: {}", event.id);
                 }
             } else {
-                eprintln!("Outlook API error creating event: {}", resp.status());
+                eprintln!("Outlook API error: {} for event: {}", resp.status(), event.id);
             }
         }
 
@@ -508,6 +411,13 @@ impl OutlookSyncService {
         let conn = get_db_connection(app_handle_arc)
             .map_err(|e| format!("Database connection failed: {}", e))?;
         Self::mark_events_synced_outlook(&conn, &events)?;
+
+        // TRIGGER IMMEDIATE DYNAMODB SYNC TO PERSIST SYNC FLAGS
+        if let Err(e) = crate::trigger_sync(app_handle_arc.as_ref().clone()).await {
+            eprintln!("Failed to trigger DynamoDB sync after Google sync: {}", e);
+        } else {
+            println!("Successfully triggered DynamoDB sync after Google sync");
+        }
 
         Ok(())
     }
@@ -678,86 +588,44 @@ impl OutlookSyncService {
                     }
 
                     // Check for duplicates
-                    let duplicate_info = {
+                     let should_skip = {
                         let conn = get_db_connection(app_handle_arc)
                             .map_err(|e| format!("Database connection failed: {}", e))?;
-                        
+
+                        // 1. Check if this Outlook event already exists by ID OR by event_id_outlook
                         let mut id_query = conn
-                            .prepare("SELECT COUNT(*), description FROM events WHERE (id = ?1 OR event_id_outlook = ?1) AND user_id = ?2")
+                            .prepare("SELECT COUNT(*) FROM events WHERE (id = ?1 OR event_id_outlook = ?1) AND user_id = ?2")
                             .map_err(|e| format!("Failed to prepare ID check statement: {}", e))?;
+                        let id_exists: i64 = id_query
+                            .query_row([outlook_id, &user_id], |row| row.get(0))
+                            .map_err(|e| format!("Failed to check for existing event by ID: {}", e))?;
 
-                        if let Ok(row) = id_query.query_row([outlook_id, &user_id], |row| {
-                            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-                        }) {
-                            if row.0 > 0 {
-                                // Event exists, decrypt and compare descriptions
-                                let existing_description = if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(&row.1) {
-                                    match crate::encryption_utils::decrypt_user_data_base(app_handle_arc, &user_id, &decoded) {
-                                        Ok(decrypted) => String::from_utf8(decrypted).unwrap_or_default(),
-                                        Err(_) => row.1.clone(), // Fall back to encrypted string if decryption fails
-                                    }
-                                } else {
-                                    row.1.clone() // Not base64, assume plain text
-                                };
-                                
-                                let needs_update = existing_description != subject;
-                                (true, needs_update, existing_description)
-                            } else {
-                                // Check for events with same time and description (within 30-minute window)
-                                let event_start = event_time.with_timezone(&chrono::Utc);
-                                let window_start = event_start - chrono::Duration::minutes(30);
-                                let window_end = event_start + chrono::Duration::minutes(30);
-
-                                let mut time_query = conn.prepare(
-                                    "SELECT COUNT(*), description FROM events WHERE user_id = ?1 AND description = ?2 AND time BETWEEN ?3 AND ?4 AND deleted = 0"
-                                ).map_err(|e| format!("Failed to prepare time check statement: {}", e))?;
-                                
-                                if let Ok(time_row) = time_query.query_row([
-                                    &user_id,
-                                    subject,
-                                    &window_start.to_rfc3339(),
-                                    &window_end.to_rfc3339()
-                                ], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))) {
-                                    let needs_update = time_row.0 > 0 && time_row.1 != subject;
-                                    (time_row.0 > 0, needs_update, time_row.1)
-                                } else {
-                                    (false, false, String::new())
-                                }
-                            }
+                        if id_exists > 0 {
+                            true
                         } else {
-                            (false, false, String::new())
+                            // 2. Check for events with same time and description (within 30-minute window)
+                            let event_start = event_time.with_timezone(&chrono::Utc);
+                            let window_start = event_start - chrono::Duration::minutes(30);
+                            let window_end = event_start + chrono::Duration::minutes(30);
+
+                            let mut time_query = conn.prepare(
+                                "SELECT COUNT(*) FROM events WHERE user_id = ?1 AND description = ?2 AND time BETWEEN ?3 AND ?4 AND deleted = 0"
+                            ).map_err(|e| format!("Failed to prepare time check statement: {}", e))?;
+                            
+                            let time_exists: i64 = time_query.query_row([
+                                &user_id,
+                                subject,
+                                &window_start.to_rfc3339(),
+                                &window_end.to_rfc3339()
+                            ], |row| row.get(0))
+                            .map_err(|e| format!("Failed to check for existing event by time: {}", e))?;
+
+                            time_exists > 0
                         }
                     };
 
-                    if duplicate_info.0 && !duplicate_info.1 {
-                        println!("Skipping Outlook event '{}' - duplicate found with same description", outlook_id);
-                        continue;
-                    } else if duplicate_info.0 && duplicate_info.1 {
-                        println!("Updating Outlook event '{}'", outlook_id);
-
-                        // Update the existing event
-                        let conn = get_db_connection(app_handle_arc)
-                            .map_err(|e| format!("Database connection failed: {}", e))?;
-
-                        // Encrypt the new description before updating
-                        let encrypted_description = match crate::encryption_utils::encrypt_user_data_base(
-                            app_handle_arc,
-                            &user_id,
-                            subject.as_bytes(),
-                        ) {
-                            Ok(encrypted) => base64::engine::general_purpose::STANDARD.encode(&encrypted),
-                            Err(e) => {
-                                eprintln!("Failed to encrypt description for Outlook update: {}", e);
-                                subject.to_string() // Fall back to plain text if encryption fails
-                            }
-                        };
-
-                        conn.execute(
-                            "UPDATE events SET description = ?, participants = ? WHERE (id = ? OR event_id_outlook = ?) AND user_id = ?",
-                            (encrypted_description, serde_json::to_string(&participants.unwrap_or_default()).unwrap_or("[]".to_string()), outlook_id, outlook_id, &user_id),
-                        ).map_err(|e| format!("Failed to update event: {}", e))?;
-                                                
-                        println!("✅ Successfully updated Outlook event '{}'", outlook_id);
+                    if should_skip {
+                        println!("Skipping Outlook event '{}' - duplicate found", subject);
                         continue;
                     }
 

@@ -215,23 +215,38 @@ impl GoogleSyncService {
 
         // Send and process each event to Google Calendar
         for event in &events {
-            let is_local_change = !event.synced;
-            
+            // Skip events that already have a Google ID (already originated from Google or already synced)
+            if let Some(ref google_id) = event.event_id_google {
+                if !google_id.is_empty() {
+                    println!("Skipping event {} - already has Google ID: {}", event.id, google_id);
+                    continue;
+                }
+            }
+
+            // Skip events that are already synced to Google
+            if event.synced_google {
+                println!("Skipping event {} - already synced to Google", event.id);
+                continue;
+            }
+
             // Skip deleted events unless they need to be deleted from Google
-            if event.deleted && event.synced_google {
+            if event.deleted && !event.synced_google {
                 println!("Skipping deleted event {} - not synced to Google yet", event.id);
                 continue;
             }
 
-            // Handle deletion of synced events
-            if event.deleted == true && event.synced_google == false {
+            // Skip events that are marked as deleted
+            if event.deleted == true && event.synced_google == true {
                 let google_id_to_delete = if let Some(ref google_id) = event.event_id_google {
                     if !google_id.is_empty() {
+                        // This was a locally-created event synced to Google
                         google_id
                     } else {
+                        // Empty Google ID, use the event ID
                         &event.id
                     }
                 } else {
+                    // No Google ID stored, use the event ID (this was an event pulled from Google)
                     &event.id
                 };
                 
@@ -284,116 +299,7 @@ impl GoogleSyncService {
                     Ok(Err(e)) => eprintln!("Request error deleting Google event: {}", e),
                     Err(_) => eprintln!("Timeout deleting Google event {}", google_id_to_delete),
                 }
-                continue;
-            }
-
-            // Check if this event has a Google ID (existing Google event to update)
-            if let Some(ref google_id) = event.event_id_google {
-                if !google_id.is_empty() && is_local_change {
-                    // UPDATE existing Google event with local changes
-                    println!("Updating existing Google event {} with local changes", google_id);
-                    
-                    // Decrypt the event description
-                    let decrypted_description = if !event.description.is_empty() {
-                        match decrypt_user_data_base(
-                            app_handle_arc,
-                            &event.user_id,
-                            &base64::engine::general_purpose::STANDARD
-                                .decode(&event.description)
-                                .unwrap_or_default(),
-                        ) {
-                            Ok(bytes) => String::from_utf8(bytes).unwrap_or_default(),
-                            Err(e) => {
-                                eprintln!("Failed to decrypt event description for Google sync: {}", e);
-                                String::from("[UNREADABLE EVENT]")
-                            }
-                        }
-                    } else {
-                        String::new()
-                    };
-
-                    let start_time = event.time;
-                    let end_time = event.time + chrono::Duration::hours(1);
-
-                    let attendees: Vec<serde_json::Value> = event.participants
-                        .as_ref()
-                        .map(|participants| {
-                            participants.iter()
-                                .map(|email| {
-                                    json!({
-                                        "email": email,
-                                        "responseStatus": "needsAction"
-                                    })
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
-
-                    let body = json!({
-                        "summary": decrypted_description,
-                        "start": { "dateTime": start_time.to_rfc3339() },
-                        "end": { "dateTime": end_time.to_rfc3339() },
-                        "attendees": attendees
-                    });
-
-                    // UPDATE existing Google event
-                    let update_url = format!("https://www.googleapis.com/calendar/v3/calendars/primary/events/{}", google_id);
-                    let resp = tokio::time::timeout(
-                        Duration::from_secs(15),
-                        self.client
-                            .put(&update_url)
-                            .bearer_auth(access_token.trim())
-                            .json(&body)
-                            .send(),
-                    )
-                    .await
-                    .map_err(|e| format!("Request timed out: {}", e))?
-                    .map_err(|e| format!("Failed to update event in Google: {}", e))?;
-
-                    if resp.status().is_success() {
-                        println!("✅ Successfully updated Google event with ID: {}", google_id);
-                    } else if resp.status() == reqwest::StatusCode::UNAUTHORIZED && !refresh_token.is_empty() {
-                        // Try refreshing token and retry
-                        if let Ok(new_token) = self
-                            .refresh_google_access_token(refresh_token, client_id, client_secret)
-                            .await
-                        {
-                            self.update_access_token_file(&token_path, &new_token)?;
-                            access_token = new_token;
-                            
-                            let retry_resp = tokio::time::timeout(
-                                Duration::from_secs(15),
-                                self.client
-                                    .put(&update_url)
-                                    .bearer_auth(access_token.trim())
-                                    .json(&body)
-                                    .send(),
-                            )
-                            .await;
-                            
-                            if let Ok(Ok(retry_resp)) = retry_resp {
-                                if retry_resp.status().is_success() {
-                                    println!("✅ Successfully updated Google event with ID: {} (after token refresh)", google_id);
-                                } else {
-                                    eprintln!("Failed to update Google event {}: {}", google_id, retry_resp.status());
-                                }
-                            }
-                        }
-                    } else {
-                        eprintln!("Google API error updating event: {}", resp.status());
-                    }
-                    continue; // Skip to next event
-                } else if !google_id.is_empty() && !is_local_change {
-                    // Event already has Google ID and no local changes - skip
-                    println!("Skipping event {} - already has Google ID and no local changes: {}", event.id, google_id);
-                    continue;
-                }
-            }
-
-            // Event already has Google ID and no local changes - skip
-            if event.synced_google && !is_local_change {
-                println!("Skipping event {} - already synced to Google", event.id);
-                continue;
+                continue; // Skip to next event
             }
 
             // CREATE new Google event (no Google ID or empty Google ID)
@@ -420,6 +326,91 @@ impl GoogleSyncService {
 
             let start_time = event.time;
             let end_time = event.time + chrono::Duration::hours(1);
+
+            // Calculate the hour range for this event
+            let event_hour_start = start_time.with_minute(0).unwrap().with_second(0).unwrap();
+            let event_hour_end = start_time.with_minute(59).unwrap().with_second(59).unwrap();
+
+            // First, fetch events from Google Calendar for this hour
+            let events_url = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
+            let mut events_response = tokio::time::timeout(
+                Duration::from_secs(15),
+                self.client
+                    .get(events_url)
+                    .bearer_auth(access_token.trim())
+                    .query(&[
+                        ("timeMin", event_hour_start.to_rfc3339().as_str()),
+                        ("timeMax", event_hour_end.to_rfc3339().as_str()),
+                        ("singleEvents", "true"),
+                    ])
+                    .send(),
+            )
+            .await
+            .map_err(|e| format!("Request timed out: {}", e))?
+            .map_err(|e| format!("Failed to get events for hour: {}", e))?;
+
+            // If unauthorized, refresh token and retry once
+            if events_response.status() == reqwest::StatusCode::UNAUTHORIZED
+                && !refresh_token.is_empty()
+            {
+                if let Ok(new_token) = self
+                    .refresh_google_access_token(refresh_token, client_id, client_secret)
+                    .await
+                {
+                    self.update_access_token_file(&token_path, &new_token)?;
+                    access_token = new_token;
+                    events_response = tokio::time::timeout(
+                        Duration::from_secs(15),
+                        self.client
+                            .get(events_url)
+                            .bearer_auth(access_token.trim())
+                            .query(&[
+                                ("timeMin", event_hour_start.to_rfc3339().as_str()),
+                                ("timeMax", event_hour_end.to_rfc3339().as_str()),
+                                ("singleEvents", "true"),
+                            ])
+                            .send(),
+                    )
+                    .await
+                    .map_err(|e| format!("Request timed out: {}", e))?
+                    .map_err(|e| format!("Failed to get events for hour: {}", e))?;
+                }
+            }
+
+            if events_response.status().is_success() {
+                let json: serde_json::Value =
+                    events_response.json().await.map_err(|e| e.to_string())?;
+
+                // // Delete any existing events in this hour
+                // if let Some(items) = json.get("items").and_then(|v| v.as_array()) {
+                //     for item in items {
+                //         if let Some(google_id) = item.get("id").and_then(|v| v.as_str()) {
+                //             println!(
+                //                 "Deleting existing Google event {} in the same hour",
+                //                 google_id
+                //             );
+
+                //             let delete_url = format!("https://www.googleapis.com/calendar/v3/calendars/primary/events/{}", google_id);
+                //             let delete_resp = self
+                //                 .client
+                //                 .delete(&delete_url)
+                //                 .bearer_auth(access_token.trim())
+                //                 .send()
+                //                 .await;
+
+                //             if let Err(e) = delete_resp {
+                //                 eprintln!("Failed to delete existing event: {}", e);
+                //             } else if !delete_resp.unwrap().status().is_success() {
+                //                 eprintln!("Google API error when deleting event");
+                //             } else {
+                //                 println!("Successfully deleted Google event in same hour");
+                //             }
+                //         }
+                //     }
+                // }
+            }
+
+
 
             let attendees: Vec<serde_json::Value> = event.participants
                 .as_ref()
@@ -469,51 +460,13 @@ impl GoogleSyncService {
                         )
                         .map_err(|e| format!("Failed to store Google event ID: {}", e))?;
                         
-                        println!("✅ Successfully created Google event with ID: {}", google_id);
+                        println!("Successfully created Google event with ID: {}", google_id);
                     }
                 } else {
                     println!("Successfully created new Google event (could not parse response)");
                 }
-            } else if resp.status() == reqwest::StatusCode::UNAUTHORIZED && !refresh_token.is_empty() {
-                // Try refreshing token and retry once for creation
-                if let Ok(new_token) = self
-                    .refresh_google_access_token(refresh_token, client_id, client_secret)
-                    .await
-                {
-                    self.update_access_token_file(&token_path, &new_token)?;
-                    access_token = new_token;
-                    
-                    let retry_resp = tokio::time::timeout(
-                        Duration::from_secs(15),
-                        self.client
-                            .post(url)
-                            .bearer_auth(access_token.trim())
-                            .json(&body)
-                            .send(),
-                    )
-                    .await;
-                    
-                    if let Ok(Ok(retry_resp)) = retry_resp {
-                        if retry_resp.status().is_success() {
-                            if let Ok(response_json) = retry_resp.json::<serde_json::Value>().await {
-                                if let Some(google_id) = response_json.get("id").and_then(|v| v.as_str()) {
-                                    let conn = get_db_connection(app_handle_arc)
-                                        .map_err(|e| format!("Database connection failed: {}", e))?;
-                                    
-                                    conn.execute(
-                                        "UPDATE events SET event_id_google = ? WHERE id = ? AND user_id = ?",
-                                        (google_id, &event.id, &event.user_id),
-                                    )
-                                    .map_err(|e| format!("Failed to store Google event ID: {}", e))?;
-                                    
-                                    println!("✅ Successfully created Google event with ID: {} (after token refresh)", google_id);
-                                }
-                            }
-                        }
-                    }
-                }
             } else {
-                eprintln!("Google API error creating event: {}", resp.status());
+                eprintln!("Google API error: {}", resp.status());
             }
         }
 
@@ -521,6 +474,13 @@ impl GoogleSyncService {
         let conn = get_db_connection(app_handle_arc)
             .map_err(|e| format!("Database connection failed: {}", e))?;
         Self::mark_events_synced_google(&conn, &events)?;
+
+        // TRIGGER IMMEDIATE DYNAMODB SYNC TO PERSIST SYNC FLAGS
+        if let Err(e) = crate::trigger_sync(app_handle_arc.as_ref().clone()).await {
+            eprintln!("Failed to trigger DynamoDB sync after Google sync: {}", e);
+        } else {
+            println!("Successfully triggered DynamoDB sync after Google sync");
+        }
 
         Ok(())
     }
@@ -675,81 +635,40 @@ impl GoogleSyncService {
                             let conn = get_db_connection(app_handle_arc)
                                 .map_err(|e| format!("Database connection failed: {}", e))?;
 
+                            // 1. Check if this Google event already exists by ID OR by event_id_google
                             let mut id_query = conn
-                                .prepare("SELECT COUNT(*), description FROM events WHERE (id = ?1 OR event_id_google = ?1) AND user_id = ?2")
+                                .prepare("SELECT COUNT(*) FROM events WHERE (id = ?1 OR event_id_google = ?1) AND user_id = ?2")
                                 .map_err(|e| format!("Failed to prepare ID check statement: {}", e))?;
+                            let id_exists: i64 = id_query
+                                .query_row([google_id, &user_id], |row| row.get(0))
+                                .map_err(|e| format!("Failed to check for existing event by ID: {}", e))?;
 
-                            if let Ok(row) = id_query.query_row([google_id, &user_id], |row| {
-                                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-                            }) {
-                                if row.0 > 0 {
-                                    // Event exists, decrypt and compare descriptions
-                                    let existing_description = if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(&row.1) {
-                                        match crate::encryption_utils::decrypt_user_data_base(app_handle_arc, &user_id, &decoded) {
-                                            Ok(decrypted) => String::from_utf8(decrypted).unwrap_or_default(),
-                                            Err(_) => row.1.clone(), // Fall back to encrypted string if decryption fails
-                                        }
-                                    } else {
-                                        row.1.clone() // Not base64, assume plain text
-                                    };
-                                    
-                                    let needs_update = existing_description != summary;
-                                    (true, needs_update, existing_description)
-                                } else {
-                                                                // Check for events with same time and description (within 30-minute window)
-                                    let event_start = event_time.with_timezone(&chrono::Utc);
-                                    let window_start = event_start - chrono::Duration::minutes(30);
-                                    let window_end = event_start + chrono::Duration::minutes(30);
-
-                                    let mut time_query = conn.prepare(
-                                        "SELECT COUNT(*), description FROM events WHERE user_id = ?1 AND description = ?2 AND time BETWEEN ?3 AND ?4 AND deleted = 0"
-                                    ).map_err(|e| format!("Failed to prepare time check statement: {}", e))?;
-                                    
-                                    if let Ok(time_row) = time_query.query_row([
-                                        &user_id,
-                                        summary,
-                                        &window_start.to_rfc3339(),
-                                        &window_end.to_rfc3339()
-                                    ], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))) {
-                                        let needs_update = time_row.0 > 0 && time_row.1 != summary;
-                                        (time_row.0 > 0, needs_update, time_row.1)
-                                    } else {
-                                        (false, false, String::new())
-                                    }
-                                }
+                            if id_exists > 0 {
+                                true
                             } else {
-                                (false, false, String::new())
+                                // 2. Check for events with same time and description (within 30-minute window)
+                                let event_start = event_time.with_timezone(&chrono::Utc);
+                                let window_start = event_start - chrono::Duration::minutes(30);
+                                let window_end = event_start + chrono::Duration::minutes(30);
+
+                                let mut time_query = conn.prepare(
+                                    "SELECT COUNT(*) FROM events WHERE user_id = ?1 AND description = ?2 AND time BETWEEN ?3 AND ?4 AND deleted = 0"
+                                ).map_err(|e| format!("Failed to prepare time check statement: {}", e))?;
+                                
+                                let time_exists: i64 = time_query.query_row([
+                                    &user_id,
+                                    summary,
+                                    &window_start.to_rfc3339(),
+                                    &window_end.to_rfc3339()
+                                ], |row| row.get(0))
+                                .map_err(|e| format!("Failed to check for existing event by time: {}", e))?;
+
+                                time_exists > 0
                             }
                         };
 
-                        if duplicate_info.0 && !duplicate_info.1 {
-                            println!("Skipping Google event '{}' - duplicate found with same description", google_id);
-                            continue;
-                        } else if duplicate_info.0 && duplicate_info.1 {
-                            println!("Updating Google event '{}'", google_id);
-                            
-                            // Update the existing event
-                            let conn = get_db_connection(app_handle_arc)
-                                .map_err(|e| format!("Database connection failed: {}", e))?;
-
-                            // Encrypt the new description before updating
-                            let encrypted_description = match crate::encryption_utils::encrypt_user_data_base(
-                                app_handle_arc,
-                                &user_id,
-                                summary.as_bytes(),
-                            ) {
-                                Ok(encrypted) => base64::engine::general_purpose::STANDARD.encode(&encrypted),
-                                Err(e) => {
-                                    eprintln!("Failed to encrypt description for Google update: {}", e);
-                                    summary.to_string() // Fall back to plain text if encryption fails
-                                }
-                            };
-
-                            conn.execute(
-                                "UPDATE events SET description = ?, participants = ? WHERE (id = ? OR event_id_google = ?) AND user_id = ?",
-                                (encrypted_description, serde_json::to_string(&participants.unwrap_or_default()).unwrap_or("[]".to_string()), google_id, google_id, &user_id),
-                            ).map_err(|e| format!("Failed to update event: {}", e))?;
-                            
+                        if should_skip {
+                            println!("Skipping Google event '{}' - duplicate found", summary);
                             continue;
                         }
 
