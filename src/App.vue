@@ -66,7 +66,7 @@
       <section v-show="activeSection === 'section2'" class="content-section">
         <AiAssistant />
       </section>
-      <section v-show="activeSection === 'section3'" class="content-section">
+      <section v-show="activeSection === 'section3'" class="content-section" id="settings">
         <div id="theme-background-element"></div> <!-- background visual element -->
         <h2>SETTINGS:</h2>
         <hr>
@@ -439,6 +439,21 @@ stroke: var(--color-dark);
 
 .content-section h3 {
     margin-left: 0.5rem;
+}
+
+#settings {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  height: 100%;
+  width: 100%;
+  overflow-y: auto;
+}
+
+#settings hr {
+  width: 100%;
+  border: 1px solid var(--color-border);
+  margin: 1rem 0;
 }
 
 #oauth-section {

@@ -5,6 +5,7 @@ h2 {
 }
 
 .container {
+  width: 60%;
   padding: 20px;
   border: 1px solid var(--color-text);
   border-radius: 8px;
