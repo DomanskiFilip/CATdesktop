@@ -177,8 +177,6 @@ pub fn init_db(app_handle: &AppHandle) -> Result<(), SqliteError> {
 
 // Function to save events //
 pub async fn save_event(app_handle: &AppHandle, event_json: String) -> Result<(), String> {
-
-    println!("Saving event: {}", event_json);
     let mut event = CalendarEvent::from_json(&event_json)?;
     // Get current user ID and assign to event
     let user_id = {
@@ -224,6 +222,26 @@ pub async fn save_event(app_handle: &AppHandle, event_json: String) -> Result<()
             Ok(mut stmt) => stmt.exists([&event.id, &event.user_id]).unwrap_or(false),
             Err(_) => false,
         }
+    };
+
+    // Determine sync flags based on context
+    let (synced, synced_google, synced_outlook) = if json_value.get("force_sync").and_then(|v| v.as_bool()).unwrap_or(false) {
+        // Force sync: mark as unsynced to all services
+        (false, false, false)
+    } else if json_value.get("synced").is_some() || json_value.get("synced_google").is_some() || json_value.get("synced_outlook").is_some() {
+        // Explicit sync flags provided (from sync services) - use them as-is
+        (
+            json_value.get("synced").and_then(|v| v.as_bool()).unwrap_or(false),
+            json_value.get("synced_google").and_then(|v| v.as_bool()).unwrap_or(false),
+            json_value.get("synced_outlook").and_then(|v| v.as_bool()).unwrap_or(false)
+        )
+    } else if is_existing_event {
+        // This is a local edit of an existing event - reset sync flags to force sync
+        println!("Local edit detected for existing event {} - resetting sync flags", event.id);
+        (false, false, false)
+    } else {
+        // New events start as unsynced
+        (false, false, false)
     };
 
     // Use the values from JSON if present, otherwise determine based on whether it's a new or existing event
@@ -425,7 +443,7 @@ pub async fn delete_event(app_handle: &AppHandle, id: String) -> Result<(), Sqli
     };
 
     conn.execute(
-        "UPDATE events SET deleted = TRUE WHERE id = ? AND user_id = ?",
+        "UPDATE events SET deleted = TRUE, synced = FALSE, synced_google = FALSE, synced_outlook = FALSE WHERE id = ? AND user_id = ?",
         [id, user_id],
     )?;
     Ok(())

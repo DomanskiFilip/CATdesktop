@@ -677,6 +677,39 @@ async fn trigger_sync(app_handle: tauri::AppHandle) -> Result<(), String> {
         return Err("User not logged in".to_string());
     }
 
+    // Sync to Google Calendar
+    if config_state.enable_google_sync {
+        let google_state = app_handle_arc.state::<GoogleSyncServiceState>();
+        let service_guard = google_state.lock().await;
+
+        if let Some(service) = service_guard.as_ref() {
+            if let Err(e) = service.sync_to_google(&app_handle_arc, true).await {
+                eprintln!("Failed to sync to Google Calendar: {}", e);
+            } else {
+                println!("Immediate sync to Google Calendar completed");
+            }
+        }
+    } else {
+        println!("Google sync is disabled, skipping Google Calendar sync");
+    }
+
+    // Sync to Outlook Calendar
+    if config_state.enable_outlook_sync {
+        let outlook_state = app_handle_arc.state::<OutlookSyncServiceState>();
+        let service_guard = outlook_state.lock().await;
+
+        if let Some(service) = service_guard.as_ref() {
+            if let Err(e) = service.sync_to_outlook(&app_handle_arc, true).await {
+                eprintln!("Failed to sync to Outlook Calendar: {}", e);
+            } else {
+                println!("Immediate sync to Outlook Calendar completed");
+            }
+        }
+    } else {
+        println!("Outlook sync is disabled, skipping Outlook Calendar sync");
+    }
+
+    // Sync to DynamoDB
     if config_state.enable_database_sync {
         let db_state = app_handle_arc.state::<DbSyncServiceState>();
         let service_guard = db_state.lock().await;

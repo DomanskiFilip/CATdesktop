@@ -556,8 +556,14 @@ const updateEventDescription = async (event: Event, hour: number) => {
         console.warn('Failed to delete event:', error);
       }
     } else {
-      existingEvent.description = value;
-      saveEvent(existingEvent);
+      const updatedEvent = {
+        ...existingEvent,
+        description: value,
+        synced: false,
+        synced_google: false,
+        synced_outlook: false
+      };
+      saveEvent(updatedEvent);
     }
   } else if (value.trim()) {
     // Create new event if description is not empty
@@ -660,8 +666,14 @@ const alarm = async (hour: number) => {
 
   if (existingEvent) {
     // Toggle alarm for existing event
-    existingEvent.alarm = !existingEvent.alarm
-    saveEvent(existingEvent)
+    const updatedEvent = {
+      ...existingEvent,
+      alarm: !existingEvent.alarm,
+      synced: false,
+      synced_google: false,
+      synced_outlook: false
+    };
+    saveEvent(updatedEvent)
     
     // Schedule native notifications through Tauri
     if (existingEvent.alarm) {

@@ -436,7 +436,8 @@ const updateEventByTargetId = async (eventSuggestion: EventSuggestion) => {
     location: existingEvent.location || '',
     // Reset sync flags
     synced: false,
-    synced_google: false
+    synced_google: false,
+    synced_outlook: false
   };
   await invoke('save_event', { event: JSON.stringify(updatedEvent) });
   if (updatedEvent.alarm) {

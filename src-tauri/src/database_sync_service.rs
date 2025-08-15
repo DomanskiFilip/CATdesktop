@@ -36,7 +36,7 @@ impl DbSyncService {
         })
     }
 
-    // Stops the Db sync service and cancels all scheduled tasks
+    /// Stops the Db sync service and cancels all scheduled tasks
     pub async fn stop(&mut self) {
         println!("Stopping Db sync service...");
         self.running.store(false, Ordering::SeqCst);
@@ -373,8 +373,8 @@ impl DbSyncService {
                     "alarm": event.alarm,
                     "synced_google": event.synced_google,
                     "synced_outlook": event.synced_outlook,
-                    "event_id_google": event.event_id_google.clone(),
-                    "event_id_outlook": event.event_id_outlook.clone(),
+                    "event_id_google": event.event_id_google,
+                    "event_id_outlook": event.event_id_outlook,
                     "deleted": event.deleted,
                     "recurrence": event.recurrence.clone().unwrap_or_else(|| "none".to_string()),
                     "participants": event.participants.clone().unwrap_or_default()
@@ -491,7 +491,7 @@ impl DbSyncService {
     async fn merge_remote_events(&self, app_handle: &AppHandle, remote_events: &[Value],) -> Result<(), String> {
         for event_data in remote_events.iter().cloned() {
             let event_id = event_data["id"].as_str().unwrap_or("").to_string();
-            let user_id = event_data["email"].as_str().unwrap_or("").to_string();
+            let user_id = event_data["user_id"].as_str().unwrap_or("").to_string();
             let event_id_for_log = event_id.clone();
             let mut description_plain = String::new();
             if let Some(enc_desc) = event_data.get("description").and_then(|v| v.as_str()) {
@@ -546,6 +546,7 @@ impl DbSyncService {
                 "alarm": event_data["alarm"],
                 "deleted": incoming_deleted,
                 "synced": event_data.get("synced").and_then(|v| v.as_bool()).unwrap_or(false),
+                // USE REMOTE VALUES DIRECTLY
                 "synced_google": event_data.get("synced_google").and_then(|v| v.as_bool()).unwrap_or(false),
                 "synced_outlook": event_data.get("synced_outlook").and_then(|v| v.as_bool()).unwrap_or(false),
                 "event_id_google": event_data.get("event_id_google").and_then(|v| v.as_str()).map(String::from),
@@ -563,29 +564,25 @@ impl DbSyncService {
                 let conn = get_db_connection(&app_handle)
                     .map_err(|e| format!("Database connection failed: {}", e))?;
 
-                let mut delete_query = conn
-                    .prepare("SELECT deleted FROM events WHERE id = ?1 AND user_id = ?2")
-                    .map_err(|e| format!("Failed to prepare check statement: {}", e))?;
-                let mut should_save = true;
-                let existing_deleted: Option<bool> = delete_query
-                    .query_row([event_id.as_str(), user_id.as_str()], |row| row.get(0))
+                let mut existing_query = conn
+                    .prepare("SELECT deleted, participants FROM events WHERE id = ?1 AND user_id = ?2")
+                    .map_err(|e| format!("Failed to prepare existing check statement: {}", e))?;
+                
+                let existing_data: Option<(bool, String)> = existing_query
+                    .query_row([event_id.as_str(), user_id.as_str()], |row| {
+                        Ok((row.get(0)?, row.get(1)?))
+                    })
                     .ok();
 
-                let mut participants_query = conn
-                    .prepare("SELECT participants FROM events WHERE id = ?1 AND user_id = ?2")
-                    .map_err(|e| format!("Failed to prepare participants check: {}", e))?;
-                let existing_participants: Option<String> = participants_query
-                    .query_row([event_id.as_str(), user_id.as_str()], |row| row.get(0))
-                    .ok();
-
-                if let (Some(existing_deleted), Some(existing_participants)) = (existing_deleted, existing_participants) {
+                let should_save = if let Some((existing_deleted, existing_participants)) = existing_data {
                     // Only update if deleted status OR participants are different
                     let incoming_participants_json = serde_json::to_string(&participants_for_db).unwrap_or("[]".to_string());
                     let participants_changed = existing_participants != incoming_participants_json;
-                    if existing_deleted == incoming_deleted && !participants_changed {
-                        should_save = false;
-                    }
-                }
+                    existing_deleted != incoming_deleted || participants_changed
+                } else {
+                    true // New event, always save
+                };
+
                 if should_save {
                     futures::executor::block_on(save_event(&app_handle, event_json_string))
                 } else {
@@ -597,6 +594,8 @@ impl DbSyncService {
 
             if let Err(e) = result {
                 println!("❌ Failed to save event {}: {}", event_id_for_log, e);
+            } else {
+                println!("✅ Event saved successfully");
             }
         }
         Ok(())

@@ -298,6 +298,15 @@ async function addParticipant() {
   newParticipant.value = ''
   emailError.value = ''
   props.event.participants = participants.value;
+
+  const updatedEvent = {
+    ...props.event,
+    participants: participants.value,
+    synced: false,
+    synced_google: false,
+    synced_outlook: false
+  };
+  
   await invoke('save_event', { event: JSON.stringify(props.event) });
   await invoke('trigger_sync');
 }
