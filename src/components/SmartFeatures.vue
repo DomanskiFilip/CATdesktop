@@ -307,7 +307,7 @@ async function addParticipant() {
     synced_outlook: false
   };
   
-  await invoke('save_event', { event: JSON.stringify(props.event) });
+  await invoke('save_event', { event: JSON.stringify(updatedEvent) });
   await invoke('trigger_sync');
 }
 

@@ -677,7 +677,9 @@ async fn trigger_sync(app_handle: tauri::AppHandle) -> Result<(), String> {
         return Err("User not logged in".to_string());
     }
 
-    // Sync to Google Calendar
+    // SEQUENTIAL SYNC: Google first, then Outlook, then DynamoDB
+    
+    // 1. Sync to Google Calendar first
     if config_state.enable_google_sync {
         let google_state = app_handle_arc.state::<GoogleSyncServiceState>();
         let service_guard = google_state.lock().await;
@@ -693,7 +695,27 @@ async fn trigger_sync(app_handle: tauri::AppHandle) -> Result<(), String> {
         println!("Google sync is disabled, skipping Google Calendar sync");
     }
 
-    // Sync to Outlook Calendar
+    // Wait 3 seconds before next sync
+    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+    // 2. Sync from Google Calendar to get any IDs
+    if config_state.enable_google_sync {
+        let google_state = app_handle_arc.state::<GoogleSyncServiceState>();
+        let service_guard = google_state.lock().await;
+
+        if let Some(service) = service_guard.as_ref() {
+            if let Err(e) = service.sync_from_google(&app_handle_arc, true).await {
+                eprintln!("Failed to sync from Google Calendar: {}", e);
+            } else {
+                println!("Immediate sync from Google Calendar completed");
+            }
+        }
+    }
+
+    // Wait 3 seconds before Outlook sync
+    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+    // 3. Sync to Outlook Calendar
     if config_state.enable_outlook_sync {
         let outlook_state = app_handle_arc.state::<OutlookSyncServiceState>();
         let service_guard = outlook_state.lock().await;
@@ -709,7 +731,27 @@ async fn trigger_sync(app_handle: tauri::AppHandle) -> Result<(), String> {
         println!("Outlook sync is disabled, skipping Outlook Calendar sync");
     }
 
-    // Sync to DynamoDB
+    // Wait 3 seconds before sync from Outlook
+    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+    // 4. Sync from Outlook Calendar
+    if config_state.enable_outlook_sync {
+        let outlook_state = app_handle_arc.state::<OutlookSyncServiceState>();
+        let service_guard = outlook_state.lock().await;
+
+        if let Some(service) = service_guard.as_ref() {
+            if let Err(e) = service.sync_from_outlook(&app_handle_arc, true).await {
+                eprintln!("Failed to sync from Outlook Calendar: {}", e);
+            } else {
+                println!("Immediate sync from Outlook Calendar completed");
+            }
+        }
+    }
+
+    // Wait 3 seconds before DynamoDB sync
+    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+    // 5. Sync to DynamoDB (all events should have external IDs now)
     if config_state.enable_database_sync {
         let db_state = app_handle_arc.state::<DbSyncServiceState>();
         let service_guard = db_state.lock().await;
