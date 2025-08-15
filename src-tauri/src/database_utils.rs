@@ -224,26 +224,6 @@ pub async fn save_event(app_handle: &AppHandle, event_json: String) -> Result<()
         }
     };
 
-    // Determine sync flags based on context
-    let (synced, synced_google, synced_outlook) = if json_value.get("force_sync").and_then(|v| v.as_bool()).unwrap_or(false) {
-        // Force sync: mark as unsynced to all services
-        (false, false, false)
-    } else if json_value.get("synced").is_some() || json_value.get("synced_google").is_some() || json_value.get("synced_outlook").is_some() {
-        // Explicit sync flags provided (from sync services) - use them as-is
-        (
-            json_value.get("synced").and_then(|v| v.as_bool()).unwrap_or(false),
-            json_value.get("synced_google").and_then(|v| v.as_bool()).unwrap_or(false),
-            json_value.get("synced_outlook").and_then(|v| v.as_bool()).unwrap_or(false)
-        )
-    } else if is_existing_event {
-        // This is a local edit of an existing event - reset sync flags to force sync
-        println!("Local edit detected for existing event {} - resetting sync flags", event.id);
-        (false, false, false)
-    } else {
-        // New events start as unsynced
-        (false, false, false)
-    };
-
     // Use the values from JSON if present, otherwise determine based on whether it's a new or existing event
     let synced = if json_value.get("synced").is_some() {
         json_value

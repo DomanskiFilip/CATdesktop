@@ -189,7 +189,6 @@ const stopRecording = () => {
   if (audioContext) {
     audioContext.close()
     audioContext = null
-    analyser = null
   }
 }
 
