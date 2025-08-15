@@ -391,6 +391,8 @@ impl NotificationService {
                 synced: event.synced,
                 synced_google: event.synced_google,
                 synced_outlook: event.synced_outlook,
+                event_id_google: event.event_id_google.clone(),
+                event_id_outlook: event.event_id_outlook.clone(),
                 deleted: event.deleted,
                 recurrence: None::<String>,
                 participants: None,

@@ -195,7 +195,7 @@ impl GoogleSyncService {
                 .and_hms_opt(0, 0, 0)
                 .unwrap();
             let mut unsynced = conn.prepare(
-                "SELECT id, user_id, description, time, alarm, synced, synced_google, synced_outlook, deleted, recurrence, participants FROM events 
+                "SELECT id, user_id, description, time, alarm, synced, synced_google, synced_outlook, event_id_google, event_id_outlook, deleted, recurrence, participants FROM events 
                 WHERE user_id = ? AND ((synced_google = 0) OR (deleted = 1 AND synced_google = 0)) AND time >= ?"
             ).map_err(|e| format!("Failed to prepare statement: {}", e))?;
 
@@ -215,16 +215,91 @@ impl GoogleSyncService {
 
         // Send each event to Google Calendar
         for event in &events {
+            // Skip events that already have a Google ID (already originated from Google or already synced)
+            if let Some(ref google_id) = event.event_id_google {
+                if !google_id.is_empty() {
+                    println!("Skipping event {} - already has Google ID: {}", event.id, google_id);
+                    continue;
+                }
+            }
+
             // Skip events that are already synced to Google
-            if event.synced_google == true {
-                println!("Skipping event {} that originated from Google", event.id);
+            if event.synced_google {
+                println!("Skipping event {} - already synced to Google", event.id);
+                continue;
+            }
+
+            // Skip deleted events unless they need to be deleted from Google
+            if event.deleted && !event.synced_google {
+                println!("Skipping deleted event {} - not synced to Google yet", event.id);
                 continue;
             }
 
             // Skip events that are marked as deleted
-            if event.deleted == true {
-                println!("Skipping deleted event {}", event.id);
-                continue;
+            if event.deleted == true && event.synced_google == true {
+                let google_id_to_delete = if let Some(ref google_id) = event.event_id_google {
+                    if !google_id.is_empty() {
+                        // This was a locally-created event synced to Google
+                        google_id
+                    } else {
+                        // Empty Google ID, use the event ID
+                        &event.id
+                    }
+                } else {
+                    // No Google ID stored, use the event ID (this was an event pulled from Google)
+                    &event.id
+                };
+                
+                println!("Deleting Google event {}", google_id_to_delete);
+                let delete_url = format!("https://www.googleapis.com/calendar/v3/calendars/primary/events/{}", google_id_to_delete);
+                
+                let delete_resp = tokio::time::timeout(
+                    Duration::from_secs(15),
+                    self.client
+                        .delete(&delete_url)
+                        .bearer_auth(access_token.trim())
+                        .send(),
+                )
+                .await;
+
+                match delete_resp {
+                    Ok(Ok(resp)) => {
+                        if resp.status() == reqwest::StatusCode::UNAUTHORIZED && !refresh_token.is_empty() {
+                            // Retry with refreshed token
+                            if let Ok(new_token) = self
+                                .refresh_google_access_token(refresh_token, client_id, client_secret)
+                                .await
+                            {
+                                self.update_access_token_file(&token_path, &new_token)?;
+                                access_token = new_token;
+                                
+                                let retry_resp = tokio::time::timeout(
+                                    Duration::from_secs(15),
+                                    self.client
+                                        .delete(&delete_url)
+                                        .bearer_auth(access_token.trim())
+                                        .send(),
+                                )
+                                .await;
+                                
+                                if let Ok(Ok(retry_resp)) = retry_resp {
+                                    if retry_resp.status().is_success() || retry_resp.status() == reqwest::StatusCode::NOT_FOUND {
+                                        println!("Successfully deleted Google event {}", google_id_to_delete);
+                                    } else {
+                                        eprintln!("Failed to delete Google event {}: {}", google_id_to_delete, retry_resp.status());
+                                    }
+                                }
+                            }
+                        } else if resp.status().is_success() || resp.status() == reqwest::StatusCode::NOT_FOUND {
+                            println!("Successfully deleted Google event {}", google_id_to_delete);
+                        } else {
+                            eprintln!("Failed to delete Google event {}: {}", google_id_to_delete, resp.status());
+                        }
+                    }
+                    Ok(Err(e)) => eprintln!("Request error deleting Google event: {}", e),
+                    Err(_) => eprintln!("Timeout deleting Google event {}", google_id_to_delete),
+                }
+                continue; // Skip to next event
             }
 
             // Decrypt the event description
@@ -304,34 +379,36 @@ impl GoogleSyncService {
                 let json: serde_json::Value =
                     events_response.json().await.map_err(|e| e.to_string())?;
 
-                // Delete any existing events in this hour
-                if let Some(items) = json.get("items").and_then(|v| v.as_array()) {
-                    for item in items {
-                        if let Some(google_id) = item.get("id").and_then(|v| v.as_str()) {
-                            println!(
-                                "Deleting existing Google event {} in the same hour",
-                                google_id
-                            );
+                // // Delete any existing events in this hour
+                // if let Some(items) = json.get("items").and_then(|v| v.as_array()) {
+                //     for item in items {
+                //         if let Some(google_id) = item.get("id").and_then(|v| v.as_str()) {
+                //             println!(
+                //                 "Deleting existing Google event {} in the same hour",
+                //                 google_id
+                //             );
 
-                            let delete_url = format!("https://www.googleapis.com/calendar/v3/calendars/primary/events/{}", google_id);
-                            let delete_resp = self
-                                .client
-                                .delete(&delete_url)
-                                .bearer_auth(access_token.trim())
-                                .send()
-                                .await;
+                //             let delete_url = format!("https://www.googleapis.com/calendar/v3/calendars/primary/events/{}", google_id);
+                //             let delete_resp = self
+                //                 .client
+                //                 .delete(&delete_url)
+                //                 .bearer_auth(access_token.trim())
+                //                 .send()
+                //                 .await;
 
-                            if let Err(e) = delete_resp {
-                                eprintln!("Failed to delete existing event: {}", e);
-                            } else if !delete_resp.unwrap().status().is_success() {
-                                eprintln!("Google API error when deleting event");
-                            } else {
-                                println!("Successfully deleted Google event in same hour");
-                            }
-                        }
-                    }
-                }
+                //             if let Err(e) = delete_resp {
+                //                 eprintln!("Failed to delete existing event: {}", e);
+                //             } else if !delete_resp.unwrap().status().is_success() {
+                //                 eprintln!("Google API error when deleting event");
+                //             } else {
+                //                 println!("Successfully deleted Google event in same hour");
+                //             }
+                //         }
+                //     }
+                // }
             }
+
+
 
             let attendees: Vec<serde_json::Value> = event.participants
                 .as_ref()
@@ -367,11 +444,27 @@ impl GoogleSyncService {
             .map_err(|e| format!("Request timed out: {}", e))?
             .map_err(|e| format!("Failed to send event to Google: {}", e))?;
 
-            if !resp.status().is_success() {
-                eprintln!("Google API error: {}", resp.status());
-                // Don't return early, try to send all events
+            if resp.status().is_success() {
+                // Extract the Google event ID from the response
+                if let Ok(response_json) = resp.json::<serde_json::Value>().await {
+                    if let Some(google_id) = response_json.get("id").and_then(|v| v.as_str()) {
+                        // Update the local event with the Google ID
+                        let conn = get_db_connection(app_handle_arc)
+                            .map_err(|e| format!("Database connection failed: {}", e))?;
+                        
+                        conn.execute(
+                            "UPDATE events SET event_id_google = ? WHERE id = ? AND user_id = ?",
+                            (google_id, &event.id, &event.user_id),
+                        )
+                        .map_err(|e| format!("Failed to store Google event ID: {}", e))?;
+                        
+                        println!("Successfully created Google event with ID: {}", google_id);
+                    }
+                } else {
+                    println!("Successfully created new Google event (could not parse response)");
+                }
             } else {
-                println!("Successfully created new Google event");
+                eprintln!("Google API error: {}", resp.status());
             }
         }
 
@@ -379,6 +472,13 @@ impl GoogleSyncService {
         let conn = get_db_connection(app_handle_arc)
             .map_err(|e| format!("Database connection failed: {}", e))?;
         Self::mark_events_synced_google(&conn, &events)?;
+
+        // TRIGGER IMMEDIATE DYNAMODB SYNC TO PERSIST SYNC FLAGS
+        if let Err(e) = crate::trigger_sync(app_handle_arc.as_ref().clone()).await {
+            eprintln!("Failed to trigger DynamoDB sync after Google sync: {}", e);
+        } else {
+            println!("Successfully triggered DynamoDB sync after Google sync");
+        }
 
         Ok(())
     }
@@ -533,19 +633,41 @@ impl GoogleSyncService {
                             let conn = get_db_connection(app_handle_arc)
                                 .map_err(|e| format!("Database connection failed: {}", e))?;
 
-                            // Check if this Google event already exists locally
-                            let mut query = conn
-                                .prepare("SELECT COUNT(*) FROM events WHERE id = ?1 AND user_id = ?2")
-                                .map_err(|e| format!("Failed to prepare check statement: {}", e))?;
-                            let exists: i64 = query
+                            // 1. Check if this Google event already exists by ID OR by event_id_google
+                            let mut id_query = conn
+                                .prepare("SELECT COUNT(*) FROM events WHERE (id = ?1 OR event_id_google = ?1) AND user_id = ?2")
+                                .map_err(|e| format!("Failed to prepare ID check statement: {}", e))?;
+                            let id_exists: i64 = id_query
                                 .query_row([google_id, &user_id], |row| row.get(0))
-                                .map_err(|e| format!("Failed to check for existing event: {}", e))?;
+                                .map_err(|e| format!("Failed to check for existing event by ID: {}", e))?;
 
-                            exists > 0
+                            if id_exists > 0 {
+                                true
+                            } else {
+                                // 2. Check for events with same time and description (within 30-minute window)
+                                let event_start = event_time.with_timezone(&chrono::Utc);
+                                let window_start = event_start - chrono::Duration::minutes(30);
+                                let window_end = event_start + chrono::Duration::minutes(30);
+
+                                let mut time_query = conn.prepare(
+                                    "SELECT COUNT(*) FROM events WHERE user_id = ?1 AND description = ?2 AND time BETWEEN ?3 AND ?4 AND deleted = 0"
+                                ).map_err(|e| format!("Failed to prepare time check statement: {}", e))?;
+                                
+                                let time_exists: i64 = time_query.query_row([
+                                    &user_id,
+                                    summary,
+                                    &window_start.to_rfc3339(),
+                                    &window_end.to_rfc3339()
+                                ], |row| row.get(0))
+                                .map_err(|e| format!("Failed to check for existing event by time: {}", e))?;
+
+                                time_exists > 0
+                            }
                         };
 
                         if should_skip {
-                            continue; // Skip if already exists
+                            println!("Skipping Google event '{}' - duplicate found", summary);
+                            continue;
                         }
 
                         // Create the event JSON
@@ -558,6 +680,8 @@ impl GoogleSyncService {
                             "synced": false,
                             "synced_google": true,
                             "synced_outlook": false,
+                            "event_id_google": google_id,
+                            "event_id_outlook": None::<String>,
                             "deleted": false,
                             "recurrence": None::<String>,
                             "participants": participants.unwrap_or_default(),
