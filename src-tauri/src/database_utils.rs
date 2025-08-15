@@ -215,7 +215,6 @@ pub async fn save_event(app_handle: &AppHandle, event_json: String) -> Result<()
         .transaction()
         .map_err(|e| format!("Transaction error: {}", e.to_string()))?;
 
-    // Check if this is an existing event being updated
     let is_existing_event = {
         let existing_event_query = tx.prepare("SELECT id FROM events WHERE id = ? AND user_id = ?");
         match existing_event_query {
@@ -242,16 +241,6 @@ pub async fn save_event(app_handle: &AppHandle, event_json: String) -> Result<()
     } else {
         // New events start as unsynced
         (false, false, false)
-    };
-
-    // Use the values from JSON if present, otherwise determine based on whether it's a new or existing event
-    let synced = if json_value.get("synced").is_some() {
-        json_value
-            .get("synced")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-    } else {
-        !is_existing_event
     };
 
     let synced_google = if json_value.get("synced_google").is_some() {
