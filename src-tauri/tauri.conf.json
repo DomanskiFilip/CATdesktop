@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "version": "1.0.0-beta",
+  "version": "1.0.1",
   "identifier": "com.calendarassistant.casual",
-  "productName": "Calendar Assistant",
+  "productName": "CAT - Calendar Assistant (Beta)",
   "build": {
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "npm run dev",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "catdesktop",
+        "title": "CAT - Calendar Assistant",
         "width": 1280,
         "height": 680,
         "resizable": true,
@@ -43,6 +43,22 @@
       "icons/ios/icon-76.png",
       "icons/ios/icon-1024.png"
     ],
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "",
+      "wix": {
+        "language": ["en-US"],
+        "template": "wix/main.wxs",
+        "fragmentPaths": ["wix/fragment.wxs"],
+        "componentRefs": ["myComponent"],
+        "featureRefs": ["myFeature"],
+        "mergeRefs": ["myMerge"],
+        "enableElevatedUpdateTask": false,
+        "bannerPath": "wix/banner.bmp",
+        "dialogImagePath": "wix/dialog.bmp"
+      }
+    },
     "macOS": {
       "frameworks": [],
       "minimumSystemVersion": "",
