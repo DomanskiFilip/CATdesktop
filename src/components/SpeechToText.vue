@@ -1,9 +1,17 @@
 <template>
   <section class="speech-container">
     <!-- Speech Button -->
-    <button @click="toggleRecording" :class="['speech-btn', { recording: isRecording, disabled: !isSupported || isProcessing }]" :disabled="!isSupported || isProcessing" :title="getButtonTitle()">
+    <button @click="toggleRecording" :class="['speech-btn', { recording: isRecording, disabled: !isSupported || isProcessing, processing: isProcessing }]" :disabled="!isSupported || isProcessing" :title="getButtonTitle()">
+      <!-- Microphone Icon (not recording, not processing) -->
       <svg v-if="!isRecording && !isProcessing" xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-dark)"><path d="M480-400q-50 0-85-35t-35-85v-240q0-50 35-85t85-35q50 0 85 35t35 85v240q0 50-35 85t-85 35Zm0-240Zm-40 520v-123q-104-14-172-93t-68-184h80q0 83 58.5 141.5T480-320q83 0 141.5-58.5T680-520h80q0 105-68 184t-172 93v123h-40Zm40-360q17 0 28.5-11.5T520-520v-240q0-17-11.5-28.5T480-800q-17 0-28.5 11.5T440-760v240q0 17 11.5 28.5T480-480Z"/></svg>
+      <!-- Stop Icon (recording) -->
       <svg v-else-if="isRecording" xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-dark)"><path d="M320-320h320v-320H320v320ZM480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Z"/></svg>
+      <!-- Loading Spinner (processing) -->
+      <div v-else-if="isProcessing" class="loading-spinner">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-dark)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12a9 9 0 11-6.219-8.56"/>
+        </svg>
+      </div>
     </button>
 
     <!-- Microphone Selection Dropdown -->
@@ -313,6 +321,18 @@ const processRecording = async () => {
   cursor: not-allowed;
 }
 
+.loading-spinner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+}
+
+.loading-spinner svg {
+  animation: spin 1s linear infinite;
+}
+
 @keyframes pulse {
   0% {
     transform: scale(1);
@@ -322,6 +342,15 @@ const processRecording = async () => {
   }
   100% {
     transform: scale(1);
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
   }
 }
 </style>

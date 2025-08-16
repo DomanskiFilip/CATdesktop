@@ -89,25 +89,19 @@ pub async fn transcribe_audio(app_handle: AppHandle, audio_data: Vec<u8>, format
         .await
         .map_err(|e| format!("Failed to call speech-to-text endpoint: {}", e))?;
 
-    let status = response.status();
-    let response_text = response
-        .text()
-        .await
-        .map_err(|e| format!("Failed to read response: {}", e))?;
+    let text = response.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
+    println!("Raw Response: {}", text);
 
-    println!("Raw Response: {}", response_text);
-
-    // First, try to parse as a Lambda wrapper response
-    if let Ok(lambda_wrapper) = serde_json::from_str::<serde_json::Value>(&response_text) {
-        if let Some(lambda_status) = lambda_wrapper.get("status_code").and_then(|s| s.as_u64()) {
-            // This is a Lambda wrapper response
+    // handle response
+    if let Ok(lambda_wrapper) = serde_json::from_str::<serde_json::Value>(&text) {
+        if let Some(status_code) = lambda_wrapper.get("status_code").and_then(|s| s.as_u64()) {
             let body_str = lambda_wrapper.get("body")
                 .and_then(|b| b.as_str())
                 .unwrap_or("{}");
             
-            match lambda_status {
+            match status_code {
                 200 => {
-                    // Parse the body as SpeechToTextResponse
+                    // Success - parse the response
                     match serde_json::from_str::<SpeechToTextResponse>(body_str) {
                         Ok(speech_response) => {
                             return Ok(serde_json::to_string(&speech_response)
@@ -140,7 +134,7 @@ pub async fn transcribe_audio(app_handle: AppHandle, audio_data: Vec<u8>, format
                     }
                 }
                 401 => {
-                    // Try auto-login and retry
+                    // Unauthorized - try auto-login and retry
                     if auto_login_lambda(&app_handle).await.unwrap_or(false) {
                         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
                         
@@ -160,83 +154,96 @@ pub async fn transcribe_audio(app_handle: AppHandle, audio_data: Vec<u8>, format
                                 .await
                                 .map_err(|e| format!("Failed to read retry response: {}", e))?;
                             
-                            // Parse retry response (could also be wrapped)
                             if let Ok(retry_wrapper) = serde_json::from_str::<serde_json::Value>(&retry_text) {
                                 if let Some(retry_status) = retry_wrapper.get("status_code").and_then(|s| s.as_u64()) {
-                                    if retry_status == 200 {
-                                        let retry_body = retry_wrapper.get("body")
-                                            .and_then(|b| b.as_str())
-                                            .unwrap_or("{}");
-                                        
-                                        let speech_response: SpeechToTextResponse = serde_json::from_str(retry_body)
-                                            .map_err(|e| format!("Failed to parse retry response: {}", e))?;
-                                        
-                                        return Ok(serde_json::to_string(&speech_response)
-                                            .map_err(|e| format!("Failed to serialize retry response: {}", e))?);
+                                    match retry_status {
+                                        200 => {
+                                            let retry_body = retry_wrapper.get("body")
+                                                .and_then(|b| b.as_str())
+                                                .unwrap_or("{}");
+                                            
+                                            let speech_response: SpeechToTextResponse = serde_json::from_str(retry_body)
+                                                .map_err(|e| format!("Failed to parse retry response: {}", e))?;
+                                            
+                                            return Ok(serde_json::to_string(&speech_response)
+                                                .map_err(|e| format!("Failed to serialize retry response: {}", e))?);
+                                        }
+                                        401 => {
+                                            let _ = logout_user(app_handle).await;
+                                            return Err("Session expired. Please log in again.".to_string());
+                                        }
+                                        429 => {
+                                            let retry_body = retry_wrapper.get("body")
+                                                .and_then(|b| b.as_str())
+                                                .unwrap_or("{}");
+                                            let error_response: SpeechErrorResponse = serde_json::from_str(retry_body)
+                                                .map_err(|e| format!("Failed to parse rate limit response: {}", e))?;
+                                            return Err(format!("RATE_LIMIT: {}", error_response.message));
+                                        }
+                                        _ => {
+                                            // Other error status codes
+                                            let error_response: SpeechErrorResponse = serde_json::from_str(body_str)
+                                                .unwrap_or(SpeechErrorResponse {
+                                                    error: "Unknown error".to_string(),
+                                                    message: "An unexpected error occurred".to_string(),
+                                                    remaining_requests: None,
+                                                });
+                                            return Err(error_response.message);
+                                        }
                                     }
+                                } else {
+                                    // No status code found in response
+                                    return Err("Invalid response format: missing status code".to_string());
                                 }
+                            } else {
+                                // Failed to parse JSON response
+                                return Err("Failed to parse response as JSON".to_string());
                             }
-                            
-                            let _ = logout_user(app_handle).await;
-                            return Err("Session expired. Please log in again.".to_string());
                         } else {
+                            // Failed to read tokens after auto-login
                             let _ = logout_user(app_handle).await;
                             return Err("Failed to refresh authentication.".to_string());
                         }
                     } else {
+                        // Auto-login failed
                         let _ = logout_user(app_handle).await;
                         return Err("Session expired. Please log in again.".to_string());
                     }
                 }
                 429 => {
-                    // Parse the body for rate limit error
+                    // Rate limit exceeded
                     let error_response: SpeechErrorResponse = serde_json::from_str(body_str)
                         .map_err(|e| format!("Failed to parse rate limit response: {}", e))?;
-                    // Return a special error string for frontend detection
                     return Err(format!("RATE_LIMIT: {}", error_response.message));
                 }
+                500 => {
+                    // Server error - parse the error response
+                    println!("Lambda returned 500 error: {}", body_str);
+                    let error_response: SpeechErrorResponse = serde_json::from_str(body_str)
+                        .unwrap_or(SpeechErrorResponse {
+                            error: "server_error".to_string(),
+                            message: "Speech-to-text service is temporarily unavailable. Please try again.".to_string(),
+                            remaining_requests: None,
+                        });
+                    return Err(format!("SERVER_ERROR: {}", error_response.message));
+                }
                 _ => {
-                    // Parse the body for other errors
+                    // Other error status codes
                     let error_response: SpeechErrorResponse = serde_json::from_str(body_str)
                         .unwrap_or(SpeechErrorResponse {
                             error: "Unknown error".to_string(),
                             message: "An unexpected error occurred".to_string(),
                             remaining_requests: None,
                         });
-                    
                     return Err(error_response.message);
                 }
             }
+        } else {
+            // No status code found in response
+            return Err("Invalid response format: missing status code".to_string());
         }
-    }
-
-    // Fallback: try to parse the response directly
-    match status.as_u16() {
-        200 => {
-            match serde_json::from_str::<SpeechToTextResponse>(&response_text) {
-                Ok(speech_response) => {
-                    Ok(serde_json::to_string(&speech_response)
-                        .map_err(|e| format!("Failed to serialize response: {}", e))?)
-                }
-                Err(parse_err) => {
-                    Err(format!("Failed to parse success response: {}", parse_err))
-                }
-            }
-        }
-        429 => {
-            let error_response: SpeechErrorResponse = serde_json::from_str(&response_text)
-                .map_err(|e| format!("Failed to parse rate limit response: {}", e))?;
-            Err(format!("RATE_LIMIT: {}", error_response.message))
-        }
-        _ => {
-            let error_response: SpeechErrorResponse = serde_json::from_str(&response_text)
-                .unwrap_or(SpeechErrorResponse {
-                    error: "Unknown error".to_string(),
-                    message: "An unexpected error occurred".to_string(),
-                    remaining_requests: None,
-                });
-            
-            Err(error_response.message)
-        }
+    } else {
+        // Failed to parse JSON response
+        return Err("Failed to parse response as JSON".to_string());
     }
 }

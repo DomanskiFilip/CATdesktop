@@ -255,145 +255,177 @@ impl AIAssistantService {
             .map_err(|e| format!("Failed to call Lambda: {}", e))?;
 
         let text = resp.text().await.map_err(|e| format!("Failed to read Lambda response: {}", e))?;
+        let lambda_resp: LambdaResponse = serde_json::from_str(&text).map_err(|e| format!("Failed to parse Lambda response: {}", e))?;
 
-        // Parse Lambda response for status_code
-        let mut lambda_resp: LambdaResponse = serde_json::from_str(&text)
-            .map_err(|e| format!("Failed to parse Lambda response: {}", e))?;
+        match lambda_resp.status_code {
+            200 => {
+                // Success - process the response
+                println!("🔍 Raw Lambda response: {}", lambda_resp.body);
 
-        if lambda_resp.status_code == 429 {
-            // Handle rate limiting
-            let rate_limit_error: serde_json::Value = serde_json::from_str(&lambda_resp.body)
-                .map_err(|e| format!("Failed to parse rate limit response: {}", e))?;
-            
-            let error_message = rate_limit_error["message"]
-                .as_str()
-                .unwrap_or("Daily AI request limit exceeded. You can make 25 requests per day. Please try again tomorrow. :3 😽");
-            
-            let remaining_requests = rate_limit_error["remaining_requests"]
-                .as_i64()
-                .unwrap_or(0) as i32;
+                let sanitized_body = lambda_resp
+                    .body
+                    .replace('\n', "")
+                    .replace('\r', "")
+                    .replace('\t', "")
+                    .replace('\u{a0}', "")
+                    .trim()
+                    .to_string();
 
-            return Ok(LLMResponse {
-                response_text: format!("🚫 {}", error_message),
-                extracted_events: None,
-                action_taken: Some("none".to_string()),
-                confidence: Some(1.0),
-                remaining_requests: Some(remaining_requests),
-            });
-        }
-        
-        // If access token is rejected (status_code 401), try auto-login
-        if lambda_resp.status_code == 401 {
-            // Try auto-login to refresh tokens
-            if auto_login_lambda(app_handle).await.unwrap_or(false) {
-                // Wait briefly to ensure token file is written
-                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-                // Retry with new tokens
-                if let Ok((access_token, _refresh_token, _)) =
-                    read_tokens_from_file(app_handle).await
-                {
-                    prompt_with_token["access_token"] = serde_json::json!(access_token);
-                    let retry_resp = client
-                        .post(&url)
-                        .header("Content-Type", "application/json")
-                        .json(&prompt_with_token)
-                        .send()
-                        .await
-                        .map_err(|e| format!("Failed to call Lambda after auto-login: {}", e))?;
-                    
-                    let retry_status = retry_resp.status();
-                    let retry_text = retry_resp.text().await.map_err(|e| {
-                        format!("Failed to read Lambda response after auto-login: {}", e)
-                    })?;
+                if !sanitized_body.ends_with('}') {
+                    println!("❌ Lambda response appears truncated: {}", sanitized_body);
+                    return Err("Received incomplete response from AI. Please try again.".to_string());
+                }
 
-                    // Check for rate limiting on retry as well
-                    if retry_status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                        let rate_limit_error: serde_json::Value = serde_json::from_str(&retry_text)
-                            .map_err(|e| format!("Failed to parse rate limit response on retry: {}", e))?;
-                        
-                        let error_message = rate_limit_error["message"]
-                            .as_str()
-                            .unwrap_or("Daily AI request limit exceeded. You can make 25 requests per day. Please try again tomorrow. :3 😽");
-                        
-                        let remaining_requests = rate_limit_error["remaining_requests"]
-                            .as_i64()
-                            .unwrap_or(0) as i32;
+                println!("🔍 Patched Lambda response for parsing: {}", sanitized_body);
 
-                        return Ok(LLMResponse {
-                            response_text: format!("🚫 {}", error_message),
-                            extracted_events: None,
-                            action_taken: Some("none".to_string()),
-                            confidence: Some(1.0),
-                            remaining_requests: Some(remaining_requests),
-                        });
+                let mut llm_response: LLMResponse = serde_json::from_str(&sanitized_body).map_err(|e| {
+                    println!("❌ Failed to parse LLM response: {} - JSON was: {}", e, sanitized_body);
+                    format!("Failed to parse LLM response: {}", e)
+                })?;
+
+                // Patch: Ensure every extracted event has a non-empty description
+                if let Some(events) = &mut llm_response.extracted_events {
+                    for event in events.iter_mut() {
+                        if event
+                            .description
+                            .as_ref()
+                            .map(|d| d.trim().is_empty())
+                            .unwrap_or(true)
+                        {
+                            event.description = Some("Untitled Event".to_string());
+                        }
                     }
+                }
 
-                    lambda_resp = serde_json::from_str(&retry_text).map_err(|e| {
-                        format!("Failed to parse Lambda response after auto-login: {}", e)
-                    })?;
-                    // If still unauthorized, force logout
-                    if lambda_resp.status_code == 401 {
+                Ok(llm_response)
+            }
+            401 => {
+                // Unauthorized - try auto-login and retry
+                if auto_login_lambda(app_handle).await.unwrap_or(false) {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                    
+                    if let Ok((access_token, _refresh_token, _)) = read_tokens_from_file(app_handle).await {
+                        prompt_with_token["access_token"] = serde_json::json!(access_token);
+                        
+                        let retry_resp = client
+                            .post(&url)
+                            .header("Content-Type", "application/json")
+                            .json(&prompt_with_token)
+                            .send()
+                            .await
+                            .map_err(|e| format!("Failed to call Lambda after auto-login: {}", e))?;
+                        
+                        let retry_text = retry_resp.text().await.map_err(|e| {
+                            format!("Failed to read Lambda response after auto-login: {}", e)
+                        })?;
+
+                        let retry_lambda_resp: LambdaResponse = serde_json::from_str(&retry_text).map_err(|e| {
+                            format!("Failed to parse Lambda response after auto-login: {}", e)
+                        })?;
+
+                        match retry_lambda_resp.status_code {
+                            200 => {
+                                // Success on retry
+                                let sanitized_body = retry_lambda_resp
+                                    .body
+                                    .replace('\n', "")
+                                    .replace('\r', "")
+                                    .replace('\t', "")
+                                    .replace('\u{a0}', "")
+                                    .trim()
+                                    .to_string();
+
+                                let mut llm_response: LLMResponse = serde_json::from_str(&sanitized_body).map_err(|e| {
+                                    format!("Failed to parse LLM response after retry: {}", e)
+                                })?;
+
+                                // Patch descriptions
+                                if let Some(events) = &mut llm_response.extracted_events {
+                                    for event in events.iter_mut() {
+                                        if event
+                                            .description
+                                            .as_ref()
+                                            .map(|d| d.trim().is_empty())
+                                            .unwrap_or(true)
+                                        {
+                                            event.description = Some("Untitled Event".to_string());
+                                        }
+                                    }
+                                }
+
+                                Ok(llm_response)
+                            }
+                            401 => {
+                                let _ = logout_user(app_handle.clone()).await;
+                                Err("Session expired. Please log in again.".to_string())
+                            }
+                            429 => {
+                                // Rate limiting on retry
+                                let rate_limit_error: serde_json::Value = serde_json::from_str(&retry_lambda_resp.body)
+                                    .map_err(|e| format!("Failed to parse rate limit response on retry: {}", e))?;
+                                
+                                let error_message = rate_limit_error["message"]
+                                    .as_str()
+                                    .unwrap_or("Daily AI request limit exceeded. You can make 25 requests per day. Please try again tomorrow. :3 😽");
+                                
+                                let remaining_requests = rate_limit_error["remaining_requests"]
+                                    .as_i64()
+                                    .unwrap_or(0) as i32;
+
+                                Ok(LLMResponse {
+                                    response_text: format!("🚫 {}", error_message),
+                                    extracted_events: None,
+                                    action_taken: Some("none".to_string()),
+                                    confidence: Some(1.0),
+                                    remaining_requests: Some(remaining_requests),
+                                })
+                            }
+                            500 => {
+                                println!("Lambda returned error on retry: {}", retry_lambda_resp.body);
+                                Err("AI service error on retry. Please try again.".to_string())
+                            }
+                            _ => {
+                                Err(format!("Unexpected error on retry: status code {}", retry_lambda_resp.status_code))
+                            }
+                        }
+                    } else {
                         let _ = logout_user(app_handle.clone()).await;
-                        return Err("Session expired. Please log in again.".to_string());
+                        Err("Could not read tokens after auto-login, force logout".to_string())
                     }
                 } else {
-                    // Could not read tokens after auto-login, force logout
                     let _ = logout_user(app_handle.clone()).await;
-                    return Err("Could not read tokens after auto-login, force logout".to_string());
-                }
-            } else {
-                // Auto-login failed, force logout
-                let _ = logout_user(app_handle.clone()).await;
-                return Err("Session expired. Please log in again.".to_string());
-            }
-        }
-
-        if lambda_resp.status_code == 500 {
-            println!("Lambda returned error: {}", lambda_resp.body);
-        }
-
-        println!("🔍 Raw Lambda response: {}", lambda_resp.body);
-
-        let sanitized_body = lambda_resp
-            .body
-            .replace('\n', "")
-            .replace('\r', "")
-            .replace('\t', "")
-            .replace('\u{a0}', "")
-            .trim()
-            .to_string();
-
-        if !sanitized_body.ends_with('}') {
-            println!("❌ Lambda response appears truncated: {}", sanitized_body);
-            return Err("Received incomplete response from AI. Please try again.".to_string());
-        }
-
-        println!("🔍 Patched Lambda response for parsing: {}", sanitized_body);
-
-        // If body is a JSON string literal, parse it first
-        let mut llm_response: LLMResponse = serde_json::from_str(&sanitized_body).map_err(|e| {
-            println!(
-                "❌ Failed to parse LLM response: {} - JSON was: {}",
-                e, sanitized_body
-            );
-            format!("Failed to parse LLM response: {}", e)
-        })?;
-
-        // Patch: Ensure every extracted event has a non-empty description
-        if let Some(events) = &mut llm_response.extracted_events {
-            for event in events.iter_mut() {
-                if event
-                    .description
-                    .as_ref()
-                    .map(|d| d.trim().is_empty())
-                    .unwrap_or(true)
-                {
-                    event.description = Some("Untitled Event".to_string());
+                    Err("Session expired. Please log in again.".to_string())
                 }
             }
-        }
+            429 => {
+                // Rate limit exceeded
+                let rate_limit_error: serde_json::Value = serde_json::from_str(&lambda_resp.body)
+                    .map_err(|e| format!("Failed to parse rate limit response: {}", e))?;
+                
+                let error_message = rate_limit_error["message"]
+                    .as_str()
+                    .unwrap_or("Daily AI request limit exceeded. You can make 25 requests per day. Please try again tomorrow. :3 😽");
+                
+                let remaining_requests = rate_limit_error["remaining_requests"]
+                    .as_i64()
+                    .unwrap_or(0) as i32;
 
-        Ok(llm_response)
+                Ok(LLMResponse {
+                    response_text: format!("🚫 {}", error_message),
+                    extracted_events: None,
+                    action_taken: Some("none".to_string()),
+                    confidence: Some(1.0),
+                    remaining_requests: Some(remaining_requests),
+                })
+            }
+            500 => {
+                println!("Lambda returned error: {}", lambda_resp.body);
+                Err("AI service error. Please try again.".to_string())
+            }
+            _ => {
+                Err(format!("Unexpected error: status code {}", lambda_resp.status_code))
+            }
+        }
     }
 
     async fn get_recent_events(&self, app_handle: &AppHandle,) -> Result<Vec<CalendarEvent>, String> {

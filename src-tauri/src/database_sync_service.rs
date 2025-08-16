@@ -260,77 +260,97 @@ impl DbSyncService {
             .await
             .map_err(|e| format!("Request failed: {}", e))?;
 
-        let mut status = response.status();
-        let mut text = response.text().await.map_err(|e| e.to_string())?;
-        let mut lambda_response: Option<serde_json::Value> = serde_json::from_str(&text).ok();
+        let text = response.text().await.map_err(|e| e.to_string())?;
+        let lambda_response: Option<serde_json::Value> = serde_json::from_str(&text).ok();
 
-        // If 401, try auto-login and retry once
-        if let Some(ref resp) = lambda_response {
-            if resp.get("status_code").and_then(|v| v.as_u64()) == Some(401) {
-                if auto_login_lambda(app_handle_arc).await.unwrap_or(false) {
-                    // Wait briefly to ensure token file is written
-                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                    // Retry with new token (always read from file)
-                    if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle_arc).await {
-                        payload["access_token"] = serde_json::json!(access_token);
-                        payload["deviceInfo"] = device_info;
-                        payload["user_id"] = serde_json::json!(user_id);
-                        let retry_response = self
-                            .client
-                            .post(&sync_url)
-                            .header("Content-Type", "application/json")
-                            .json(&payload)
-                            .send()
-                            .await
-                            .map_err(|e| format!("Request failed after auto-login: {}", e))?;
-                        status = retry_response.status();
-                        text = retry_response.text().await.map_err(|e| e.to_string())?;
-                        lambda_response = serde_json::from_str::<serde_json::Value>(&text).ok();
-                        // If still 401, force logout
-                        if let Some(ref resp2) = lambda_response {
-                            if resp2.get("status_code").and_then(|v| v.as_u64()) == Some(401) {
-                                let _ = logout_user(app_handle_arc.as_ref().clone()).await;
-                                return Err("Session expired. Please log in again.".to_string());
-                            }
-                        }
-                    } else {
-                        // Could not read tokens after auto-login
-                        let _ = logout_user(app_handle_arc.as_ref().clone()).await;
-                        return Err("Could not read tokens after auto-login".to_string());
-                    }
-                } else {
-                    let _ = logout_user(app_handle_arc.as_ref().clone()).await;
-                    return Err("Session expired. Please log in again.".to_string());
-                }
-            }
-        }
-
+        // handle response
         if let Some(lambda_response) = lambda_response {
             if let Some(status_code) = lambda_response.get("status_code").and_then(|v| v.as_u64()) {
-                if status_code != 200 {
-                    if let Some(body) = lambda_response.get("body").and_then(|v| v.as_str()) {
-                        return Err(format!("Failed to get events: {}", body));
-                    } else {
-                        return Err(format!("Failed to get events: status code {}", status_code));
+                match status_code {
+                    200 => {
+                        // Success - process the response body
+                        if let Some(body) = lambda_response.get("body").and_then(|v| v.as_str()) {
+                            if let Ok(body_json) = serde_json::from_str::<serde_json::Value>(body) {
+                                if let Some(events_array) = body_json.get("events").and_then(|v| v.as_array()) {
+                                    self.merge_remote_events(app_handle_arc, events_array)
+                                        .await
+                                        .map_err(|e| format!("Failed to merge remote events: {}", e))?;
+                                } else {
+                                    println!("No events found in response or invalid format");
+                                }
+                            }
+                        }
+                        return Ok(());
                     }
-                }
-                if let Some(body) = lambda_response.get("body").and_then(|v| v.as_str()) {
-                    if let Ok(body_json) = serde_json::from_str::<serde_json::Value>(body) {
-                        if let Some(events_array) = body_json.get("events").and_then(|v| v.as_array()) {
-                            self.merge_remote_events(app_handle_arc, events_array)
-                                .await
-                                .map_err(|e| format!("Failed to merge remote events: {}", e))?;
+                    401 => {
+                        // Unauthorized - try auto-login and retry
+                        if auto_login_lambda(app_handle_arc).await.unwrap_or(false) {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                            
+                            if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle_arc).await {
+                                payload["access_token"] = serde_json::json!(access_token);
+                                payload["deviceInfo"] = device_info;
+                                payload["user_id"] = serde_json::json!(user_id);
+                                
+                                let retry_response = self
+                                    .client
+                                    .post(&sync_url)
+                                    .header("Content-Type", "application/json")
+                                    .json(&payload)
+                                    .send()
+                                    .await
+                                    .map_err(|e| format!("Request failed after auto-login: {}", e))?;
+                                
+                                let retry_text = retry_response.text().await.map_err(|e| e.to_string())?;
+                                
+                                if let Ok(retry_lambda_response) = serde_json::from_str::<serde_json::Value>(&retry_text) {
+                                    if let Some(retry_status) = retry_lambda_response.get("status_code").and_then(|v| v.as_u64()) {
+                                        match retry_status {
+                                            200 => {
+                                                if let Some(retry_body) = retry_lambda_response.get("body").and_then(|v| v.as_str()) {
+                                                    if let Ok(body_json) = serde_json::from_str::<serde_json::Value>(retry_body) {
+                                                        if let Some(events_array) = body_json.get("events").and_then(|v| v.as_array()) {
+                                                            self.merge_remote_events(app_handle_arc, events_array)
+                                                                .await
+                                                                .map_err(|e| format!("Failed to merge remote events: {}", e))?;
+                                                        }
+                                                    }
+                                                }
+                                                return Ok(());
+                                            }
+                                            401 => {
+                                                let _ = logout_user(app_handle_arc.as_ref().clone()).await;
+                                                return Err("Session expired. Please log in again.".to_string());
+                                            }
+                                            _ => {
+                                                if let Some(retry_body) = retry_lambda_response.get("body").and_then(|v| v.as_str()) {
+                                                    return Err(format!("Failed to get events after retry: {}", retry_body));
+                                                } else {
+                                                    return Err(format!("Failed to get events after retry: status code {}", retry_status));
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                let _ = logout_user(app_handle_arc.as_ref().clone()).await;
+                                return Err("Could not read tokens after auto-login".to_string());
+                            }
                         } else {
-                            println!("No events found in response or invalid format");
+                            let _ = logout_user(app_handle_arc.as_ref().clone()).await;
+                            return Err("Session expired. Please log in again.".to_string());
+                        }
+                    }
+                    _ => {
+                        // Other error status codes
+                        if let Some(body) = lambda_response.get("body").and_then(|v| v.as_str()) {
+                            return Err(format!("Failed to get events: {}", body));
+                        } else {
+                            return Err(format!("Failed to get events: status code {}", status_code));
                         }
                     }
                 }
-                return Ok(());
             }
-        }
-
-        if !status.is_success() {
-            return Err(format!("Failed to get events: {}", text));
         }
         Ok(())
     }
@@ -398,76 +418,91 @@ impl DbSyncService {
             .await
             .map_err(|e| format!("Request failed: {}", e))?;
 
-        let mut status = response.status();
-        let mut text = response.text().await.map_err(|e| e.to_string())?;
-        let mut lambda_response: Option<serde_json::Value> = serde_json::from_str(&text).ok();
+        let text = response.text().await.map_err(|e| e.to_string())?;
+        let lambda_response: Option<serde_json::Value> = serde_json::from_str(&text).ok();
 
-        // If 401, try auto-login and retry once
-        if let Some(ref resp) = lambda_response {
-            if resp.get("status_code").and_then(|v| v.as_u64()) == Some(401) {
-                if auto_login_lambda(app_handle_arc).await.unwrap_or(false) {
-                    // Wait briefly to ensure token file is written
-                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                    // Retry with new token (always read from file)
-                    if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle_arc).await {
-                        payload["access_token"] = serde_json::json!(access_token);
-                        payload["deviceInfo"] = device_info;
-                        payload["user_id"] = serde_json::json!(user_id);
-                        let retry_response = self
-                            .client
-                            .post(&sync_url)
-                            .header("Content-Type", "application/json")
-                            .json(&payload)
-                            .send()
-                            .await
-                            .map_err(|e| format!("Request failed after auto-login: {}", e))?;
-                        status = retry_response.status();
-                        text = retry_response.text().await.map_err(|e| e.to_string())?;
-                        lambda_response = serde_json::from_str::<serde_json::Value>(&text).ok();
-                        // If still 401, force logout
-                        if let Some(ref resp2) = lambda_response {
-                            if resp2.get("status_code").and_then(|v| v.as_u64()) == Some(401) {
-                                let _ = logout_user(app_handle_arc.as_ref().clone()).await;
-                                return Err("Session expired. Please log in again.".to_string());
-                            }
-                        }
-                    } else {
-                        // Could not read tokens after auto-login
-                        let _ = logout_user(app_handle_arc.as_ref().clone()).await;
-                        return Err("Could not read tokens after auto-login".to_string());
-                    }
-                } else {
-                    let _ = logout_user(app_handle_arc.as_ref().clone()).await;
-                    return Err("Session expired. Please log in again.".to_string());
-                }
-            }
-        }
-
+        // handle response
         if let Some(lambda_response) = lambda_response {
             if let Some(status_code) = lambda_response.get("status_code").and_then(|v| v.as_u64()) {
-                if status_code != 200 {
-                    if let Some(body) = lambda_response.get("body").and_then(|v| v.as_str()) {
-                        return Err(format!("Failed to sync events: {}", body));
-                    } else {
-                        return Err(format!(
-                            "Failed to sync events: status code {}",
-                            status_code
-                        ));
+                match status_code {
+                    200 => {
+                        // Success
+                        if let Some(body) = lambda_response.get("body").and_then(|v| v.as_str()) {
+                            if let Ok(body_json) = serde_json::from_str::<serde_json::Value>(body) {
+                                if let Some(msg) = body_json.get("message").and_then(|v| v.as_str()) {
+                                    println!("{}", msg);
+                                }
+                            }
+                        }
+                        return Ok(());
                     }
-                }
-                if let Some(body) = lambda_response.get("body").and_then(|v| v.as_str()) {
-                    if let Ok(body_json) = serde_json::from_str::<serde_json::Value>(body) {
-                        if let Some(msg) = body_json.get("message").and_then(|v| v.as_str()) {
-                            println!("{}", msg);
+                    401 => {
+                        // Unauthorized - try auto-login and retry
+                        if auto_login_lambda(app_handle_arc).await.unwrap_or(false) {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                            
+                            if let Ok((access_token, _, _)) = read_tokens_from_file(app_handle_arc).await {
+                                payload["access_token"] = serde_json::json!(access_token);
+                                payload["deviceInfo"] = device_info;
+                                payload["user_id"] = serde_json::json!(user_id);
+                                
+                                let retry_response = self
+                                    .client
+                                    .post(&sync_url)
+                                    .header("Content-Type", "application/json")
+                                    .json(&payload)
+                                    .send()
+                                    .await
+                                    .map_err(|e| format!("Request failed after auto-login: {}", e))?;
+                                
+                                let retry_text = retry_response.text().await.map_err(|e| e.to_string())?;
+                                
+                                if let Ok(retry_lambda_response) = serde_json::from_str::<serde_json::Value>(&retry_text) {
+                                    if let Some(retry_status) = retry_lambda_response.get("status_code").and_then(|v| v.as_u64()) {
+                                        match retry_status {
+                                            200 => {
+                                                if let Some(retry_body) = retry_lambda_response.get("body").and_then(|v| v.as_str()) {
+                                                    if let Ok(body_json) = serde_json::from_str::<serde_json::Value>(retry_body) {
+                                                        if let Some(msg) = body_json.get("message").and_then(|v| v.as_str()) {
+                                                            println!("{}", msg);
+                                                        }
+                                                    }
+                                                }
+                                                return Ok(());
+                                            }
+                                            401 => {
+                                                let _ = logout_user(app_handle_arc.as_ref().clone()).await;
+                                                return Err("Session expired. Please log in again.".to_string());
+                                            }
+                                            _ => {
+                                                if let Some(retry_body) = retry_lambda_response.get("body").and_then(|v| v.as_str()) {
+                                                    return Err(format!("Failed to sync events after retry: {}", retry_body));
+                                                } else {
+                                                    return Err(format!("Failed to sync events after retry: status code {}", retry_status));
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                let _ = logout_user(app_handle_arc.as_ref().clone()).await;
+                                return Err("Could not read tokens after auto-login".to_string());
+                            }
+                        } else {
+                            let _ = logout_user(app_handle_arc.as_ref().clone()).await;
+                            return Err("Session expired. Please log in again.".to_string());
+                        }
+                    }
+                    _ => {
+                        // Other error status codes
+                        if let Some(body) = lambda_response.get("body").and_then(|v| v.as_str()) {
+                            return Err(format!("Failed to sync events: {}", body));
+                        } else {
+                            return Err(format!("Failed to sync events: status code {}", status_code));
                         }
                     }
                 }
-                return Ok(());
             }
-        }
-
-        if !status.is_success() {
-            return Err(format!("Failed to sync events: {}", text));
         }
         Ok(())
     }
