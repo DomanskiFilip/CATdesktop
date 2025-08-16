@@ -294,8 +294,7 @@ pub async fn save_event(app_handle: &AppHandle, event_json: String) -> Result<()
         ),
     ).map_err(|e| format!("Execute error: {}", e.to_string()))?;
 
-    tx.commit()
-        .map_err(|e| format!("Commit error: {}", e.to_string()))?;
+    tx.commit().map_err(|e| format!("Commit error: {}", e.to_string()))?;
     println!("✅ Event saved successfully");
     Ok(())
 }
@@ -349,7 +348,7 @@ pub async fn get_events(app_handle: &AppHandle) -> Result<Vec<String>, SqliteErr
         // Get the event from the result
         let mut event = row_result?;
 
-        // Skip deleted events (if this check is needed)
+        // Skip deleted events
         if event.deleted {
             continue;
         }
@@ -357,8 +356,8 @@ pub async fn get_events(app_handle: &AppHandle) -> Result<Vec<String>, SqliteErr
         let decoded = match general_purpose::STANDARD.decode(&event.description) {
             Ok(decoded) => decoded,
             Err(_) => {
-                // If base64 decoding fails, assume it's not encrypted (legacy data)
-                event.description.as_bytes().to_vec()
+                eprintln!("Failed to decode event description for event ID: {}", event.id);
+                continue; // Skip this event if decryption fails
             }
         };
 

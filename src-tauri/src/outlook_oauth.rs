@@ -34,8 +34,6 @@ pub async fn outlook_oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result
         .and_then(|v| v.as_str())
         .ok_or("No client_id in Outlook credentials")?;
     
-    // Note: Don't use client_secret for public clients (Microsoft personal accounts)
-    
     // Use localhost redirect URI for desktop OAuth
     let redirect_uri_str = "http://127.0.0.1:1426";
 

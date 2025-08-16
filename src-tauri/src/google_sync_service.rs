@@ -33,6 +33,7 @@ impl GoogleSyncService {
         }
     }
 
+    // Stop the Outlook sync service //
     pub async fn stop(&mut self) {
         println!("Stopping Google sync service...");
         self.running.store(false, Ordering::SeqCst);
@@ -695,7 +696,7 @@ impl GoogleSyncService {
                                     let needs_update = existing_description != summary;
                                     (true, needs_update, existing_description)
                                 } else {
-                                                                // Check for events with same time and description (within 30-minute window)
+                                    // Check for events with same time and description (within 30-minute window)
                                     let event_start = event_time.with_timezone(&chrono::Utc);
                                     let window_start = event_start - chrono::Duration::minutes(30);
                                     let window_end = event_start + chrono::Duration::minutes(30);
@@ -793,7 +794,7 @@ impl GoogleSyncService {
         Ok(())
     }
 
-    /// Refreshes the Google access token using the refresh token. //
+    // Refreshes the Google access token using the refresh token. //
     pub async fn refresh_google_access_token(&self, refresh_token: &str, client_id: &str, client_secret: &str,) -> Result<String, String> {
         let url = "https://oauth2.googleapis.com/token";
         let params = [
@@ -828,7 +829,7 @@ impl GoogleSyncService {
         Ok(access_token.to_string())
     }
 
-    /// Updates the token file with the new access token. //
+    // Updates the token file with the new access token. //
     pub fn update_access_token_file(&self, token_path: &std::path::Path, new_access_token: &str,) -> Result<(), String> {
         let mut token_json: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(token_path).map_err(|e| e.to_string())?)

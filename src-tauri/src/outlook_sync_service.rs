@@ -33,6 +33,7 @@ impl OutlookSyncService {
         }
     }
 
+    // Stop the Outlook sync service //
     pub async fn stop(&mut self) {
         println!("Stopping Outlook sync service...");
         self.running.store(false, Ordering::SeqCst);
@@ -42,6 +43,7 @@ impl OutlookSyncService {
         }
     }
 
+    // Start the Outlook sync service //
     pub async fn start(&mut self, app_handle_arc: Arc<AppHandle>, user_logged_in: bool) {
         println!("Starting Outlook sync service...");
 
@@ -117,7 +119,7 @@ impl OutlookSyncService {
         }));
     }
 
-    // Sync local events to Outlook
+    // Sync local events to Outlook //
     pub async fn sync_to_outlook(&self, app_handle_arc: &Arc<AppHandle>, user_logged_in: bool) -> Result<(), String> {
         if !user_logged_in {
             println!("User not logged in, skipping sync to Outlook.");
@@ -512,7 +514,7 @@ impl OutlookSyncService {
         Ok(())
     }
 
-    // Sync Outlook events to local database
+    // Sync Outlook events to local database //
     pub async fn sync_from_outlook(&self, app_handle_arc: &Arc<AppHandle>, user_logged_in: bool) -> Result<(), String> {
         if !user_logged_in {
             println!("User not logged in, skipping sync from Outlook.");
