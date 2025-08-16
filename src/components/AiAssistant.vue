@@ -564,7 +564,31 @@ const updateConflictingEvent = async (existingEvent: any, newSuggestion: EventSu
 const rejectSuggestion = async (messageIndex: number) => {
   const message = chatHistory.value[messageIndex];
   if (!message) return;
+  
   message.eventRejected = true;
+  
+  // Record rejection for learning
+  if (message.eventSuggestion) {
+    try {
+      // Find the original user query that led to this suggestion
+      let userQuery = '';
+      for (let i = messageIndex - 1; i >= 0; i--) {
+        if (chatHistory.value[i].sender === 'user') {
+          userQuery = chatHistory.value[i].content;
+          break;
+        }
+      }
+      
+      await invoke('record_rejection', {
+        eventSuggestion: JSON.stringify(message.eventSuggestion),
+        userQuery: userQuery,
+        rejectionReason: null // Could add a dialog to ask why
+      });
+    } catch (error) {
+      console.warn('Failed to record rejection for learning:', error);
+    }
+  }
+
   let rejectionMessage = "No problem. ";
   if (message.isDelete) {
     rejectionMessage += "The event remains in your calendar. ";

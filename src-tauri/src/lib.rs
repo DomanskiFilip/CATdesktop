@@ -477,6 +477,54 @@ async fn reject_event_suggestion(event_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn record_rejection(app_handle: AppHandle, event_suggestion: String, user_query: String, rejection_reason: Option<String>) -> Result<(), String> {
+    let user_id = match crate::user_utils::get_current_user_id(&app_handle) {
+        Ok(id) => id,
+        Err(e) => return Err(format!("Failed to get user ID: {}", e))
+    };
+    
+    let config = crate::api_utils::AppConfig::new()
+        .map_err(|e| format!("Failed to get config: {}", e))?;
+    let url = format!("{}/llm", config.lambda_base_url);
+    
+    let mut payload = serde_json::json!({
+        "request_type": "record_rejection",
+        "user_id": user_id,
+        "event_suggestion": event_suggestion,
+        "user_query": user_query,
+        "rejection_reason": rejection_reason,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "deviceInfo": crate::api_utils::get_device_info(&app_handle)
+    });
+
+    // Add access token if available
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        if let Ok((access_token, _, _)) = crate::token_utils::read_tokens_from_file(&app_handle).await {
+            payload["access_token"] = serde_json::json!(access_token);
+        }
+    }
+    
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        if let Some((access_token, _, _)) = read_tokens_from_cache().await {
+            payload["access_token"] = serde_json::json!(access_token);
+        }
+    }
+
+    let client = reqwest::Client::new();
+    let _response = client
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to record rejection: {}", e))?;
+
+    Ok(())
+}
+
+#[tauri::command]
 async fn delete_all_events(app_handle: tauri::AppHandle) -> Result<usize, String> {
     let conn = match database_utils::get_db_connection(&app_handle) {
         Ok(conn) => conn,
@@ -864,6 +912,7 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
             enrichment_followup,
             save_event_from_ai,
             reject_event_suggestion,
+            record_rejection,
             delete_all_events,
             get_weekly_weather,
             set_user_coordinates,
