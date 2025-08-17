@@ -999,25 +999,36 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             create_system_tray(&app.handle())?;
 
+             // Create system tray (desktop only)
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            create_system_tray(&app.handle())?;
+
             // Setup auto-launch on first run (desktop only)
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 let app_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
+                    // Check if running in dev mode
+                    let exe_path = std::env::current_exe().unwrap_or_default();
+                    let is_dev = exe_path.to_string_lossy().contains("target\\debug") || exe_path.to_string_lossy().contains("target/debug");
+                    if is_dev {
+                        println!("Skipping auto-launch setup in dev mode.");
+                        // Optionally, disable auto-launch if it was previously enabled by dev
+                        let _ = disable_auto_launch().await;
+                        return;
+                    }
+
                     // Check if this is first run by looking for a flag file
                     let app_data_dir = match app_handle.path().app_data_dir() {
                         Ok(dir) => dir,
                         Err(_) => return,
                     };
-                    
                     let first_run_flag = app_data_dir.join("auto_launch_setup.flag");
-                    
                     if !first_run_flag.exists() {
                         // First run - set up auto-launch
                         match setup_auto_launch().await {
                             Ok(_) => {
                                 println!("Auto-launch configured successfully");
-                                // Create flag file to indicate setup is complete
                                 if let Err(e) = std::fs::create_dir_all(&app_data_dir) {
                                     eprintln!("Failed to create app data dir: {}", e);
                                 } else if let Err(e) = std::fs::write(&first_run_flag, "1") {
