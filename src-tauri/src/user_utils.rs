@@ -31,7 +31,7 @@ pub fn save_current_user_id(app_handle: &AppHandle, user_id: &str) -> Result<(),
     use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
     use rand::RngCore;
 
-    let key = get_encryption_key().map_err(|e| format!("Key error: {}", e))?;
+    let key = get_encryption_key(&app_handle).map_err(|e| format!("Key error: {}", e))?;
     let key = Key::from_slice(&key);
     let cipher = ChaCha20Poly1305::new(key);
 
@@ -72,7 +72,7 @@ pub fn get_current_user_id(app_handle: &AppHandle) -> Result<String, String> {
     use chacha20poly1305::aead::{Aead, KeyInit};
     use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
 
-    let key = get_encryption_key().map_err(|e| format!("Key error: {}", e))?;
+    let key = get_encryption_key(&app_handle).map_err(|e| format!("Key error: {}", e))?;
     let key = Key::from_slice(&key);
     let cipher = ChaCha20Poly1305::new(key);
 

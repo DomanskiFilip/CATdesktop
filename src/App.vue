@@ -78,16 +78,10 @@
             <Oauth providerName="Google"/>
             <Oauth providerName="Outlook"/>
         </section>
-        <div v-if="!isMobile" class="setting-item">
-          <h3>Startup Settings:</h3>
-          <label>
-            <input 
-              type="checkbox" 
-              v-model="autoLaunchEnabled" 
-              @change="toggleAutoLaunch"
-            />
-            Start with Windows
-          </label>
+        <div v-if="!isMobile">
+          <h3>Startup:</h3>
+          <label for="autoLaunch-checkbox">start with windows</label>
+          <input type="checkbox" v-model="autoLaunchEnabled" @change="toggleAutoLaunch" id="autoLaunch-checkbox"/>
         </div>
       </section>
     </section>
@@ -486,6 +480,10 @@ stroke: var(--color-dark);
   overflow-y: auto;
 }
 
+#settings h3 {
+  font-size: 1.2rem;
+}
+
 #settings hr {
   width: 100%;
   border: 1px solid var(--color-border);
@@ -495,6 +493,22 @@ stroke: var(--color-dark);
 #oauth-section {
   display: flex;
   flex-direction: row;
+}
+
+label[for="autoLaunch-checkbox"] {
+  font-size: 1rem;
+  color: var(--color-text);
+  margin-right: 0.5rem;
+  margin-left: 1rem;
+  cursor: pointer;
+}
+
+#autoLaunch-checkbox {
+  accent-color: var(--color-theme);
+  width: 1.2rem;
+  height: 1.2rem;
+  vertical-align: middle;
+  cursor: pointer;
 }
 
 #theme-background-element {

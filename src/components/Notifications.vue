@@ -1,5 +1,5 @@
 <template>
-  <h2>notifications:</h2>
+  <h2>Notifications:</h2>
   <section class="container">
     <section class="permission-toggle">
       <label class="toggle-switch">

@@ -1,6 +1,6 @@
 <template>
   <section id="themes">  
-    <h2>themes:</h2>
+    <h2>Themes:</h2>
     <section>
     <button id="light-1"></button>
     <button id="light-2"></button>

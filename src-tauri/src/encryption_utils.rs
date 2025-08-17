@@ -44,12 +44,22 @@ pub fn decrypt_user_data_base(_app_handle: &tauri::AppHandle, _user_id: &str, en
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod platform {
-    use base64::{engine::general_purpose, Engine};
-    use dotenvy::dotenv;
+    use keyring::Entry;
     use rand::Rng;
-    use std::env;
-    use std::fs;
-    use std::path::Path;
+    use whoami;
+    use tauri::AppHandle;
+    use base64::Engine;
+    use std::sync::{Mutex, OnceLock};
+
+    const SERVICE_NAME: &str = "com.calendarassistant.casual";
+
+    // In-memory cache for the encryption key to avoid repeated keyring calls
+    static ENCRYPTION_KEY_CACHE: OnceLock<Mutex<Option<[u8; 32]>>> = OnceLock::new();
+
+    fn get_user_name() -> String {
+        let user_name = whoami::username();
+        user_name
+    }
 
     fn generate_encryption_key() -> [u8; 32] {
         let mut key = [0u8; 32];
@@ -57,48 +67,108 @@ mod platform {
         key
     }
 
-    pub fn initialize_encryption_key() -> Result<(), String> {
-        let env_path = Path::new(".env");
-        let mut env_content = if env_path.exists() {
-            fs::read_to_string(env_path).map_err(|e| format!("Failed to read .env file: {}", e))?
-        } else {
-            String::new()
-        };
-        if env_content.contains("ENCRYPTION_KEY=") {
-            return Ok(());
+    pub fn initialize_encryption_key(_app_handle: &AppHandle) -> Result<(), String> {
+        // Check if we already have the key cached
+        let cache = ENCRYPTION_KEY_CACHE.get_or_init(|| Mutex::new(None));
+        if let Ok(guard) = cache.lock() {
+            if guard.is_some() {
+                println!("Encryption key already cached in memory");
+                return Ok(());
+            }
         }
+
+        let user_name = get_user_name();
+        
+        let entry = Entry::new(SERVICE_NAME, &user_name).map_err(|e| format!("Keyring error: {}", e))?;
+        
+        // Check if key already exists in keyring
+        match entry.get_password() {
+            Ok(existing_key) => {
+                // Verify the existing key is valid
+                if let Ok(key_bytes) = base64::engine::general_purpose::STANDARD.decode(&existing_key) {
+                    if key_bytes.len() == 32 {
+                        let mut key = [0u8; 32];
+                        key.copy_from_slice(&key_bytes);
+                        
+                        // Cache the key
+                        if let Ok(mut guard) = cache.lock() {
+                            *guard = Some(key);
+                        }
+                        
+                        println!("Valid encryption key already exists in keyring");
+                        return Ok(());
+                    }
+                }
+                println!("Existing key in keyring is invalid, regenerating");
+            },
+            Err(e) => {
+                println!("No existing encryption key found in keyring: {}", e);
+            }
+        }
+
+        // Generate a new key
         let key = generate_encryption_key();
-        let key_base64 = general_purpose::STANDARD.encode(key);
-        if !env_content.ends_with('\n') {
-            env_content.push('\n');
+        let key_base64 = base64::engine::general_purpose::STANDARD.encode(key);
+        
+        // Store in keyring
+        entry.set_password(&key_base64).map_err(|e| format!("Failed to store key in keyring: {}", e))?;
+        
+        // Verify keyring storage by attempting immediate retrieval
+        match entry.get_password() {
+            Ok(retrieved_key) => {
+                if retrieved_key == key_base64 {
+                    // Cache the key
+                    if let Ok(mut guard) = cache.lock() {
+                        *guard = Some(key);
+                    }
+                    
+                    return Ok(());
+                } else {
+                    return Err("Keyring verification failed - keys don't match".to_string());
+                }
+            },
+            Err(e) => {
+                return Err(format!("Keyring verification failed - cannot retrieve: {}", e));
+            }
         }
-        env_content.push_str(&format!("ENCRYPTION_KEY={}\n", key_base64));
-        fs::write(env_path, env_content)
-            .map_err(|e| format!("Failed to write to .env file: {}", e))?;
-        dotenv().ok();
-        Ok(())
     }
 
-    pub fn get_encryption_key() -> Result<[u8; 32], String> {
-        if let Err(_) = env::var("ENCRYPTION_KEY") {
-            initialize_encryption_key()?;
+    pub fn get_encryption_key(_app_handle: &AppHandle) -> Result<[u8; 32], String> {
+        // Check cache first
+        let cache = ENCRYPTION_KEY_CACHE.get_or_init(|| Mutex::new(None));
+        if let Ok(guard) = cache.lock() {
+            if let Some(cached_key) = *guard {
+                return Ok(cached_key);
+            }
         }
-        let key_base64 =
-            env::var("ENCRYPTION_KEY").map_err(|_| "ENCRYPTION_KEY not set in .env".to_string())?;
-        let key_bytes = general_purpose::STANDARD
-            .decode(key_base64)
-            .map_err(|e| format!("Failed to decode ENCRYPTION_KEY: {}", e))?;
-        if key_bytes.len() != 32 {
-            return Err(format!(
-                "Invalid ENCRYPTION_KEY length: expected 32 bytes, got {} bytes",
-                key_bytes.len()
-            ));
+
+        let user_name = get_user_name();
+        
+        let entry = Entry::new(SERVICE_NAME, &user_name).map_err(|e| format!("Keyring error: {}", e))?;
+        
+        // Try keyring
+        match entry.get_password() {
+            Ok(key_base64) => {
+                let key_bytes = base64::engine::general_purpose::STANDARD.decode(&key_base64).map_err(|e| format!("Failed to decode key from keyring: {}", e))?;
+                if key_bytes.len() != 32 {
+                    return Err(format!("Invalid key length from keyring: expected 32 bytes, got {}", key_bytes.len()));
+                }
+                let mut key = [0u8; 32];
+                key.copy_from_slice(&key_bytes);
+                
+                // Cache the key for future use
+                if let Ok(mut guard) = cache.lock() {
+                    *guard = Some(key);
+                }
+                
+                return Ok(key);
+            },
+            Err(e) => {
+                return Err(format!("Failed to retrieve key from keyring: {}", e));
+            }
         }
-        let mut key = [0u8; 32];
-        key.copy_from_slice(&key_bytes);
-        Ok(key)
     }
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub use platform::get_encryption_key;
+pub use platform::{get_encryption_key, initialize_encryption_key};

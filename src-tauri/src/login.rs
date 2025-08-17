@@ -1,6 +1,8 @@
 use crate::api_utils::{get_device_info, AppConfig};
 use crate::token_utils::save_tokens_to_file;
 use crate::user_utils::{save_current_user_id};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use crate::encryption_utils::initialize_encryption_key;
 use argon2::password_hash::SaltString;
 use argon2::{Argon2, PasswordHasher};
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -29,6 +31,14 @@ struct Body {
 pub async fn login_user_lambda(app_handle: &AppHandle, email: String, password: String,) -> Result<String, String> {
     let config = AppConfig::new()?;
     let device_info = get_device_info(&app_handle);
+
+    // IMPORTANT: Initialize encryption key BEFORE any token operations
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        if let Err(e) = initialize_encryption_key(&app_handle) {
+            return Err(format!("Failed to initialize encryption key: {}", e));
+        }
+    }
 
     let url = format!("{}/login", config.lambda_base_url);
     let client = Client::new();

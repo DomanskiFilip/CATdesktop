@@ -334,12 +334,10 @@ async fn setup_auto_launch() -> Result<(), String> {
 
     // Check if already enabled to avoid errors
     if auto.is_enabled().map_err(|e| e.to_string())? {
-        println!("Auto-launch already enabled");
         return Ok(());
     }
 
     auto.enable().map_err(|e| format!("Failed to enable auto-launch: {}", e))?;
-    println!("Auto-launch enabled successfully");
     Ok(())
 }
 
@@ -958,6 +956,15 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
             check_auto_launch_status,
         ])
         .setup(|app| {
+             // Initialize the encryption key FIRST, before any other operations
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                if let Err(e) = encryption_utils::initialize_encryption_key(&app.handle()) {
+                    eprintln!("Failed to initialize encryption key: {}", e);
+                    // Don't fail the app, but log the error
+                }
+            }
+
             // Initialize database with iOS-specific error handling
             #[cfg(target_os = "ios")]
             {
@@ -1053,8 +1060,8 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         #[cfg(any(target_os = "android", target_os = "ios"))]
                         {
-                            // Completely skip auto-login on iOS to prevent crashes
-                            println!("iOS: Skipping auto-login entirely");
+                            // Completely skip auto-login on iOS and Android to prevent crashes
+                            println!("iOS/Android: Skipping auto-login entirely");
                             let _ = app_handle_arc.emit("auto-login-completed", false);
                             false
                         }

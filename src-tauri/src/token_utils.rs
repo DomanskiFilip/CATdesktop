@@ -28,7 +28,7 @@ pub async fn save_tokens_to_file(app_handle: &AppHandle, access_token: &str, ref
     use aes_gcm::{Aes256Gcm, Key, Nonce};
     use base64::Engine;
 
-    let key = get_encryption_key()?;
+    let key = get_encryption_key(app_handle)?;
     let key = Key::<aes_gcm::aes::Aes256>::from_slice(&key);
     let cipher = Aes256Gcm::new(key);
 
@@ -64,7 +64,7 @@ pub async fn read_tokens_from_file(app_handle: &AppHandle,) -> Result<(String, S
     use aes_gcm::{Aes256Gcm, Key, Nonce};
     use base64::Engine;
 
-    let key = get_encryption_key()?;
+    let key = get_encryption_key(app_handle)?;
     let key = Key::<aes_gcm::aes::Aes256>::from_slice(&key);
     let cipher = Aes256Gcm::new(key);
 

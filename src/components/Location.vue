@@ -1,5 +1,5 @@
 <template>
-  <h2>location:</h2>
+  <h2>Location:</h2>
   <section class="container">
     <section class="permission-toggle">
       <label class="toggle-switch">
