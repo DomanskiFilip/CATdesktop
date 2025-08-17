@@ -163,6 +163,7 @@ dependencies = [
  "dotenvy",
  "futures",
  "jni",
+ "keyring",
  "log",
  "mac_address",
  "oauth2",

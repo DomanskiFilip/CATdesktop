@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" 
+           Name="{{product_name}}" 
+           Language="1033" 
+           Version="{{version}}" 
+           Manufacturer="{{manufacturer}}" 
+           UpgradeCode="{{upgrade_code}}">
+    
+    <Package InstallerVersion="400" Compressed="yes" InstallScope="perMachine" />
+    <MediaTemplate EmbedCab="yes" />
+    
+    <!-- Custom branding -->
+    <WixVariable Id="WixUIBannerBmp" Value="banner.bmp" />
+    <WixVariable Id="WixUIDialogBmp" Value="dialog.bmp" />
+    
+    <!-- App icon configuration -->
+    <Icon Id="icon.ico" SourceFile="{{icon_path}}" />
+    <Property Id="ARPPRODUCTICON" Value="icon.ico" />
+    
+    <!-- Custom UI configuration to move text below banner -->
+    <UI>
+      <UIRef Id="WixUI_InstallDir" />
+      
+      <!-- Custom dialog to reposition text -->
+      <Dialog Id="WelcomeDlg" Width="370" Height="270" Title="!(loc.WelcomeDlg_Title)">
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
+        </Control>
+        <Control Id="Bitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="234" TabSkip="no" Text="!(loc.WelcomeDlgBitmap)" />
+        
+        <!-- Move welcome text below the banner area -->
+        <Control Id="Title" Type="Text" X="135" Y="80" Width="220" Height="60" Transparent="yes" NoPrefix="yes" Text="!(loc.WelcomeDlg_Title)" />
+        <Control Id="Description" Type="Text" X="135" Y="120" Width="220" Height="60" Transparent="yes" NoPrefix="yes" Text="!(loc.WelcomeDlg_Description)" />
+      </Dialog>
+      
+      <!-- Customize InstallDir dialog as well -->
+      <Dialog Id="InstallDirDlg" Width="370" Height="270" Title="!(loc.InstallDirDlg_Title)">
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
+        </Control>
+        <Control Id="Banner" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="!(loc.InstallDirDlgBannerBitmap)" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        
+        <!-- Move title and description below banner -->
+        <Control Id="Title" Type="Text" X="15" Y="55" Width="300" Height="15" Transparent="yes" NoPrefix="yes" Text="!(loc.InstallDirDlg_Title)" />
+        <Control Id="Description" Type="Text" X="25" Y="75" Width="280" Height="20" Transparent="yes" NoPrefix="yes" Text="!(loc.InstallDirDlg_Description)" />
+        
+        <Control Id="FolderLabel" Type="Text" X="20" Y="100" Width="290" Height="30" NoPrefix="yes" Text="!(loc.InstallDirDlg_FolderLabel)" />
+        <Control Id="Folder" Type="PathEdit" X="20" Y="125" Width="320" Height="18" Property="WIXUI_INSTALLDIR" Indirect="yes" />
+        <Control Id="ChangeFolder" Type="PushButton" X="20" Y="150" Width="56" Height="17" Text="!(loc.InstallDirDlg_ChangeFolder)">
+          <Publish Event="SpawnDialog" Value="BrowseDlg">1</Publish>
+        </Control>
+      </Dialog>
+    </UI>
+    
+    <Property Id="WIXUI_INSTALLDIR" Value="APPLICATIONFOLDER" />
+    
+    <!-- License agreement (optional) -->
+    <WixVariable Id="WixUILicenseRtf" Value="license.rtf" />
+    
+    <!-- Directory structure -->
+    {{#each main_binary_name}}
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="{{windows_path_helper windows.program_files_folder_name}}">
+        <Directory Id="APPLICATIONFOLDER" Name="{{product_name}}">
+          {{#each binaries}}
+          <Component Id="{{bin_name}}" Guid="*">
+            <File Id="{{bin_name}}" Source="{{bin_path}}" KeyPath="yes">
+              <!-- Desktop shortcut -->
+              <Shortcut Id="DesktopShortcut" 
+                        Directory="DesktopFolder" 
+                        Name="{{product_name}}" 
+                        Icon="icon.ico" 
+                        IconIndex="0" 
+                        WorkingDirectory="APPLICATIONFOLDER" />
+              <!-- Start menu shortcut -->
+              <Shortcut Id="StartMenuShortcut" 
+                        Directory="ProgramMenuFolder" 
+                        Name="{{product_name}}" 
+                        Icon="icon.ico" 
+                        IconIndex="0" 
+                        WorkingDirectory="APPLICATIONFOLDER" />
+            </File>
+            <!-- Clean up shortcuts on uninstall -->
+            <RemoveFolder Id="RemoveDesktopShortcut" Directory="DesktopFolder" On="uninstall" />
+            <RemoveFolder Id="RemoveStartMenuShortcut" Directory="ProgramMenuFolder" On="uninstall" />
+            <RegistryValue Root="HKCU" 
+                          Key="Software\{{manufacturer}}\{{product_name}}" 
+                          Name="installed" 
+                          Type="integer" 
+                          Value="1" 
+                          KeyPath="no" />
+          </Component>
+          {{/each}}
+        </Directory>
+      </Directory>
+      <!-- Desktop folder reference -->
+      <Directory Id="DesktopFolder" Name="Desktop" />
+      <!-- Start menu folder reference -->
+      <Directory Id="ProgramMenuFolder" Name="Programs" />
+    </Directory>
+    {{/each}}
+    
+    <!-- Features to install -->
+    <Feature Id="Complete" Level="1" Title="{{product_name}}" Description="Complete installation">
+      {{#each binaries}}
+      <ComponentRef Id="{{bin_name}}" />
+      {{/each}}
+    </Feature>
+    
+    <!-- Upgrade logic -->
+    <Upgrade Id="{{upgrade_code}}">
+      <UpgradeVersion OnlyDetect="no" 
+                      Property="PREVIOUSFOUND"
+                      Minimum="0.0.0" 
+                      IncludeMinimum="yes"
+                      Maximum="{{version}}" 
+                      IncludeMaximum="no" />
+    </Upgrade>
+    
+    <!-- Install sequence -->
+    <InstallExecuteSequence>
+      <RemoveExistingProducts Before="InstallInitialize" />
+    </InstallExecuteSequence>
+    
+  </Product>
+</Wix>

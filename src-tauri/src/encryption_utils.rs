@@ -1,10 +1,6 @@
 use crate::login::DATABASE_TOKEN;
 
-pub fn encrypt_user_data_base(
-    _app_handle: &tauri::AppHandle,
-    _user_id: &str,
-    data: &[u8],
-) -> Result<Vec<u8>, String> {
+pub fn encrypt_user_data_base(_app_handle: &tauri::AppHandle, _user_id: &str, data: &[u8],) -> Result<Vec<u8>, String> {
     let key = {
         let cache = DATABASE_TOKEN.lock().unwrap();
         cache.clone().ok_or("Database token not set".to_string())?
@@ -26,11 +22,7 @@ pub fn encrypt_user_data_base(
     Ok(encrypted_data)
 }
 
-pub fn decrypt_user_data_base(
-    _app_handle: &tauri::AppHandle,
-    _user_id: &str,
-    encrypted_data: &[u8],
-) -> Result<Vec<u8>, String> {
+pub fn decrypt_user_data_base(_app_handle: &tauri::AppHandle, _user_id: &str, encrypted_data: &[u8],) -> Result<Vec<u8>, String> {
     if encrypted_data.len() < 12 {
         return Err("Encrypted data is too short".to_string());
     }
@@ -50,7 +42,7 @@ pub fn decrypt_user_data_base(
     Ok(plaintext)
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod platform {
     use base64::{engine::general_purpose, Engine};
     use dotenvy::dotenv;
@@ -108,5 +100,5 @@ mod platform {
     }
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub use platform::get_encryption_key;

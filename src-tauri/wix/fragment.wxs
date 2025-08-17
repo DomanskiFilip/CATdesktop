@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <!-- Additional custom components can be defined here -->
+    
+    <!-- Custom component for additional registry entries -->
+    <Component Id="myComponent" Guid="{12345678-1234-1234-1234-123456789012}" Directory="APPLICATIONFOLDER">
+      <!-- Registry entry for app settings -->
+      <RegistryKey Root="HKCU" Key="Software\CAT\Settings">
+        <RegistryValue Name="InstallDate" Type="string" Value="[Date]" />
+        <RegistryValue Name="Version" Type="string" Value="[ProductVersion]" />
+      </RegistryKey>
+    </Component>
+    
+    <!-- Custom feature definition -->
+    <Feature Id="myFeature" Title="Additional Features" Level="1">
+      <ComponentRef Id="myComponent" />
+    </Feature>
+    
+  </Fragment>
+</Wix>

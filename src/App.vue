@@ -78,6 +78,17 @@
             <Oauth providerName="Google"/>
             <Oauth providerName="Outlook"/>
         </section>
+        <div v-if="!isMobile" class="setting-item">
+          <h3>Startup Settings:</h3>
+          <label>
+            <input 
+              type="checkbox" 
+              v-model="autoLaunchEnabled" 
+              @change="toggleAutoLaunch"
+            />
+            Start with Windows
+          </label>
+        </div>
       </section>
     </section>
   </section>
@@ -109,6 +120,7 @@ const activeSection = ref('section1')
 const ismoreInfoVisible = ref(false)
 const currentCoordinates = ref<{ lat: number, lng: number } | null>(null)
 const currentLocationName = ref('')
+const autoLaunchEnabled = ref(false)
 
 async function provideTokensToBackend() {
   const os = await platform();
@@ -197,6 +209,21 @@ const handleLocationNameUpdate = (name: string) => {
   currentLocationName.value = name
 }
 
+// Toggle auto-launch
+const toggleAutoLaunch = async () => {
+  try {
+    if (autoLaunchEnabled.value) {
+      await invoke('setup_auto_launch')
+    } else {
+      await invoke('disable_auto_launch')
+    }
+  } catch (error) {
+    console.error('Failed to toggle auto-launch:', error)
+    // Revert checkbox state on error
+    autoLaunchEnabled.value = !autoLaunchEnabled.value
+  }
+}
+
 onMounted(() => {
   // Disable right-click context menu everywhere
   window.addEventListener('contextmenu', (e) => {
@@ -244,6 +271,15 @@ onMounted(async () => {
     }
     isLoading.value = false; 
   }, 5000); // Give auto-login time to complete
+
+  // auto-launch
+  if (!isMobile.value) {
+    try {
+      autoLaunchEnabled.value = await invoke('check_auto_launch_status') as boolean
+    } catch (error) {
+      console.error('Failed to check auto-launch status:', error)
+    }
+  }
 });
 </script>
 

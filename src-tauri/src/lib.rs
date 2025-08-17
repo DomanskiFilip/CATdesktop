@@ -320,24 +320,58 @@ fn get_oauth_timeout() -> u64 {
 // Setup auto-launch command
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
-#[allow(dead_code)]
 async fn setup_auto_launch() -> Result<(), String> {
-    // Only enable auto-launch in release builds
-    if cfg!(debug_assertions) {
+    // Enable auto-launch in both debug and release builds for testing
+    let app_path = std::env::current_exe()
+        .map_err(|e| format!("Failed to get executable path: {}", e))?;
+
+    let auto = AutoLaunchBuilder::new()
+        .set_app_name("CAT - Calendar Assistant")
+        .set_app_path(&app_path.to_string_lossy())
+        .set_use_launch_agent(false) // Use registry on Windows instead of launch agent
+        .build()
+        .map_err(|e| format!("Failed to build auto-launch: {}", e))?;
+
+    // Check if already enabled to avoid errors
+    if auto.is_enabled().map_err(|e| e.to_string())? {
+        println!("Auto-launch already enabled");
         return Ok(());
     }
 
-    let app_path =
-        std::env::current_exe().map_err(|e| format!("Failed to get executable path: {}", e))?;
+    auto.enable().map_err(|e| format!("Failed to enable auto-launch: {}", e))?;
+    println!("Auto-launch enabled successfully");
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+async fn disable_auto_launch() -> Result<(), String> {
+    let app_path = std::env::current_exe()
+        .map_err(|e| format!("Failed to get executable path: {}", e))?;
 
     let auto = AutoLaunchBuilder::new()
-        .set_app_name("Calendar Assistant")
+        .set_app_name("CAT - Calendar Assistant")
         .set_app_path(&app_path.to_string_lossy())
         .build()
         .map_err(|e| e.to_string())?;
 
-    auto.enable().map_err(|e| e.to_string())?;
+    auto.disable().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[tauri::command]
+async fn check_auto_launch_status() -> Result<bool, String> {
+    let app_path = std::env::current_exe()
+        .map_err(|e| format!("Failed to get executable path: {}", e))?;
+
+    let auto = AutoLaunchBuilder::new()
+        .set_app_name("CAT - Calendar Assistant")
+        .set_app_path(&app_path.to_string_lossy())
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    auto.is_enabled().map_err(|e| e.to_string())
 }
 
 // save user coordinates command //
@@ -919,6 +953,9 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
             set_notification_service,
             set_notification_lead_time,
             transcribe_audio,
+            setup_auto_launch,
+            disable_auto_launch,
+            check_auto_launch_status,
         ])
         .setup(|app| {
             // Initialize database with iOS-specific error handling
@@ -954,6 +991,37 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
             // Create system tray (desktop only)
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             create_system_tray(&app.handle())?;
+
+            // Setup auto-launch on first run (desktop only)
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    // Check if this is first run by looking for a flag file
+                    let app_data_dir = match app_handle.path().app_data_dir() {
+                        Ok(dir) => dir,
+                        Err(_) => return,
+                    };
+                    
+                    let first_run_flag = app_data_dir.join("auto_launch_setup.flag");
+                    
+                    if !first_run_flag.exists() {
+                        // First run - set up auto-launch
+                        match setup_auto_launch().await {
+                            Ok(_) => {
+                                println!("Auto-launch configured successfully");
+                                // Create flag file to indicate setup is complete
+                                if let Err(e) = std::fs::create_dir_all(&app_data_dir) {
+                                    eprintln!("Failed to create app data dir: {}", e);
+                                } else if let Err(e) = std::fs::write(&first_run_flag, "1") {
+                                    eprintln!("Failed to create first run flag: {}", e);
+                                }
+                            }
+                            Err(e) => eprintln!("Failed to setup auto-launch: {}", e),
+                        }
+                    }
+                });
+            }
 
             Ok(())
         })
