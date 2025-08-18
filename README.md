@@ -1,4 +1,4 @@
-# CAT - Calendar Assistant Desktop Application (v1.0.0-beta)
+# CAT - Calendar Assistant (v1.0.0-beta)
 
 **CAT (Calendar AssistanT)** is an intelligent desktop calendar application featuring a conversational AI assistant powered by Claude 3 Haiku. This cross-platform application helps users manage their schedules through natural language interactions while maintaining strong privacy through end-to-end encryption.
 
