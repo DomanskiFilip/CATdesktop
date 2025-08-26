@@ -66,7 +66,7 @@ The system proactively analyzes historical user interactions to predict and avoi
 - **Sync Services:** Google/Outlook OAuth integration
 - **Cross-Platform:** Tauri for native desktop and mobile support
 ## Cat Architecture Diagram
-<img width="1445" height="1920" alt="app architecture diagram" src="https://github.com/user-attachments/assets/b7488040-f017-44f7-903e-6c557f7d0a7e" />
+<img width="1445" height="1920" alt="app architecture diagram" src="https://github.com/user-attachments/assets/97d6ef7f-c6fa-4562-882d-bde623e5f9b2" />
 
 ## Supported Platforms
 - **Desktop:** Windows 10/11, macOS 10.15+, Linux (Ubuntu 18.04+)
