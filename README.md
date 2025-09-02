@@ -70,11 +70,14 @@ The system proactively analyzes historical user interactions to predict and avoi
 
 
 ## Supported Platforms
-- **Desktop:** Windows 10/11, macOS 10.15+, Linux (Ubuntu 18.04+)
+- **Desktop:** Windows 10/11, macOS 10.15+, Linux
 - **Mobile:** Android 8.0+ (minsdk 26), iOS 18.6+
 
 ## Beta Version Notes
 - **Windows installer available for v1.0.0-beta.**
+- **General Linux installer available for v1.0.0-beta.**
+- **Debian/Ubuntu Linux installer available for v1.0.0-beta.**
+- **Fedora/openSUSE Linux installer available for v1.0.0-beta.**
 - **Other platforms require manual build/compilation from source.**
 - **Account registration is disabled. Contact the creator (Filip Domanski) for access.**
 - **App size:** 20.4 MB.
