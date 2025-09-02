@@ -2,8 +2,8 @@
   <section v-if="!isMobile">
     <button v-if="!loggedIn" @click="checkOAuthAndLoad" :disabled="authenticating">
       Login with
-      <img  v-if="providerName === 'Google'" src="../assets/google-2025-g-logo.webp" alt="Google Logo" class="oauth-logo"/>
-      <img v-else-if="providerName === 'Outlook'"  src="../assets/outlook-logo.webp" alt="Outlook Logo" class="oauth-logo"/>
+      <img  v-if="providerName === 'Google'" src="@/assets/google-2025-g-logo.webp" alt="Google Logo" class="oauth-logo"/>
+      <img v-else-if="providerName === 'Outlook'"  src="@/assets/outlook-logo.webp" alt="Outlook Logo" class="oauth-logo"/>
     </button>
     <div v-if="authenticating && timer > 0">
       Authenticating with {{ providerName }}...

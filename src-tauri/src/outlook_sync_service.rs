@@ -270,7 +270,7 @@ impl OutlookSyncService {
             // Check if this event has an Outlook ID (existing Outlook event to update)
             if let Some(ref outlook_id) = event.event_id_outlook {
                 if !outlook_id.is_empty() && is_local_change {
-                    // UPDATE existing Outlook event with local changes
+                    // update existing Outlook event with local changes
                     println!("Updating existing Outlook event {} with local changes", outlook_id);
                     
                     // Decrypt the event description
@@ -367,7 +367,7 @@ impl OutlookSyncService {
                     } else {
                         eprintln!("Outlook API error updating event: {}", resp.status());
                     }
-                    continue; // Skip to next event - we're done with this one
+                    continue; // Skip to next event
                 } else if !outlook_id.is_empty() && !is_local_change {
                     // Event already has Outlook ID and no local changes - skip
                     println!("Skipping event {} - already has Outlook ID and no local changes: {}", event.id, outlook_id);
@@ -375,13 +375,13 @@ impl OutlookSyncService {
                 }
             }
 
-            // Skip events that are already synced to Outlook (no local changes)
+            // Skip events that are already synced to Outlook
             if event.synced_outlook && !is_local_change {
                 println!("Skipping event {} - already synced to Outlook", event.id);
                 continue;
             }
 
-            // CREATE new Outlook event (no Outlook ID or empty Outlook ID)
+            // Create new Outlook event (no Outlook ID or empty Outlook ID)
             println!("Creating new Outlook event for local event {}", event.id);
 
             // Decrypt the event description
@@ -449,7 +449,7 @@ impl OutlookSyncService {
             .map_err(|e| format!("Failed to send event to Outlook: {}", e))?;
 
         if resp.status().is_success() {
-                // IMPORTANT: Capture the Outlook ID and store it
+                // Capture the Outlook ID and store it
                 if let Ok(response_json) = resp.json::<serde_json::Value>().await {
                     if let Some(outlook_id) = response_json.get("id").and_then(|v| v.as_str()) {
                         let conn = get_db_connection(app_handle_arc)
@@ -630,7 +630,6 @@ impl OutlookSyncService {
                             // Handle Microsoft's format: 2025-08-05T21:00:00.0000000
                             // Remove extra precision and add timezone
                             let cleaned_start = if start.contains('.') {
-                                // Remove microseconds beyond 3 digits and add Z for UTC
                                 let parts: Vec<&str> = start.split('.').collect();
                                 if parts.len() == 2 {
                                     let base = parts[0];
