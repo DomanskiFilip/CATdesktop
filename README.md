@@ -75,6 +75,7 @@ The system proactively analyzes historical user interactions to predict and avoi
 
 ## Beta Version Notes
 - **Windows installer available for v1.0.0-beta.**
+- **AppImage Linux installer available for v1.0.0-beta.**
 - **Debian/Ubuntu Linux installer available for v1.0.0-beta.**
 - **Fedora/openSUSE Linux installer available for v1.0.0-beta.**
 - **Other platforms require manual build/compilation from source.**
