@@ -138,13 +138,8 @@ impl NotificationService {
                 sleep(TokioDuration::from_secs(warning_delay.num_seconds() as u64)).await;
 
                 // Decrypt the description before showing the notification
-                let decrypted_description = match base64::engine::general_purpose::STANDARD.decode(&_description_clone) {
-                    Ok(decoded) => match decrypt_user_data_base(&app_handle_arc, &event_user_id, &decoded) {
-                        Ok(decrypted) => String::from_utf8(decrypted).unwrap_or("[UNREADABLE EVENT]".to_string()),
-                        Err(_) => "[UNREADABLE EVENT]".to_string(),
-                    },
-                    Err(_) => "[UNREADABLE EVENT]".to_string(),
-                };
+                let decrypted_description =
+                    resolve_event_description(&app_handle_arc, &event_user_id, &_description_clone);
 
 
                 if let Err(e) = app_handle_arc
@@ -184,13 +179,8 @@ impl NotificationService {
                 sleep(TokioDuration::from_secs(event_delay.num_seconds() as u64)).await;
 
                 // Decrypt the description before showing the notification
-                let decrypted_description = match base64::engine::general_purpose::STANDARD.decode(&_description_clone) {
-                    Ok(decoded) => match decrypt_user_data_base(&app_handle_arc, &event_user_id, &decoded) {
-                        Ok(decrypted) => String::from_utf8(decrypted).unwrap_or("[UNREADABLE EVENT]".to_string()),
-                        Err(_) => "[UNREADABLE EVENT]".to_string(),
-                    },
-                    Err(_) => "[UNREADABLE EVENT]".to_string(),
-                };
+                let decrypted_description =
+                    resolve_event_description(&app_handle_arc, &event_user_id, &_description_clone);
 
                 if let Err(e) = app_handle_arc
                     .notification()
@@ -412,5 +402,23 @@ impl NotificationService {
             self.scheduled_tasks.len()
         );
         Ok(())
+    }
+}
+
+// Helper function to resolve and decrypt event description //
+fn resolve_event_description(app_handle: &Arc<AppHandle>, user_id: &str, raw: &str) -> String {
+    if raw.trim().is_empty() {
+        return "[UNREADABLE EVENT]".to_string();
+    }
+
+    match base64::engine::general_purpose::STANDARD.decode(raw) {
+        Ok(decoded) => match decrypt_user_data_base(app_handle, user_id, &decoded)
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+        {
+            Some(text) if !text.trim().is_empty() => text,
+            _ => "[UNREADABLE EVENT]".to_string(),
+        },
+        Err(_) => raw.to_string(),
     }
 }

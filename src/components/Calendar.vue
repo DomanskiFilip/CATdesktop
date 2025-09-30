@@ -658,6 +658,14 @@ const scheduleNativeNotification = async (event: CalendarEvent) => {
   }
 }
 
+const cancelNativeNotification = async (eventId: string) => {
+  try {
+    await invoke('cancel_event_notification', { eventId })
+  } catch (error) {
+    console.error('Failed to cancel notification:', error)
+  }
+}
+
 // Set alarm function
 const alarm = async (hour: number) => {
   if (isInPast(hour)) return
@@ -665,7 +673,6 @@ const alarm = async (hour: number) => {
   const existingEvent = findEventAtHour(hour)
 
   if (existingEvent) {
-    // Toggle alarm for existing event
     const updatedEvent = {
       ...existingEvent,
       alarm: !existingEvent.alarm,
@@ -673,11 +680,15 @@ const alarm = async (hour: number) => {
       synced_google: false,
       synced_outlook: false
     };
+    events.value = events.value.map(event =>
+      event.id === updatedEvent.id ? updatedEvent : event
+    )
     saveEvent(updatedEvent)
     
-    // Schedule native notifications through Tauri
-    if (existingEvent.alarm) {
-      scheduleNativeNotification(existingEvent)
+    if (updatedEvent.alarm) {
+      await scheduleNativeNotification(updatedEvent)
+    } else {
+      await cancelNativeNotification(updatedEvent.id)
     }
     // Trigger sync after alarm change
     try {
