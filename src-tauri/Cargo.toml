@@ -1,10 +1,10 @@
 [package]
 name = "app"
-version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
-license = "MIT"
-repository = "https://github.com/your-repo/app"
+version = "1.0.0"
+description = "Calendar Assistant"
+authors = ["DomanskiFilip"]
+license = "custom"
+repository = "https://github.com/DomanskiFilip/CATdesktop/releases/tag/v1.0.0-beta"
 edition = "2021"
 rust-version = "1.77.2"
 

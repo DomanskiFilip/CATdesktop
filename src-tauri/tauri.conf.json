@@ -36,12 +36,12 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico",
-      "icons/ios/icon-20.png",
-      "icons/ios/icon-29.png",
-      "icons/ios/icon-40.png",
-      "icons/ios/icon-60.png",
-      "icons/ios/icon-76.png",
-      "icons/ios/icon-1024.png"
+      "icons/ios/AppIcon-20x20@1x.png",
+      "icons/ios/AppIcon-29x29@1x.png",
+      "icons/ios/AppIcon-40x40@1x.png",
+      "icons/ios/AppIcon-60x60@2x.png",
+      "icons/ios/AppIcon-76x76@1x.png",
+      "icons/ios/AppIcon-512@2x.png"
     ],
     "windows": {
       "certificateThumbprint": null,

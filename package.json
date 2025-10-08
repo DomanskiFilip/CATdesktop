@@ -18,7 +18,7 @@
     "@capacitor/browser": "^7.0.1",
     "@fabianlars/tauri-plugin-oauth": "^2",
     "@impierce/tauri-plugin-keystore": "^2.1.0-alpha.1",
-    "@tauri-apps/api": "^2.7.0",
+    "@tauri-apps/api": "^2.8.0",
     "@tauri-apps/plugin-biometric": "^2.3.0",
     "@tauri-apps/plugin-notification": "^2.3.0",
     "@tauri-apps/plugin-os": "^2.3.0",
@@ -33,7 +33,7 @@
     "vue": "^3.5.18"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.7.1",
+    "@tauri-apps/cli": "^2.8.0",
     "@tsconfig/node22": "^22.0.1",
     "@types/google.maps": "^3.58.1",
     "@types/internal-ip": "^4.1.0",
