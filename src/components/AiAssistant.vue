@@ -18,6 +18,22 @@
         <DeleteSuggestion v-if="message.sender === 'assistant' && message.eventSuggestion && message.isDelete" :eventSuggestion="message.eventSuggestion" :eventAccepted="message.eventAccepted" :eventRejected="message.eventRejected" @accept="acceptSuggestion(index)" @reject="rejectSuggestion(index)"/>
         <EventSuggestion v-else-if="message.sender === 'assistant' && message.eventSuggestion" :eventSuggestion="message.eventSuggestion" :eventAccepted="message.eventAccepted" :eventRejected="message.eventRejected" :isUpdate="message.isUpdate" :isMoved="message.isMoved" @accept="acceptSuggestion(index)" @reject="rejectSuggestion(index)"/>
         <div class="message-content">{{ message.content }}</div>
+        <!-- Feedback buttons for assistant messages (excluded initial greeting) -->
+        <div v-if="message.sender === 'assistant' && !message.feedbackGiven && !message.isInitialGreeting" class="feedback-buttons">
+          <button @click="submitFeedback(index, 'thumbs_up')" class="feedback-btn thumbs-up" title="Helpful response">
+            <svg xmlns="http://www.w3.org/2000/svg" height="16px" viewBox="0 -960 960 960" width="16px" fill="currentColor">
+              <path d="M720-120H280v-520l280-280 50 50q7 7 11.5 19t4.5 23v14l-44 174h258q32 0 56 24t24 56v80q0 7-2 15t-4 15L794-168q-9 20-30 34t-44 14Zm-360-80h360l120-280v-80H480l54-220-174 174v406Zm0-406v406-406Zm-80-34v80H160v360h120v80H80v-520h200Z"/>
+            </svg>
+          </button>
+          <button @click="submitFeedback(index, 'thumbs_down')" class="feedback-btn thumbs-down" title="Not helpful">
+            <svg xmlns="http://www.w3.org/2000/svg" height="16px" viewBox="0 -960 960 960" width="16px" fill="currentColor">
+              <path d="M240-840h440v520L400-40l-50-50q-7-7-11.5-19t-4.5-23v-14l44-174H120q-32 0-56-24t-24-56v-80q0-7 2-15t4-15l120-282q9-20 30-34t44-14Zm360 80H240L120-480v80h360l-54 220 174-174v-406Zm0 406v-406 406Zm80 34v-80h120v-360H680v-80h200v520H680Z"/>
+            </svg>
+          </button>
+        </div>
+        <div v-if="message.feedbackGiven" class="feedback-given">
+          {{ message.feedbackType === 'thumbs_up' ? '👍 Thanks for the feedback!' : '👎 Thanks for the feedback!' }}
+        </div>
       </div>
       <div v-if="isTyping" class="typing-indicator">
         <span></span>
@@ -25,6 +41,7 @@
         <span></span>
       </div>
     </section>
+    
     <!-- Suggestions -->
     <section id="suggestions-area">
       <button class="scroll-btn left" @click="scrollSuggestions('left')" aria-label="Scroll left">
@@ -86,13 +103,22 @@ interface ChatMessage {
   isMoved?: boolean;
   isDelete?: boolean;
   multipleOptions?: any[];
+  // feedback properties
+  feedbackGiven?: boolean;
+  feedbackType?: 'thumbs_up' | 'thumbs_down';
+  actionTaken?: string;
+  confidence?: number;
+  requestType?: string;
+  userQuery?: string;
+  isInitialGreeting?: boolean;
 }
 
 const chatHistory = ref<ChatMessage[]>([
   {
     content: "Hello! I'm your Calendar AssistanT, You can call me CAT. How can I help you manage your schedule today?",
     sender: 'assistant',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    isInitialGreeting: true
   }
 ]);
 const userInput = ref('');
@@ -115,13 +141,21 @@ const conflictData = ref<{
   messageIndex: -1
 });
 
+// Store the last AI response metadata for feedback
+const lastAIResponse = ref<{
+  action_taken?: string;
+  confidence?: number;
+  request_type?: string;
+} | null>(null);
+
 // == Utility functions == //
 // Utility function -> clear chat history
 const clearChat = () => {
   chatHistory.value = [{
     content: "Hello! I'm your Calendar AssistanT, You can call me CAT. How can I help you manage your schedule today?",
     sender: 'assistant',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    isInitialGreeting: true
   }];
 };
 
@@ -184,11 +218,18 @@ const processQuery = async (message: string) => {
     if (!aiResponse.response_text || !aiResponse.action_taken) {
       throw new Error('Invalid AI response format');
     }
+    
+    // Store metadata for feedback
+    lastAIResponse.value = {
+      action_taken: aiResponse.action_taken,
+      confidence: aiResponse.confidence,
+      request_type: aiResponse.request_type
+    };
+    
     return aiResponse;
   } catch (error) {
     console.error("Error in processQuery:", error);
 
-    // Check if the error message starts with the rate limit emoji
     const errorString = error instanceof Error ? error.message : String(error);
     if (errorString.startsWith('🚫')) {
       return {
@@ -244,7 +285,12 @@ const handleAIResponse = async (aiResponse: any) => {
   const baseMessage = {
     content: aiResponse.response_text,
     sender: 'assistant' as const,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    actionTaken: aiResponse.action_taken,
+    confidence: aiResponse.confidence,
+    requestType: aiResponse.request_type,
+    // Find the last user message as the query
+    userQuery: [...chatHistory.value].reverse().find(m => m.sender === 'user')?.content || ''
   };
 
   switch (aiResponse.action_taken) {
@@ -604,6 +650,35 @@ const rejectSuggestion = async (messageIndex: number) => {
     timestamp: new Date().toISOString()
   });
   await scrollToBottom();
+};
+
+// Submit feedback for a message (now anonymous)
+const submitFeedback = async (messageIndex: number, feedbackType: 'thumbs_up' | 'thumbs_down') => {
+  const message = chatHistory.value[messageIndex];
+  if (!message || message.sender !== 'assistant' || message.feedbackGiven) return;
+
+  try {
+    await invoke('submit_feedback', {
+      feedbackType: feedbackType,
+      responseText: message.content,
+      actionTaken: message.actionTaken || 'none',
+      confidence: message.confidence || 0.0,
+      originalRequestType: message.requestType || 'calendar_assistant',
+      hasEventSuggestion: !!message.eventSuggestion
+    });
+
+    // Mark feedback as given
+    message.feedbackGiven = true;
+    message.feedbackType = feedbackType;
+
+  } catch (error) {
+    console.error('Failed to submit feedback:', error);
+    chatHistory.value.push({
+      content: "Failed to submit feedback. Please try again.",
+      sender: 'assistant',
+      timestamp: new Date().toISOString()
+    });
+  }
 };
 
 // Handle speech-to-text transcription //
@@ -996,5 +1071,52 @@ watch(chatHistory, () => {
 
 #main-page.is-mobile #main-content .content-section #ai-assistant #input-area {
   margin: 0 1rem;
+}
+
+.feedback-buttons {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.message:hover .feedback-buttons {
+  opacity: 1;
+}
+
+.feedback-btn {
+  background: transparent;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--color-text);
+  transition: all 0.2s;
+}
+
+.feedback-btn:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+  transform: scale(1.05);
+}
+
+.feedback-btn.thumbs-up:hover {
+  color: green;
+  border-color: green;
+}
+
+.feedback-btn.thumbs-down:hover {
+  color: darkred;
+  border-color: darkred;
+}
+
+.feedback-given {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  opacity: 0.7;
+  font-style: italic;
 }
 </style>

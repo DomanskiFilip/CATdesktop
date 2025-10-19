@@ -592,6 +592,46 @@ async fn delete_all_events(app_handle: tauri::AppHandle) -> Result<usize, String
     Ok(result as usize)
 }
 
+// submit feedback command //
+#[tauri::command]
+async fn submit_feedback(app_handle: AppHandle, feedback_type: String, response_text: String, action_taken: String, confidence: f64, original_request_type: String, has_event_suggestion: bool) -> Result<String, String> {
+    let config = crate::api_utils::AppConfig::new()
+        .map_err(|e| format!("Failed to get config: {}", e))?;
+    let url = format!("{}/llm", config.lambda_base_url);
+    
+    let mut payload = serde_json::json!({
+        "request_type": "submit_feedback",
+        "feedback_type": feedback_type,
+        "response_text": response_text,
+        "action_taken": action_taken,
+        "confidence": confidence,
+        "original_request_type": original_request_type,
+        "has_event_suggestion": has_event_suggestion,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "deviceInfo": crate::api_utils::get_device_info(&app_handle)
+    });
+
+    if let Ok((access_token, _, _)) = crate::token_utils::read_tokens_from_file(&app_handle).await {
+        payload["access_token"] = serde_json::json!(access_token);
+    }
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to submit feedback: {}", e))?;
+
+    let response_text = response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read response: {}", e))?;
+
+    Ok(response_text)
+}
+
 // Start auto-login process //
 async fn start_auto_login(app_handle_arc: Arc<AppHandle>) -> Result<bool, String> {
     let login_success = match crate::auto_login::auto_login_lambda(&app_handle_arc).await {
@@ -983,6 +1023,7 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
             disable_auto_launch,
             check_auto_launch_status,
             schedule_smart_departure_notification,
+            submit_feedback,
         ])
         .setup(|app| {
              // Initialize the encryption key FIRST, before any other operations
