@@ -731,6 +731,34 @@ async fn schedule_event_notification(event_json: String, app_handle: AppHandle) 
     }
 }
 
+#[tauri::command]
+async fn schedule_smart_departure_notification(app_handle: tauri::AppHandle, event_json: String, travel_seconds: i64, destination: String,) -> Result<(), String> {
+    if travel_seconds <= 0 {
+        return Err("Travel duration must be greater than zero".to_string());
+    }
+
+    let event: CalendarEvent =
+        serde_json::from_str(&event_json).map_err(|e| format!("Failed to parse event: {}", e))?;
+    let app_handle_arc = Arc::new(app_handle);
+    let notification_state = app_handle_arc.state::<NotificationServiceState>();
+    let mut service_guard = notification_state.lock().await;
+
+    if let Some(service) = service_guard.as_mut() {
+        service
+            .schedule_smart_departure_notification(
+                Arc::clone(&app_handle_arc),
+                &event,
+                travel_seconds,
+                destination,
+            )
+            .await
+            .map_err(|e| format!("Failed to schedule smart departure: {}", e))?;
+        Ok(())
+    } else {
+        Err("Notification service not available".to_string())
+    }
+}
+
 // Trigger immediate sync command //
 #[tauri::command]
 async fn trigger_sync(app_handle: tauri::AppHandle) -> Result<(), String> {
@@ -954,6 +982,7 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
             setup_auto_launch,
             disable_auto_launch,
             check_auto_launch_status,
+            schedule_smart_departure_notification,
         ])
         .setup(|app| {
              // Initialize the encryption key FIRST, before any other operations

@@ -62,7 +62,15 @@
             <input v-model="manualOrigin" type="text" placeholder="Enter start location" class="location-input"/>
             <input v-model="manualDestination" type="text" placeholder="Enter end location" class="location-input"/>
           </form>
-          <button @click="manualOrigin = ''; useManualOrigin = false; manualDestination = ''; useManualDestination = false"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/></svg></button>
+           <button @click="manualOrigin = ''; useManualOrigin = false; manualDestination = ''; useManualDestination = false"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="var(--color-text)"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/></svg></button>
+          <button id="smart-notification-btn" @click="scheduleSmartNotification" :disabled="!routeReady || !travelDurationSeconds || smartNotificationLoading">
+            <span v-if="smartNotificationLoading">Scheduling...</span>
+            <span v-else>Smart Notification <svg xmlns="http://www.w3.org/2000/svg" height="20px" viewBox="0 -960 960 960" width="20px" fill="var(--color-text)"><path d="M96-528q0-88.39 35.5-162.19Q167-764 230-818l51 50q-52 43-82.5 105.5T168-528H96Zm696 0q0-73-30.5-135.5T678-769l52-51q62 53 98 128.5T864-528h-72ZM192-216v-72h48v-240q0-87 53.5-153T432-763v-53q0-20 14-34t34-14q20 0 34 14t14 34v53q85 16 138.5 82T720-528v240h48v72H192Zm288-276Zm-.21 396Q450-96 429-117.15T408-168h144q0 30-21.21 51t-51 21ZM312-288h336v-240q0-70-49-119t-119-49q-70 0-119 49t-49 119v240Z"/></svg></span>
+          </button>
+        <div v-if="smartNotificationStatus || smartNotificationError" class="smart-notification-message">
+          <span v-if="smartNotificationStatus" class="success">{{ smartNotificationStatus }}</span>
+          <span v-else class="error">{{ smartNotificationError }}</span>
+        </div>
         </section>
         <!-- Google Maps Map -->
         <div v-show="mode === 'car' || mode === 'transit'" :key="mode + '-' + (useManualOrigin ? manualOrigin : (destinationLocation ? destinationLocation : (props.coordinates ? props.coordinates.lat + ',' + props.coordinates.lng : '')))" id="google-map"></div>
@@ -124,6 +132,10 @@ const transitSteps = ref<any[]>([])
 const transitStepsRef = ref<HTMLElement | null>(null)
 const clarifyingQuestion = ref('')
 const destinationLocation = ref<string | null>(null)
+const travelDurationSeconds = ref<number | null>(null)
+const smartNotificationStatus = ref<string | null>(null)
+const smartNotificationError = ref<string | null>(null)
+const smartNotificationLoading = ref(false)
 const eventTimestamp = props.event?.time ? new Date(props.event.time) : new Date()
 const apiKey = "AIzaSyCq_gPC_WgOecqVQ0JJKo221BRlHuasJ-4";
 const clarificationHistory = ref<string[]>([])
@@ -202,6 +214,17 @@ let map: google.maps.Map | null = null
 let directionsRenderer: google.maps.DirectionsRenderer | null = null
 let directionsService: google.maps.DirectionsService | null = null
 
+// Resolve destination string
+function resolveDestination() {
+  if (useManualDestination.value && manualDestination.value.trim()) {
+    return manualDestination.value.trim()
+  }
+  if (destinationLocation.value) {
+    return destinationLocation.value
+  }
+  return 'London Eye, London'
+}
+
 // Render the Google Map with directions
 const renderMap = async () => {
   await nextTick()
@@ -245,12 +268,7 @@ const renderMap = async () => {
     : props.coordinates
       ? { lat: props.coordinates.lat, lng: props.coordinates.lng }
       : { lat: 51.5033, lng: -0.1195 }
-  const destination =
-    useManualDestination.value && manualDestination.value.trim()
-      ? manualDestination.value.trim()
-      : destinationLocation.value // Use AI location if available
-        ? destinationLocation.value
-        : 'London Eye, London'
+  const destination = resolveDestination()
   const travelMode = mode.value === 'car' ? 'DRIVING' : 'TRANSIT'
 
   directionsService.route(
@@ -267,6 +285,8 @@ const renderMap = async () => {
     },
     (result, status) => {
       if (status === 'OK' && result) {
+        const firstLeg = result.routes[0]?.legs?.[0]
+        travelDurationSeconds.value = firstLeg?.duration?.value ?? null
         directionsRenderer!.setDirections(result)
         if (travelMode === 'TRANSIT') {
           const steps = result.routes[0].legs[0].steps
@@ -276,6 +296,7 @@ const renderMap = async () => {
         }
       } else {
         transitSteps.value = []
+        travelDurationSeconds.value = null
       }
     }
   )
@@ -387,6 +408,39 @@ async function sendEmail() {
   
 }
 
+// Schedule smart notification
+async function scheduleSmartNotification() {
+  smartNotificationStatus.value = null
+  smartNotificationError.value = null
+
+  if (!props.event) {
+    smartNotificationError.value = 'No event selected.'
+    return
+  }
+
+  if (!routeReady.value || !travelDurationSeconds.value || travelDurationSeconds.value <= 0) {
+    smartNotificationError.value = 'Generate a valid route before scheduling.'
+    return
+  }
+
+  smartNotificationLoading.value = true
+  const destination = resolveDestination()
+
+  try {
+    await invoke('schedule_smart_departure_notification', {
+      eventJson: JSON.stringify(props.event),
+      travelSeconds: Math.round(travelDurationSeconds.value),
+      destination
+    })
+    smartNotificationStatus.value = `Smart departure reminder set for ${destination}.`
+  } catch (err) {
+    const message = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Failed to schedule smart reminder.'
+    smartNotificationError.value = message
+  } finally {
+    smartNotificationLoading.value = false
+  }
+}
+
 // == watchers and computed properties == //
 // Watch for manual origin changes
 watch(manualOrigin, (val) => {
@@ -414,6 +468,9 @@ watch(
         : ''
       destinationLocation.value = aiResponce.value.location || null
       routeReady.value = !!destinationLocation.value
+      travelDurationSeconds.value = null
+      smartNotificationStatus.value = null
+      smartNotificationError.value = null
       aiResponceState.value = true
 
       // Scroll to smart features after response is loaded
@@ -445,6 +502,9 @@ watch(
     map = null
     directionsRenderer = null
     directionsService = null
+    travelDurationSeconds.value = null
+    smartNotificationStatus.value = null
+    smartNotificationError.value = null
     await loadGoogleMapsApi()
     renderMap()
     // Scroll to map after rendering if map is shown
@@ -475,6 +535,9 @@ watch(
           : ''
         destinationLocation.value = aiResponce.value.location || null
         routeReady.value = !!destinationLocation.value
+        travelDurationSeconds.value = null
+        smartNotificationStatus.value = null
+        smartNotificationError.value = null
         aiResponceState.value = true
 
         // Scroll to smart features after response is loaded
@@ -495,7 +558,7 @@ watch(
 
 <style scoped>
 #smart-features-container {
-  width: 200%;
+  width: 100%;
   margin: 0 auto;
   background: var(--color-shadow);
   border-radius: 10px;
@@ -611,6 +674,37 @@ watch(
   display: flex;
   align-items: center;
   gap: 0.1rem;
+}
+
+#button-container button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#smart-notification-btn {
+  min-width: 9rem;
+}
+
+#smart-notification-btn span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+
+.smart-notification-message {
+  width: 80%;
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+  text-align: left;
+}
+
+.smart-notification-message .success {
+  color: var(--color-success, #27ae60);
+}
+
+.smart-notification-message .error {
+  color: var(--color-error, #ff6b6b);
 }
 
 .location-input {
@@ -792,4 +886,11 @@ watch(
 #main-page.is-mobile #main-content .content-section #calendar #smart-features-container #map-container #button-container form  input{
   width: 10rem;
 }
+
+/* @media screen and (max-width: 1600px) {
+  #smart-features-container {
+    width: 175%;
+    padding: 1rem;
+  }
+} */
 </style>

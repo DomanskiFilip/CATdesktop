@@ -80,8 +80,15 @@
         </span>
       </section>
     </section>
-    <SmartFeatures v-if="showSmartFeatures" ref="smartFeaturesRef" :event="smartFeaturesEvent" :coordinates="currentCoordinates" @close="closeSmartFeatures"/>
-   </section>
+        <section v-if="showSmartFeatures" class="smart-features-wrapper">
+        <SmartFeatures
+            ref="smartFeaturesRef"
+            :event="smartFeaturesEvent"
+            :coordinates="currentCoordinates"
+            @close="closeSmartFeatures"
+        />
+        </section>
+    </section>
 </template>
 
 <script setup lang="ts">
@@ -1336,6 +1343,19 @@ padding: 0.1rem;
 
 .recurring-highlight svg {
   fill: var(--color-theme);
+}
+
+.smart-features-wrapper {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+}
+
+.smart-features-wrapper :deep(#smart-features-container) {
+  width: min(90vw, 1100px);
+  min-width: 0;
 }
 
 /* Mobile */

@@ -12,6 +12,7 @@ use rrule::{ RRuleSet, Tz };
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::io;
 use tauri::{ AppHandle, Manager, Emitter };
 use tokio::sync::Mutex as TokioMutex;
 use tokio::task::JoinHandle;
@@ -77,7 +78,17 @@ impl NotificationService {
         }
 
         // Cancel event task
-        if let Some(task) = self.scheduled_tasks.remove(&format!("{}_event", event_id)) {
+        if let Some(task) = self
+            .scheduled_tasks
+            .remove(&format!("{}_event", event_id))
+        {
+            task.abort();
+        }
+
+        if let Some(task) = self
+            .scheduled_tasks
+            .remove(&format!("{}_smart_departure", event_id))
+        {
             task.abort();
         }
 
@@ -401,6 +412,77 @@ impl NotificationService {
             "Total scheduled tasks after adding recurring event: {}",
             self.scheduled_tasks.len()
         );
+        Ok(())
+    }
+
+    // Method to schedule smart departure notifications //
+    pub async fn schedule_smart_departure_notification(&mut self, app_handle_arc: Arc<AppHandle>, event: &CalendarEvent, travel_seconds: i64, destination: String,) -> Result<(), Box<dyn std::error::Error>> {
+        if travel_seconds <= 0 {
+            return Err(Box::new(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Travel duration must be greater than zero",
+            )));
+        }
+
+        if let Some(task) = self
+            .scheduled_tasks
+            .remove(&format!("{}_smart_departure", event.id))
+        {
+            task.abort();
+        }
+
+        let reminder_time =
+            event.time - Duration::seconds(travel_seconds) - Duration::minutes(15);
+        let now = Local::now();
+
+        if reminder_time <= now {
+            return Err(Box::new(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Smart departure reminder would trigger in the past",
+            )));
+        }
+
+        let delay_seconds = (reminder_time - now).num_seconds();
+        let event_id = event.id.clone();
+        let event_user_id = event.user_id.clone();
+        let description = event.description.clone();
+        let destination_clone = destination.clone();
+        let travel_minutes = ((travel_seconds as f64) / 60.0).ceil() as i64;
+        let app_handle_clone = Arc::clone(&app_handle_arc);
+
+        let task = tokio::spawn(async move {
+            sleep(TokioDuration::from_secs(delay_seconds as u64)).await;
+
+            let decrypted_description =
+                resolve_event_description(&app_handle_clone, &event_user_id, &description);
+
+            let body = format!(
+                "Leave in 15 minutes to reach {} for {}. Estimated travel time: {} minutes.",
+                destination_clone, decrypted_description, travel_minutes
+            );
+
+            if let Err(e) = app_handle_clone
+                .notification()
+                .builder()
+                .title("Calendar AssistanT - Smart Departure")
+                .body(&body)
+                .show()
+            {
+                eprintln!("Failed to show smart departure notification: {}", e);
+            } else {
+                println!("✅ Smart departure notification shown successfully");
+                if let Err(e) = app_handle_clone.emit(
+                    "open-smartfeatures",
+                    serde_json::json!({ "eventId": event_id }),
+                ) {
+                    eprintln!("❌ Failed to emit open-smartfeatures: {}", e);
+                }
+            }
+        });
+
+        self.scheduled_tasks
+            .insert(format!("{}_smart_departure", event.id), task);
+
         Ok(())
     }
 }
