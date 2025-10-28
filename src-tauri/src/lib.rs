@@ -1023,10 +1023,10 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
             disable_auto_launch,
             check_auto_launch_status,
             schedule_smart_departure_notification,
-            submit_feedback,
+            submit_feedback,           
         ])
         .setup(|app| {
-             // Initialize the encryption key FIRST, before any other operations
+            // Initialize the encryption key FIRST, before any other operations
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 if let Err(e) = encryption_utils::initialize_encryption_key(&app.handle()) {
@@ -1065,10 +1065,6 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
                 std::env::set_var("RUST_LOG", "debug");
             }
             
-            // Create system tray (desktop only)
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
-            create_system_tray(&app.handle())?;
-
              // Create system tray (desktop only)
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             create_system_tray(&app.handle())?;
