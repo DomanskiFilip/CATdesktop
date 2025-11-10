@@ -55,6 +55,7 @@ The system proactively analyzes historical user interactions to predict and avoi
 
 ## Rate Limiting & Fair Usage
 - **Daily Limits:** 25 AI requests per user per day
+- **Daily Limits:** 5 voice tanscription requests per user per day
 - **Intelligent Caching:** Reduces API calls through smart caching
 - **Graceful Degradation:** Basic features available if limits are reached
 
