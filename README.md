@@ -1,6 +1,6 @@
 # CAT - Calendar Assistant (v1.0.0-beta)
 
-**CAT (Calendar AssistanT)** is an intelligent desktop calendar application featuring a conversational AI assistant powered by Claude 3 Haiku. This cross-platform application helps users manage their schedules through natural language interactions while maintaining strong privacy through end-to-end encryption.
+**CAT (Calendar AssistanT)** is an intelligent desktop calendar application featuring a conversational AI assistant powered by Claude 3 Haiku. This cross-platform application helps users manage their schedules through natural language interactions while maintaining strong privacy through end-to-end encryption. Connect your Google and Outlook calendars. Draft event related emails with AI email agent, plan route for your event with localisation based AI route agent and inbuilt map with car and public transport modes and "leave before x" smart notifications. Stay up to date with your events thanks to native notifications on all platforms and cross platform bidirectional sync.
 
 ## Key Features
 
@@ -55,6 +55,7 @@ The system proactively analyzes historical user interactions to predict and avoi
 
 ## Rate Limiting & Fair Usage
 - **Daily Limits:** 25 AI requests per user per day
+- **Daily Limits:** 5 voice tanscription requests per user per day
 - **Intelligent Caching:** Reduces API calls through smart caching
 - **Graceful Degradation:** Basic features available if limits are reached
 
