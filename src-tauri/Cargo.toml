@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "1.1.1"
+version = "1.2.1"
 description = "Calendar Assistant"
 authors = ["DomanskiFilip"]
 license = "custom"
@@ -37,6 +37,8 @@ base64 = "0.22.1"
 rand = "0.9.1"
 aes = "0.8"
 aes-gcm = "0.10"
+rsa = { version = "0.9.9", features = ["pem"] }
+sha2 = "0.10"
 
 # Date and UUID utilities
 chrono = "0.4"
