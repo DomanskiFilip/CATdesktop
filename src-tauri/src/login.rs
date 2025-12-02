@@ -163,21 +163,20 @@ fn derive_database_token(username: &str, password: &str) -> [u8; 32] {
     key
 }
 
+// Encrypt the password using the server's exposed public key
 async fn encrypt_password_for_transport(client: &Client, base_url: &str, password: &str) -> Result<String, String> {
     match try_encrypt_with_server_key(client, base_url, password).await? {
         Some(cipher) => Ok(cipher),
         None => {
-            warn!("Falling back to plaintext password payload (could not encrypt)");
+            // Fallback to plaintext if encryption fails !! insecure whatch our for this log
+            warn!("❗❗❗Falling back to plaintext password payload (could not encrypt❗❗❗)");
             Ok(password.to_string())
         }
     }
 }
 
-async fn try_encrypt_with_server_key(
-    client: &Client,
-    base_url: &str,
-    password: &str,
-) -> Result<Option<String>, String> {
+// Attempt to encrypt the password with the server's public key
+async fn try_encrypt_with_server_key(client: &Client, base_url: &str, password: &str,) -> Result<Option<String>, String> {
     let key_response = match client
         .get(format!("{}/login", base_url))
         .send()
