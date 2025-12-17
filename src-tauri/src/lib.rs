@@ -916,18 +916,25 @@ async fn trigger_sync(app_handle: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+
 // Create system tray
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn create_system_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let open = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-
-    let menu = Menu::with_items(app, &[&quit])?;
-
+    let menu = Menu::with_items(app, &[&open, &quit])?;
     let _tray = TrayIconBuilder::with_id("main-tray")
         .icon(app.default_window_icon().unwrap().clone())
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_menu_event(move |_app, event| match event.id().as_ref() {
+        .on_menu_event(move |app, event| match event.id().as_ref() {
+            "open" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                    let _ = window.unminimize();
+                }
+            }
             "quit" => {
                 std::process::exit(0);
             }
@@ -955,7 +962,6 @@ fn create_system_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             }
         })
         .build(app)?;
-
     Ok(())
 }
 
