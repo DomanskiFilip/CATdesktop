@@ -301,6 +301,12 @@ pub async fn save_event(app_handle: &AppHandle, event_json: String) -> Result<()
 
 // Function to get all events //
 pub async fn get_events(app_handle: &AppHandle) -> Result<Vec<String>, SqliteError> {
+    // Run garbage collection to clean up old events
+    if let Err(e) = clean_old_events(app_handle).await {
+        eprintln!("Warning: Failed to clean old events: {}", e);
+        // Continue even if cleanup fails
+    }
+    
     let conn = match get_db_connection(app_handle) {
         Ok(conn) => conn,
         Err(e) => {
@@ -432,6 +438,9 @@ pub async fn delete_event(app_handle: &AppHandle, id: String) -> Result<(), Sqli
 pub async fn clean_old_events(app_handle: &AppHandle) -> Result<(), SqliteError> {
     let conn = get_db_connection(app_handle)?;
     let now = chrono::Local::now();
+    
+    // Calculate date 6 months ago
+    let six_months_ago = now - chrono::Duration::days(180);
 
     // Get current user ID
     let user_id = {
@@ -457,9 +466,15 @@ pub async fn clean_old_events(app_handle: &AppHandle) -> Result<(), SqliteError>
         }
     };
 
-    conn.execute(
-        "UPDATE events SET deleted = TRUE WHERE time < ? AND user_id = ?",
-        [now.to_rfc3339(), user_id],
+    // Permanently delete events older than 6 months
+    let deleted_count = conn.execute(
+        "DELETE FROM events WHERE time < ? AND user_id = ?",
+        [six_months_ago.to_rfc3339(), user_id],
     )?;
+    
+    if deleted_count > 0 {
+        println!("🗑️  Cleaned up {} old events (6+ months)", deleted_count);
+    }
+    
     Ok(())
 }
