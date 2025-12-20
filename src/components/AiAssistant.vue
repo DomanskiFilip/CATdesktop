@@ -52,6 +52,7 @@
         <li @click="useSuggestion($event)">delete an event at:</li>
         <li @click="useSuggestion($event)">move event at:</li>
         <li @click="useSuggestion($event)">change the description of an event at:</li>
+        <li @click="useSuggestion($event)">can you tell me the weather forecast for the next week?</li>
         <li @click="useSuggestion($event)">what kind of a cat are you?</li>
       </ul>
       <button class="scroll-btn right" @click="scrollSuggestions('right')" aria-label="Scroll right">
