@@ -79,12 +79,7 @@ The system proactively analyzes historical user interactions to predict and avoi
 - **Mobile:** Android 8.0+ (minsdk 26), iOS 18.6+
 
 ## Beta Version Notes
-- **Windows installer available for v1.0.0-beta.**
-- **AppImage Linux installer available for v1.0.0-beta.**
-- **Debian/Ubuntu Linux installer available for v1.0.0-beta.**
-- **Fedora/openSUSE Linux installer available for v1.0.0-beta.**
-- **Other platforms require manual build/compilation from source.**
-- **Account registration is disabled. Contact the creator (Filip Domanski) for access.**
+- **See Releases tab for more information about specific versions**
 - **App size:** 20.4 MB.
 
 ---
