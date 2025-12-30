@@ -5,11 +5,12 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 
 const host = process.env.TAURI_DEV_HOST;
 
-// https://vite.dev/config/
-export default defineConfig({
+// Pass a callback function to access { mode }
+export default defineConfig(({ mode }) => ({
   plugins: [
     vue(),
-    vueDevTools(),
+    // Only include DevTools if in development mode
+    mode === 'development' ? vueDevTools() : [],
   ],
   clearScreen: false,
   resolve: {
@@ -29,8 +30,7 @@ export default defineConfig({
         }
       : undefined,
     watch: {
-      // 3. tell vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
     },
   },
-})
+}))

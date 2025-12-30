@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "version": "1.2.3",
-  "identifier": "com.calendarassistant.casual",
-  "productName": "CAT - Calendar Assistant (Beta)",
+  "identifier": "com.casual.cat",
+  "productName": "CAT Calendar Assistant Beta",
   "build": {
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "npm run dev",
@@ -36,6 +36,8 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico",
+      "icons/icon.png",
+      "icons/cat.png",
       "icons/ios/AppIcon-20x20@1x.png",
       "icons/ios/AppIcon-29x29@1x.png",
       "icons/ios/AppIcon-40x40@1x.png",
