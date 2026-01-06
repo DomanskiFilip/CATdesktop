@@ -296,6 +296,16 @@ impl AIAssistantService {
                         }
                     }
                 }
+                
+                if lambda_resp.body.contains("reached my daily conversation limit!!!!") {
+                    return Ok(LLMResponse {
+                        response_text: "I apologize, but I've reached my daily conversation limit set by Amazon Web Services. 😿\n\nThis is a temporary limitation on the AI service provider's side, not your account. The limit will reset tomorrow, and you'll be able to chat with me again! 🌅\n\nThank you for your patience and understanding! 💛".to_string(),
+                        extracted_events: None,
+                        action_taken: Some("none".to_string()),
+                        confidence: Some(0.0),
+                        remaining_requests: Some(0),
+                    });
+                }
 
                 Ok(llm_response)
             }
