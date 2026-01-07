@@ -86,7 +86,7 @@ impl AIAssistantService {
         Ok(llm_response)
     }
 
-        fn get_canned_response(&self, query: &str) -> Option<LLMResponse> {
+    fn get_canned_response(&self, query: &str) -> Option<LLMResponse> {
         let lowercase_query = query.to_lowercase();
         let normalized_query = lowercase_query.trim();
         let mut rng = rand::rng();
@@ -260,8 +260,6 @@ impl AIAssistantService {
         match lambda_resp.status_code {
             200 => {
                 // Success - process the response
-                println!("🔍 Raw Lambda response: {}", lambda_resp.body);
-
                 let sanitized_body = lambda_resp
                     .body
                     .replace('\n', "")
@@ -282,6 +280,18 @@ impl AIAssistantService {
                     println!("❌ Failed to parse LLM response: {} - JSON was: {}", e, sanitized_body);
                     format!("Failed to parse LLM response: {}", e)
                 })?;
+                
+                // Check for Bedrock throttling messages
+                if llm_response.response_text.contains("reached my daily conversation limit!!!!") 
+                    || llm_response.response_text.contains("I'm experiencing technical difficulties") {
+                    return Ok(LLMResponse {
+                        response_text: "I apologize, but I've reached my daily conversation limit set by Amazon Web Services. 😿\n\nThis is a temporary limitation on the AI service provider's side, not your account. The limit will reset tomorrow, and you'll be able to chat with me again! 🌅\n\nThank you for your patience and understanding! 💛".to_string(),
+                        extracted_events: None,
+                        action_taken: Some("none".to_string()),
+                        confidence: Some(0.0),
+                        remaining_requests: Some(0),
+                    });
+                }
 
                 // Patch: Ensure every extracted event has a non-empty description
                 if let Some(events) = &mut llm_response.extracted_events {
@@ -295,16 +305,6 @@ impl AIAssistantService {
                             event.description = Some("Untitled Event".to_string());
                         }
                     }
-                }
-                
-                if lambda_resp.body.contains("reached my daily conversation limit!!!!") {
-                    return Ok(LLMResponse {
-                        response_text: "I apologize, but I've reached my daily conversation limit set by Amazon Web Services. 😿\n\nThis is a temporary limitation on the AI service provider's side, not your account. The limit will reset tomorrow, and you'll be able to chat with me again! 🌅\n\nThank you for your patience and understanding! 💛".to_string(),
-                        extracted_events: None,
-                        action_taken: Some("none".to_string()),
-                        confidence: Some(0.0),
-                        remaining_requests: Some(0),
-                    });
                 }
 
                 Ok(llm_response)
@@ -392,6 +392,32 @@ impl AIAssistantService {
                             }
                             500 => {
                                 println!("Lambda returned error on retry: {}", retry_lambda_resp.body);
+                                
+                                // Sanitize the retry response body
+                                let sanitized_retry_body = retry_lambda_resp
+                                    .body
+                                    .replace('\n', "")
+                                    .replace('\r', "")
+                                    .replace('\t', "")
+                                    .replace('\u{a0}', "")
+                                    .trim()
+                                    .to_string();
+                                      
+                                // Try to parse as LLMResponse to check for throttling
+                                if let Ok(llm_response) = serde_json::from_str::<LLMResponse>(&sanitized_retry_body) {
+                                    // Check for Bedrock throttling messages
+                                    if llm_response.response_text.contains("reached my daily conversation limit!!!!") 
+                                        || llm_response.response_text.contains("I'm experiencing technical difficulties") {
+                                        return Ok(LLMResponse {
+                                            response_text: "I apologize, but I've reached my daily conversation limit set by Amazon Web Services. 😿\n\nThis is a temporary limitation on the AI service provider's side, not your account. The limit will reset tomorrow, and you'll be able to chat with me again! 🌅\n\nThank you for your patience and understanding! 💛".to_string(),
+                                            extracted_events: None,
+                                            action_taken: Some("none".to_string()),
+                                            confidence: Some(0.0),
+                                            remaining_requests: Some(0),
+                                        });
+                                    }
+                                }
+                                
                                 Err("AI service error on retry. Please try again.".to_string())
                             }
                             _ => {
@@ -430,6 +456,24 @@ impl AIAssistantService {
             }
             500 => {
                 println!("Lambda returned error: {}", lambda_resp.body);
+                
+                // Try to parse the error body as JSON to check for throttling
+                if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(&lambda_resp.body) {
+                    if let Some(response_text) = error_json["response_text"].as_str() {
+                        if response_text.contains("technical difficulties") 
+                            || response_text.contains("reached my daily conversation limit") 
+                            || lambda_resp.body.contains("BEDROCK_THROTTLED") {
+                            return Ok(LLMResponse {
+                                response_text: "I apologize, but I've reached my daily conversation limit set by Amazon Web Services. 😿\n\nThis is a temporary limitation on the AI service provider's side, not your account. The limit will reset tomorrow, and you'll be able to chat with me again! 🌅\n\nThank you for your patience and understanding! 💛".to_string(),
+                                extracted_events: None,
+                                action_taken: Some("none".to_string()),
+                                confidence: Some(0.0),
+                                remaining_requests: Some(0),
+                            });
+                        }
+                    }
+                }
+                
                 Err("AI service error. Please try again.".to_string())
             }
             _ => {

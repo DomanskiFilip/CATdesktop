@@ -215,8 +215,42 @@ const processQuery = async (message: string) => {
       query: message,
       conversationHistory: JSON.stringify(chatHistory.value.slice(0, -1))
     });
+    
+    console.log('Raw response from backend:', response);
+    
     const aiResponse = JSON.parse(response);
+    
+    console.log('Parsed AI response:', aiResponse);
+    console.log('Response text:', aiResponse.response_text);
+    console.log('Action taken:', aiResponse.action_taken);
+    
+    // Check for Bedrock throttling (AWS service limit)
+    if (aiResponse.response_text && aiResponse.response_text.includes("reached my daily conversation limit!!!!")) {
+      console.log('🔥 Detected Bedrock throttle message');
+      return {
+        response_text: "I apologize, but I've reached my daily conversation limit set by Amazon Web Services. 😿\n\nThis is a temporary limitation on the AI service provider's side, not your account. The limit will reset tomorrow, and you'll be able to chat with me again! 🌅\n\nThank you for your patience and understanding! 💛",
+        action_taken: "none",
+        extracted_events: [],
+        confidence: 0.0,
+        request_type: "calendar_assistant"
+      };
+    }
+    
+    // Check for user rate limit (25 requests/day)
+    if (aiResponse.response_text && aiResponse.response_text.startsWith('🚫')) {
+      console.log('🔥 Detected user rate limit message');
+      return {
+        response_text: aiResponse.response_text,
+        action_taken: aiResponse.action_taken || "none",
+        extracted_events: aiResponse.extracted_events || [],
+        confidence: aiResponse.confidence || 0.0,
+        request_type: aiResponse.request_type || "calendar_assistant",
+        remaining_requests: aiResponse.remaining_requests || 0
+      };
+    }
+    
     if (!aiResponse.response_text || !aiResponse.action_taken) {
+      console.log('❌ Validation failed - missing response_text or action_taken');
       throw new Error('Invalid AI response format');
     }
     
@@ -232,6 +266,8 @@ const processQuery = async (message: string) => {
     console.error("Error in processQuery:", error);
 
     const errorString = error instanceof Error ? error.message : String(error);
+    console.log('Error string:', errorString);
+    
     if (errorString.startsWith('🚫')) {
       return {
         response_text: errorString,
