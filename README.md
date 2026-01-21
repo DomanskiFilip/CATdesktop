@@ -89,7 +89,7 @@ The system proactively analyzes historical user interactions to predict and avoi
 ---
 
 ## License
-Copyright (c) 2025 Filip Domanski
+Copyright (c) 2026 Filip Domanski
 
 CATdesktop is provided for personal, non-commercial use only. You may view, download, and run the application or source code for your own personal purposes.
 
