@@ -317,6 +317,10 @@ const getEventsForDate = (date: CalendarDay) => {
   if (!date.date) return []
   return events.value.filter(event => {
     const eventDate = new Date(event.time)
+    
+    // Skip events in the past
+    if (eventDate < now) return false
+        
     // Normal event on this date
     const isNormal = eventDate.getDate() === date.date?.getDate() &&
       eventDate.getMonth() === date.date?.getMonth() &&

@@ -440,7 +440,7 @@ pub async fn clean_old_events(app_handle: &AppHandle) -> Result<(), SqliteError>
     let now = chrono::Local::now();
     
     // Calculate date 6 months ago
-    let six_months_ago = now - chrono::Duration::days(180);
+    let month_ago = now - chrono::Duration::days(30);
 
     // Get current user ID
     let user_id = {
@@ -469,7 +469,7 @@ pub async fn clean_old_events(app_handle: &AppHandle) -> Result<(), SqliteError>
     // Permanently delete events older than 6 months
     let deleted_count = conn.execute(
         "DELETE FROM events WHERE time < ? AND user_id = ?",
-        [six_months_ago.to_rfc3339(), user_id],
+        [month_ago.to_rfc3339(), user_id],
     )?;
     
     if deleted_count > 0 {
