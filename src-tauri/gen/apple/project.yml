@@ -1,6 +1,6 @@
 name: app
 options:
-  bundleIdPrefix: com.calendarassistant.casual
+  bundleIdPrefix: com.casual.cat
   deploymentTarget:
     iOS: 18.6
 fileGroups: [../../src]
@@ -11,7 +11,7 @@ settingGroups:
   app:
     base:
       PRODUCT_NAME: Calendar Assistant
-      PRODUCT_BUNDLE_IDENTIFIER: com.calendarassistant.casual
+      PRODUCT_BUNDLE_IDENTIFIER: com.casual.cat
       DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
 targetTemplates:
   app:
