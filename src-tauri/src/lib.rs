@@ -18,6 +18,7 @@ mod theme_utils;
 mod token_utils;
 mod user_utils;
 mod weather_service;
+mod updater;
 
 
 use crate::ai_smart_features::AISmartFeaturesService;
@@ -514,11 +515,11 @@ async fn record_rejection(app_handle: AppHandle, event_suggestion: String, user_
         Ok(id) => id,
         Err(e) => return Err(format!("Failed to get user ID: {}", e))
     };
-    
+
     let config = crate::api_utils::AppConfig::new()
         .map_err(|e| format!("Failed to get config: {}", e))?;
     let url = format!("{}/llm", config.lambda_base_url);
-    
+
     let mut payload = serde_json::json!({
         "request_type": "record_rejection",
         "user_id": user_id,
@@ -536,7 +537,7 @@ async fn record_rejection(app_handle: AppHandle, event_suggestion: String, user_
             payload["access_token"] = serde_json::json!(access_token);
         }
     }
-    
+
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         if let Some((access_token, _, _)) = read_tokens_from_cache().await {
@@ -598,7 +599,7 @@ async fn submit_feedback(app_handle: AppHandle, feedback_type: String, response_
     let config = crate::api_utils::AppConfig::new()
         .map_err(|e| format!("Failed to get config: {}", e))?;
     let url = format!("{}/llm", config.lambda_base_url);
-    
+
     let mut payload = serde_json::json!({
         "request_type": "submit_feedback",
         "feedback_type": feedback_type,
@@ -827,7 +828,7 @@ async fn trigger_sync(app_handle: tauri::AppHandle) -> Result<(), String> {
     }
 
     // SEQUENTIAL SYNC: Google first, then Outlook, then DynamoDB
-    
+
     // 1. Sync to Google Calendar first
     if config_state.enable_google_sync {
         let google_state = app_handle_arc.state::<GoogleSyncServiceState>();
@@ -1029,7 +1030,7 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
             disable_auto_launch,
             check_auto_launch_status,
             schedule_smart_departure_notification,
-            submit_feedback,           
+            submit_feedback,
         ])
         .setup(|app| {
             // Initialize the encryption key FIRST, before any other operations
@@ -1052,7 +1053,7 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            
+
             #[cfg(not(target_os = "ios"))]
             {
                 match database_utils::init_db(&app.handle()) {
@@ -1070,7 +1071,7 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
                 std::env::set_var("RUST_BACKTRACE", "1");
                 std::env::set_var("RUST_LOG", "debug");
             }
-            
+
              // Create system tray (desktop only)
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             create_system_tray(&app.handle())?;
@@ -1121,6 +1122,9 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
                 let app_handle_owned = app_handle.clone();
                 tauri::async_runtime::spawn(async move {
                     let app_handle_arc = Arc::new(app_handle_owned);
+
+                    // Start automatic silent updater (checks GitHub, downloads in background, applies on next launch)
+                    crate::updater::run((*app_handle_arc).clone());
                     
                     // Start auto-login with timeout
                     let login_success = {
@@ -1151,7 +1155,7 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
                     };
 
                     // Add delays between service starts
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await; 
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
                     // Start notification service with error handling
                     match start_notification_service(Arc::clone(&app_handle_arc), login_success).await {
@@ -1198,5 +1202,6 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
             }
             _ => {}
         });
+
     Ok(())
 }
