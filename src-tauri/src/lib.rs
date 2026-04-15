@@ -974,6 +974,14 @@ pub fn run() {
     }
 }
 
+#[tauri::command]
+fn get_app_version() -> String {
+    // Return the version embedded at compile time from Cargo.toml
+    let ver = env!("CARGO_PKG_VERSION").to_string();
+    eprintln!("[get_app_version] compiled version: {}", ver);
+    return ver;
+}
+
 pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
     let app_config = Arc::new(crate::api_utils::AppConfig::new()?);
     #[allow(unused_mut)] // silence unused mut warning on desktop platforms
@@ -1022,6 +1030,7 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
             record_rejection,
             delete_all_events,
             get_weekly_weather,
+            get_app_version,
             set_user_coordinates,
             set_notification_service,
             set_notification_lead_time,
@@ -1125,7 +1134,7 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
 
                     // Start automatic silent updater (checks GitHub, downloads in background, applies on next launch)
                     crate::updater::run((*app_handle_arc).clone());
-                    
+
                     // Start auto-login with timeout
                     let login_success = {
                         #[cfg(not(any(target_os = "android", target_os = "ios")))]

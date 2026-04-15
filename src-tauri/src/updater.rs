@@ -1,42 +1,10 @@
-//! Fully-automatic, silent background updater for CAT Calendar Assistant.
-//!
-//! ## Flow
-//! 1. On app launch (`RunEvent::Ready`), call `run()`.
-//! 2. `run()` first checks for a *pending* update written by a previous session and,
-//!    if found, launches the installer and exits immediately — the installer takes over.
-//! 3. If no pending update, it spawns a background task that:
-//!    a. Fetches the latest GitHub release.
-//!    b. Compares semver with the running version.
-//!    c. If newer, picks the best asset for the current platform AND distro.
-//!    d. Downloads it silently into `<app-data>/updates/`.
-//!    e. Writes `pending_update.json` so the *next* launch can apply it.
-//!
-//! ## Platform install behaviour (next launch)
-//! | OS      | Asset      | Action                                           |
-//! |---------|------------|--------------------------------------------------|
-//! | Windows | .msi       | `msiexec /i <path> /qb`                          |
-//! | Windows | .exe       | `<installer>.exe /S`                             |
-//! | macOS   | .dmg       | `hdiutil attach` → copy .app → detach            |
-//! | macOS   | .pkg       | `installer -pkg <path> -target /`                |
-//! | Linux   | .AppImage  | `chmod +x` → re-exec new binary                 |
-//! | Linux   | .deb       | `pkexec apt install -y <path>`                   |
-//! | Linux   | .rpm       | `pkexec dnf install -y <path>` (rpm fallback)    |
-//!
-//! ## Linux distro detection
-//! 1. Checks for `dnf`/`zypper` → RPM system  → prefers `.rpm`
-//! 2. Checks for `dpkg`         → DEB system  → prefers `.deb`
-//! 3. Falls back to             → AppImage    → works everywhere
-//!
-//! All errors are non-fatal and logged to stderr.
-
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::AsyncWriteExt;
 
-// ─── GitHub API types ────────────────────────────────────────────────────────
-
+// GitHub API types
 #[derive(Debug, Deserialize)]
 struct GhAsset {
     name: String,
@@ -52,8 +20,7 @@ struct GhRelease {
     draft: Option<bool>,
 }
 
-// ─── Pending-update record written to disk ────────────────────────────────────
-
+// Pending-update record written to disk
 #[derive(Debug, Serialize, Deserialize)]
 struct PendingUpdate {
     file: String,
@@ -62,8 +29,7 @@ struct PendingUpdate {
     downloaded_at: String,
 }
 
-// ─── Linux package manager detection ─────────────────────────────────────────
-
+// Linux package manager detection 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum LinuxPkgManager {
     Rpm,  // Fedora, RHEL, OpenSUSE, CentOS
@@ -95,13 +61,10 @@ fn which_exists(binary: &str) -> bool {
         .unwrap_or(false)
 }
 
-// ─── Public entry-point ───────────────────────────────────────────────────────
-
-/// Call once from `RunEvent::Ready`.
-/// Never blocks — spawns all work onto the async runtime.
+// Public entry-poin
 pub fn run(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
-        // Phase 1 — apply previously-downloaded update if present
+        // apply previously-downloaded update if present
         match apply_pending_update_if_any(&app).await {
             ApplyResult::Applied => {
                 app.exit(0);
@@ -113,15 +76,14 @@ pub fn run(app: AppHandle) {
             }
         }
 
-        // Phase 2 — background check + download
+        // background check + download
         if let Err(e) = check_and_download(&app).await {
             eprintln!("[updater] background check failed: {e}");
         }
     });
 }
 
-// ─── Apply pending update ─────────────────────────────────────────────────────
-
+// Apply pending update
 enum ApplyResult {
     Applied,
     NoPending,
@@ -161,6 +123,11 @@ async fn apply_pending_update_if_any(app: &AppHandle) -> ApplyResult {
 
     match launch_installer(&installer_path) {
         Ok(_) => {
+            // Give the installer a short moment to start and the OS to settle
+            // to avoid races on some platforms (e.g. Windows window class unregister).
+            // This is intentionally short to avoid delaying exit unnecessarily.
+            let _ = tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
             let _ = tokio::fs::remove_file(&meta_path).await;
             ApplyResult::Applied
         }
@@ -171,8 +138,7 @@ async fn apply_pending_update_if_any(app: &AppHandle) -> ApplyResult {
     }
 }
 
-// ─── Platform-specific installer launch ──────────────────────────────────────
-
+// Platform-specific installer launch
 fn launch_installer(path: &PathBuf) -> Result<(), String> {
     let path_str = path.to_string_lossy();
     let name_lower = path
@@ -264,8 +230,7 @@ hdiutil detach "$MOUNT" -quiet"#
     Err(format!("Unsupported OS: {}", std::env::consts::OS))
 }
 
-// ─── Check GitHub and download ────────────────────────────────────────────────
-
+// Check GitHub and download
 async fn check_and_download(app: &AppHandle) -> Result<(), String> {
     const OWNER: &str = "DomanskiFilip";
     const REPO: &str = "CATdesktop";
@@ -286,6 +251,19 @@ async fn check_and_download(app: &AppHandle) -> Result<(), String> {
 
     eprintln!("[updater] New version: {remote} (running {local})");
 
+    // If a pending update is already present, skip downloading again to avoid duplicates
+    match pending_update_path(app) {
+        Ok(p) if p.exists() => {
+            eprintln!("[updater] Pending update already exists; skipping download");
+            return Ok(());
+        }
+        Ok(_) => {}
+        Err(e) => {
+            // Non-fatal: log and continue
+            eprintln!("[updater] failed to check pending update: {e}");
+        }
+    }
+
     let assets: Vec<(String, String, Option<u64>)> = release
         .assets
         .into_iter()
@@ -303,8 +281,7 @@ async fn check_and_download(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-// ─── GitHub fetch ─────────────────────────────────────────────────────────────
-
+// GitHub fetch
 async fn fetch_latest_release(owner: &str, repo: &str) -> Result<GhRelease, String> {
     let url = format!(
         "https://api.github.com/repos/{}/{}/releases/latest",
@@ -330,13 +307,7 @@ async fn fetch_latest_release(owner: &str, repo: &str) -> Result<GhRelease, Stri
         .map_err(|e| format!("parse: {e}"))
 }
 
-// ─── Asset selection ──────────────────────────────────────────────────────────
-
-/// Picks the best release asset for the running platform.
-///
-/// On Linux, preference order is determined at runtime by which package
-/// manager is installed — so a Fedora user gets the .rpm and an Ubuntu
-/// user gets the .deb automatically, with .AppImage as the universal fallback.
+// Asset selection
 fn pick_asset(assets: &[(String, String, Option<u64>)]) -> Option<(String, String)> {
     let prefs: Vec<&str> = match std::env::consts::OS {
         "windows" => vec![".msi", ".exe", ".zip"],
@@ -365,8 +336,7 @@ fn pick_asset(assets: &[(String, String, Option<u64>)]) -> Option<(String, Strin
         .map(|(n, u, _)| (n.clone(), u.clone()))
 }
 
-// ─── Streaming download ───────────────────────────────────────────────────────
-
+// Streaming download 
 async fn download(app: &AppHandle, name: &str, url: &str) -> Result<PathBuf, String> {
     let client = reqwest::Client::new();
     let resp = client
@@ -416,8 +386,7 @@ async fn download(app: &AppHandle, name: &str, url: &str) -> Result<PathBuf, Str
     Ok(dest)
 }
 
-// ─── Metadata helpers ─────────────────────────────────────────────────────────
-
+// Metadata helpers
 async fn write_pending_metadata(
     app: &AppHandle,
     name: &str,
@@ -453,8 +422,7 @@ fn updates_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-// ─── Semver comparison ────────────────────────────────────────────────────────
-
+// Semver comparison
 fn is_newer(remote: &str, local: &str) -> bool {
     fn parse(s: &str) -> Option<(u64, u64, u64)> {
         let mut parts = s.splitn(3, '.').map(|p| p.parse::<u64>().ok());
