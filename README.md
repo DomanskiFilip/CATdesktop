@@ -84,7 +84,7 @@ The system proactively analyzes historical user interactions to predict and avoi
 
 ## Beta Version Notes
 - **See Releases tab for more information about specific versions**
-- **App size:** 20.4 MB.
+- **App size:** 22 MB.
 
 ---
 
