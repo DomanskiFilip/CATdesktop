@@ -53,7 +53,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 urlencoding = "2.1"
 
 # Tauri plugins
-tauri = { version = "2.5.0", features = ["config-json5"] }
+tauri = { version = "2.10.1", features = ["config-json5"] }
 tauri-plugin-log = "2.0.0-rc"
 tauri-plugin-machine-uid = "0.1.1"
 tauri-plugin-keystore = "2.1.0-alpha.1"
