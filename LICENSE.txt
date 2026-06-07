@@ -1,4 +1,5 @@
 Copyright (c) 2026 Filip Domanski
+
 CATdesktop is provided under a source-available model for strictly personal, non-commercial use only.
 
 - You are permitted to view, download, and run the application or source code for your own personal purposes.
@@ -8,14 +9,16 @@ CATdesktop is provided under a source-available model for strictly personal, non
 
 You may not:
 
- - Redistribute: You cannot host, publish, or redistribute the code or application in any form, whether modified or unmodified, to any third party or public platform (outside of a personal GitHub fork).
+ - Host, publish, or redistribute the code or application in any form, whether modified or unmodified, to any third party or public platform (outside of a personal GitHub fork).
 
- - Compete: You cannot use this code, or any derivative works, to create a competing product, service, or public distribution.
+ - Use this code, or any derivative works, to create a competing product, service, or public distribution.
 
- - Commercialize: You cannot monetize, sell, or offer the code or application as a service, nor use it within any commercial context.
+ - Monetize, sell, or offer the code or application as a service, nor use it within any commercial context.
 
- - Non-Profit/Public Use: You cannot distribute or publicly host the code or application for non-profit, educational, or organizational purposes without explicit written permission.
+ - Distribute or publicly host the code or application for non-profit, educational, or organizational purposes without explicit written permission.
 
 Filip Domanski remains the exclusive official host and distributor of CATdesktop. Any public distribution, deployment, or hosting of this software by anyone else is strictly prohibited.
 
 For commercial licensing, redistribution inquiries, or alternative use cases, please contact the copyright holder.
+
+All rights reserved.
