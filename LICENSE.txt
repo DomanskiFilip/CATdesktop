@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Filip Domanski
+Copyright (c) 2026 Filip Domanski
 CATdesktop is provided under a source-available model for strictly personal, non-commercial use only.
 
 - You are permitted to view, download, and run the application or source code for your own personal purposes.
