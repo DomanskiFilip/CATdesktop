@@ -772,7 +772,8 @@ watch(chatHistory, () => {
   display: flex;
   flex-direction: column;
   height: 90vh;
-  max-width: 800px;
+  /* stretch with the window, keeping a responsive gap from both edges */
+  width: calc(100% - 2 * clamp(0.5rem, 4vw, 4rem));
   margin: 0 auto;
   background-color: var(--color-main);
   border-radius: 8px;
@@ -1090,6 +1091,7 @@ watch(chatHistory, () => {
 
 /* Mobile */
 #main-page.is-mobile #main-content .content-section #ai-assistant {
+  width: calc(100% - 1rem);
   margin-top: 2rem;
   height: 93%;
 }

@@ -1349,16 +1349,17 @@ padding: 0.1rem;
   fill: var(--color-theme);
 }
 
+/* spans both calendar columns and follows the page width */
 .smart-features-wrapper {
   grid-column: 1 / -1;
-  display: flex;
-  justify-content: center;
   width: 100%;
   min-width: 0;
+  box-sizing: border-box;
+  padding: 0 1rem 1rem;
 }
 
 .smart-features-wrapper :deep(#smart-features-container) {
-  width: min(90vw, 1100px);
+  width: 100%;
   min-width: 0;
 }
 

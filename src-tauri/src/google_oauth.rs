@@ -3,6 +3,8 @@ use crate::user_utils::get_current_user_id;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 use crate::user_utils::get_current_user_id_mobile;
 use crate::credential_utils::fetch_google_credentials;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use crate::oauth_pages::{http_response, OAuthPage};
 use oauth2::basic::BasicTokenType;
 use oauth2::{
     basic::BasicClient, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken,
@@ -107,8 +109,7 @@ pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String,
                             let mut parts = param.splitn(2, '=');
                             if let (Some(key), Some(value)) = (parts.next(), parts.next()) {
                                 if key == "code" {
-                                    let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
-                                        <html><body><h2>Authentication complete. You can close this window.</h2></body></html>";
+                                    let response = http_response("Google", &OAuthPage::Success);
                                     stream
                                         .write_all(response.as_bytes())
                                         .map_err(|e| e.to_string())?;
@@ -121,8 +122,7 @@ pub async fn oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result<String,
                 }
             }
         } else {
-            let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
-                <html><body><h2>Waiting for authentication...</h2></body></html>";
+            let response = http_response("Google", &OAuthPage::Waiting);
             stream
                 .write_all(response.as_bytes())
                 .map_err(|e| e.to_string())?;

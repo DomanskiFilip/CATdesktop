@@ -3,6 +3,8 @@ use crate::user_utils::get_current_user_id;
 #[cfg(any(target_os = "android", target_os = "ios"))]
 use crate::user_utils::get_current_user_id_mobile;
 use crate::credential_utils::fetch_outlook_credentials;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use crate::oauth_pages::{http_response, OAuthPage};
 use oauth2::{
     basic::BasicClient, AuthUrl, AuthorizationCode, ClientId, CsrfToken,
     PkceCodeChallenge, RedirectUrl, Scope, TokenResponse, TokenUrl,
@@ -135,19 +137,16 @@ pub async fn outlook_oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result
                                     "code" => {
                                         // Verify CSRF token if present
                                         if !state_token.is_empty() && state_token != *csrf_token.secret() {
-                                            let csrf_error_response = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\n\r\n\
-                                                <html><body><h1>CSRF Token Mismatch</h1>\
-                                                <p>Security error: Invalid state parameter.</p>\
-                                                <script>window.close();</script></body></html>";
+                                            let csrf_error_response = http_response(
+                                                "Outlook",
+                                                &OAuthPage::Error("Security check failed (invalid state parameter). Please try connecting again."),
+                                            );
                                             let _ = stream.write_all(csrf_error_response.as_bytes());
                                             return Err("CSRF token mismatch".to_string());
                                         }
                                         
                                         // Send success response first
-                                        let success_response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
-                                            <html><body><h1>Authentication Successful!</h1>\
-                                            <p>You can now close this window and return to the application.</p>\
-                                            <script>setTimeout(() => window.close(), 1000);</script></body></html>";
+                                        let success_response = http_response("Outlook", &OAuthPage::Success);
                                         
                                         if let Err(e) = stream.write_all(success_response.as_bytes()) {
                                             eprintln!("Error writing success response: {}", e);
@@ -221,14 +220,7 @@ pub async fn outlook_oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result
                                 error_description
                             };
                             
-                            let error_response = format!(
-                                "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\n\r\n\
-                                <html><body><h1>❌ Authentication Error</h1>\
-                                <p>Error: {}</p>\
-                                <p>Please try again or check your credentials.</p>\
-                                <script>setTimeout(() => window.close(), 3000);</script></body></html>",
-                                detailed_error
-                            );
+                            let error_response = http_response("Outlook", &OAuthPage::Error(&detailed_error));
                             
                             let _ = stream.write_all(error_response.as_bytes());
                             return Err(format!("OAuth error: {}", detailed_error));
@@ -236,10 +228,7 @@ pub async fn outlook_oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result
                         
                         if !found_code && !found_error {
                             // If we reach here, no code or error was found but it's a valid request
-                            let waiting_response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
-                                <html><body><h2>🔄 Waiting for Authentication...</h2>\
-                                <p>Please complete the authentication in the opened window.</p>\
-                                <script>setTimeout(() => window.location.reload(), 2000);</script></body></html>";
+                            let waiting_response = http_response("Outlook", &OAuthPage::Waiting);
                             
                             if let Err(e) = stream.write_all(waiting_response.as_bytes()) {
                                 eprintln!("Error writing waiting response: {}", e);
@@ -247,10 +236,7 @@ pub async fn outlook_oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result
                         }
                     } else {
                         // No query parameters, show waiting page
-                        let waiting_response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
-                            <html><body><h2>🔄 Waiting for Authentication...</h2>\
-                            <p>Please complete the authentication in the opened window.</p>\
-                            <script>setTimeout(() => window.location.reload(), 2000);</script></body></html>";
+                        let waiting_response = http_response("Outlook", &OAuthPage::Waiting);
                         
                         if let Err(e) = stream.write_all(waiting_response.as_bytes()) {
                             eprintln!("Error writing waiting response: {}", e);
@@ -258,22 +244,19 @@ pub async fn outlook_oauth2_flow(app_handle: &AppHandle, timeout: u64) -> Result
                     }
                 } else {
                     // Not a GET request, send a method not allowed response
-                    let method_not_allowed = "HTTP/1.1 405 Method Not Allowed\r\nContent-Type: text/html\r\n\r\n\
-                        <html><body><h1>405 Method Not Allowed</h1></body></html>";
+                    let method_not_allowed = http_response("Outlook", &OAuthPage::MethodNotAllowed);
                     
                     let _ = stream.write_all(method_not_allowed.as_bytes());
                 }
             } else {
                 // Invalid request format
-                let bad_request = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\n\r\n\
-                    <html><body><h1>400 Bad Request</h1></body></html>";
+                let bad_request = http_response("Outlook", &OAuthPage::BadRequest);
                 
                 let _ = stream.write_all(bad_request.as_bytes());
             }
         } else {
             // Invalid request format
-            let bad_request = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\n\r\n\
-                <html><body><h1>400 Bad Request</h1></body></html>";
+            let bad_request = http_response("Outlook", &OAuthPage::BadRequest);
             
             let _ = stream.write_all(bad_request.as_bytes());
         }

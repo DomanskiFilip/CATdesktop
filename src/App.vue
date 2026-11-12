@@ -84,6 +84,23 @@
         <span class="moreInfo">ASSISTANT AI</span>
       </button>
       <button
+        @click="changeSection('section4')"
+        :class="{ active: activeSection === 'section4' }"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          height="22px"
+          viewBox="0 -960 960 960"
+          width="22px"
+          fill="var(--color-text)"
+        >
+          <path
+            d="M323-160q-11 0-20.5-5.5T288-181l-78-139h58l40 80h92v-40h-68l-40-80H188l-57-100q-2-5-3.5-10t-1.5-10q0-4 5-20l57-100h104l40-80h68v-40h-92l-40 80h-58l78-139q5-10 14.5-15.5T323-800h97q17 0 28.5 11.5T460-760v160h-60l-40 40h100v120h-88l-40-80h-92l-40 40h108l40 80h112v200q0 17-11.5 28.5T420-160h-97Zm217 0q-17 0-28.5-11.5T500-200v-200h112l40-80h108l-40-40h-92l-40 80h-88v-120h100l-40-40h-60v-160q0-17 11.5-28.5T540-800h97q11 0 20.5 5.5T672-779l78 139h-58l-40-80h-92v40h68l40 80h104l57 100q2 5 3.5 10t1.5 10q0 4-5 20l-57 100H668l-40 80h-68v40h92l40-80h58l-78 139q-5 10-14.5 15.5T637-160h-97Z"
+          />
+        </svg>
+        <span class="moreInfo">SMART FEATURES</span>
+      </button>
+      <button
         @click="changeSection('section3')"
         :class="{ active: activeSection === 'section3' }"
       >
@@ -124,6 +141,9 @@
       <section v-show="activeSection === 'section2'" class="content-section">
         <AiAssistant />
       </section>
+      <section v-show="activeSection === 'section4'" class="content-section">
+        <SmartFeaturesHub :coordinates="currentCoordinates" />
+      </section>
       <section
         v-show="activeSection === 'section3'"
         class="content-section"
@@ -135,6 +155,7 @@
         <hr />
         <Themes />
         <Notifications />
+        <MicrophoneSettings />
         <Location
           @updateCoordinates="handleLocationUpdate"
           @updateLocationName="handleLocationNameUpdate"
@@ -177,6 +198,11 @@ import Themes from "./components/Themes.vue";
 import Calendar from "./components/Calendar.vue";
 import AiAssistant from "./components/AiAssistant.vue";
 import Notifications from "./components/Notifications.vue";
+import MicrophoneSettings from "./components/MicrophoneSettings.vue";
+import SmartFeaturesHub from "./components/SmartFeaturesHub.vue";
+import { useSmartHistory } from "./composables/useSmartHistory";
+
+const { clear: clearSmartHistory } = useSmartHistory();
 
 const isMobile = computed(() =>
   /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
@@ -213,6 +239,7 @@ async function provideTokensToBackend() {
 const logout = async () => {
   try {
     await invoke("logout_user");
+    clearSmartHistory(); // history holds email content; don't leak it to the next account
     loggedIn.value = false;
   } catch (error) {
     console.error("Logout failed:", error);

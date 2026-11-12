@@ -1,6 +1,6 @@
 [package]
 name = "cat"
-version = "1.3.0"
+version = "1.3.1"
 description = "Calendar Assistant"
 authors = ["DomanskiFilip"]
 license = "custom"
@@ -73,3 +73,7 @@ tauri = { version = "2.5.0", features = ["tray-icon", "config-json5"] }
 auto-launch = "0.5"
 open = "5"
 mac_address = "1.1.8"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Access to the WebKitGTK webview (microphone permission handling)
+webkit2gtk = { version = "2.0", features = ["v2_40"] }

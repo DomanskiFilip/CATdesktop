@@ -12,6 +12,8 @@ mod outlook_oauth;
 mod google_sync_service;
 mod outlook_sync_service;
 mod login;
+mod media_permissions;
+mod oauth_pages;
 mod notification_service;
 mod register;
 mod theme_utils;
@@ -1040,8 +1042,12 @@ pub fn run_impl() -> Result<(), Box<dyn std::error::Error>> {
             check_auto_launch_status,
             schedule_smart_departure_notification,
             submit_feedback,
+            media_permissions::set_microphone_permission,
         ])
         .setup(|app| {
+            // Linux/WebKitGTK: enable microphone capture + permission handling
+            media_permissions::configure_webview_media(&app.handle());
+
             // Initialize the encryption key FIRST, before any other operations
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {

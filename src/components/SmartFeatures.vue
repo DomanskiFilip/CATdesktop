@@ -125,6 +125,7 @@
         />
       </section>
       <section v-if="routeReady" id="map-container">
+        <span v-if="mapError" class="error map-error">{{ mapError }}</span>
         <section id="button-container">
           <button @click="setMode('car')">
             <svg
@@ -220,7 +221,7 @@
         </section>
         <!-- Google Maps Map -->
         <div
-          v-show="mode === 'car' || mode === 'transit'"
+          v-show="!mapError && (mode === 'car' || mode === 'transit')"
           :key="
             mode +
             '-' +
@@ -313,9 +314,15 @@
 
 <reference types="google.maps" />
 <script setup lang="ts">
-import { ref, onMounted, watch, nextTick, computed } from "vue";
+import { ref, onMounted, onBeforeUnmount, watch, nextTick, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import MiniAiChat from "./MiniAiChat.vue";
+import {
+  loadGoogleMapsApi,
+  onMapsAuthFailure,
+  MAPS_AUTH_FAILED_MSG,
+} from "../utils/googleMaps";
+import { useSmartHistory } from "../composables/useSmartHistory";
 
 const props = defineProps<{
   event: any;
@@ -340,17 +347,27 @@ const travelDurationSeconds = ref<number | null>(null);
 const smartNotificationStatus = ref<string | null>(null);
 const smartNotificationError = ref<string | null>(null);
 const smartNotificationLoading = ref(false);
+const mapError = ref<string | null>(null);
+const stopMapsAuthListener = onMapsAuthFailure(() => {
+  mapError.value = MAPS_AUTH_FAILED_MSG;
+});
+onBeforeUnmount(stopMapsAuthListener);
 const eventTimestamp = props.event?.time
   ? new Date(props.event.time)
   : new Date();
 
-// Load API key from Vite env (VITE_ prefixed variables are exposed to the client)
-const apiKey = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string) || "";
-if (!apiKey && import.meta.env.DEV) {
-  // Only warn during development
-  console.warn(
-    "VITE_GOOGLE_MAPS_API_KEY is not set — Google Maps may not load.",
-  );
+// History shared with the Smart Features tab
+const { upsert: upsertHistory } = useSmartHistory();
+// One route history entry per opened event; updated as the route is refined
+let routeHistoryId = crypto.randomUUID();
+
+// Convert event time to "YYYY-MM-DDTHH:mm" (local) for history entries
+function eventTimeLocal(): string | null {
+  if (!props.event?.time) return null;
+  const d = new Date(props.event.time);
+  if (isNaN(d.getTime())) return null;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 const clarificationHistory = ref<string[]>([]);
@@ -401,29 +418,6 @@ const handleMiniAnswer = async (answer: string) => {
 // Submit manual origin input
 function submitManualOrigin() {
   useManualOrigin.value = !!manualOrigin.value.trim();
-}
-
-// Load Google Maps API script
-function loadGoogleMapsApi(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (window.google && window.google.maps) {
-      resolve();
-      return;
-    }
-    const existingScript = document.getElementById("google-maps-script");
-    if (existingScript) {
-      existingScript.addEventListener("load", () => resolve());
-      return;
-    }
-    const script = document.createElement("script");
-    script.id = "google-maps-script";
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places`;
-    script.async = true;
-    script.defer = true;
-    script.onload = () => resolve();
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
 }
 
 // Initialize Google Maps variables
@@ -509,6 +503,30 @@ const renderMap = async () => {
         const firstLeg = result.routes[0]?.legs?.[0];
         travelDurationSeconds.value = firstLeg?.duration?.value ?? null;
         directionsRenderer!.setDirections(result);
+        if (routeReady.value && props.event) {
+          const manual = useManualOrigin.value && manualOrigin.value.trim();
+          upsertHistory({
+            id: routeHistoryId,
+            type: "route",
+            createdAt: new Date().toISOString(),
+            title: destination,
+            eventTime: eventTimeLocal(),
+            addedEventId: props.event.id ?? null,
+            sourceEventId: props.event.id ?? null,
+            route: {
+              origin:
+                typeof origin === "string"
+                  ? origin
+                  : `${origin.lat},${origin.lng}`,
+              originLabel: manual ? manual : "Current location",
+              destination,
+              mode: mode.value === "transit" ? "transit" : "car",
+              durationSeconds: firstLeg?.duration?.value ?? null,
+              durationText: firstLeg?.duration?.text ?? null,
+              distanceText: firstLeg?.distance?.text ?? null,
+            },
+          });
+        }
         if (travelMode === "TRANSIT") {
           const steps = result.routes[0].legs[0].steps;
           transitSteps.value = steps;
@@ -584,6 +602,21 @@ async function handleEmailAi(answer: string) {
       // Normal response - set email content
       emailSubject.value = parsed.email_subject || "";
       emailContent.value = parsed.response_text || "";
+      upsertHistory({
+        id: crypto.randomUUID(),
+        type: "email",
+        createdAt: new Date().toISOString(),
+        title: parsed.email_subject || answer,
+        eventTime: eventTimeLocal(),
+        addedEventId: props.event?.id ?? null,
+        sourceEventId: props.event?.id ?? null,
+        email: {
+          topic: answer,
+          subject: emailSubject.value,
+          body: emailContent.value,
+          participants: [...participants.value],
+        },
+      });
       await nextTick();
       const emailContentEl = document.getElementById("email-content");
       if (emailContentEl) {
@@ -687,6 +720,7 @@ watch(
   () => props.event,
   async (newEvent) => {
     if (!newEvent) return;
+    routeHistoryId = crypto.randomUUID();
     clarificationHistory.value = [];
     aiResponceState.value = false;
     try {
@@ -749,7 +783,12 @@ watch(
     travelDurationSeconds.value = null;
     smartNotificationStatus.value = null;
     smartNotificationError.value = null;
-    await loadGoogleMapsApi();
+    try {
+      await loadGoogleMapsApi();
+    } catch (err) {
+      mapError.value = err instanceof Error ? err.message : String(err);
+      return;
+    }
     renderMap();
     // Scroll to map after rendering if map is shown
     nextTick(() => {
@@ -802,11 +841,13 @@ watch(activeTab, async (tab) => {
 <style scoped>
 #smart-features-container {
   width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   margin: 0 auto;
   background: var(--color-shadow);
   border-radius: 10px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-  padding: 2rem;
+  padding: clamp(1rem, 3vw, 2rem);
   z-index: 2;
   display: flex;
   flex-direction: column;
@@ -823,7 +864,9 @@ watch(activeTab, async (tab) => {
   margin: 0.5rem 0;
   font-size: 0.7rem;
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
+  min-width: 0;
 }
 
 #smart-features-header div h2:first-of-type {
@@ -873,7 +916,7 @@ watch(activeTab, async (tab) => {
 }
 
 #ai-responce-container {
-  width: 80%;
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: 1rem;
@@ -892,9 +935,10 @@ watch(activeTab, async (tab) => {
 
 #button-container {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-start;
   gap: 0.1rem;
-  width: 80%;
+  width: 100%;
 }
 
 #button-container button {
@@ -915,8 +959,15 @@ watch(activeTab, async (tab) => {
 
 #button-container form {
   display: flex;
+  flex: 1 1 20rem;
   align-items: center;
   gap: 0.1rem;
+  min-width: 0;
+}
+
+#button-container form .location-input {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 #button-container button:disabled {
@@ -936,7 +987,7 @@ watch(activeTab, async (tab) => {
 }
 
 .smart-notification-message {
-  width: 80%;
+  width: 100%;
   margin-top: 0.5rem;
   font-size: 0.9rem;
   text-align: left;
@@ -961,7 +1012,7 @@ watch(activeTab, async (tab) => {
 }
 
 #google-map {
-  width: 80%;
+  width: 100%;
   height: 300px;
   border-radius: 8px;
   border-top-left-radius: 0;
@@ -970,7 +1021,7 @@ watch(activeTab, async (tab) => {
 }
 
 .transit-steps {
-  width: 80%;
+  width: 100%;
   background: transparent;
   color: var(--color-text);
   padding: 1rem;
@@ -1001,7 +1052,7 @@ watch(activeTab, async (tab) => {
 }
 
 #participants-input {
-  width: 20rem;
+  width: min(20rem, 100%);
   padding: 0.5rem;
   border: 1px solid var(--color-theme);
   border-radius: 4px;
@@ -1022,6 +1073,11 @@ watch(activeTab, async (tab) => {
 #participants-btn:active {
   background-color: var(--color-main);
   color: var(--color-theme);
+}
+
+.map-error {
+  width: 100%;
+  margin-bottom: 0.5rem;
 }
 
 #email-subject span {
